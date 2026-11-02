@@ -28,6 +28,8 @@ Also, if you find any bugs, please feel free to let me know or submit a PR. More
 
 ## Comparison Test Gameplay    (Switch 2 Left, IPhone Right)
 
+https://github.com/user-attachments/assets/1fde210a-48bf-44a9-a100-3989711f7366
+
 <img width="1749" height="516" alt="05d-night-switch-vs-phone" src="https://github.com/user-attachments/assets/01ee60a1-737f-4f84-a644-ac3abb1342be" />
 
 <img width="1759" height="516" alt="05a-day-switch-vs-phone" src="https://github.com/user-attachments/assets/b71fc457-4e04-4753-9489-2b2b5a1bb917" />
