@@ -2,7 +2,7 @@
 
 I got Pokémon Pokopia (the Switch 2 game) running natively on my Mac and on my iPhone. Not through an emulator: the
 game's own code runs on the Apple chip, and the graphics go through Metal. After a lot of work on the shaders it looks
-exactly like my Switch 2. I lined up screenshots from the Switch 2 against the phone, scene for scene, and could not tell
+exactly like the Switch 2. I lined up screenshots from the Switch 2 against the phone, scene for scene, and could not tell
 them apart. Shadows, clouds, time of day, the lot.
 
 This repository is the tool that lets you do the same with **your own copy of the game**. It takes your dump, and on
@@ -92,7 +92,7 @@ python3.12 nxs2.py setup
 python3.12 nxs2.py build "/path/to/your/dump folder" --mac-app --ipa
 ```
 
-`setup` fetches nxnative (the host this runs on, more below) at the exact commit this is made for, applies my Switch 2
+`setup` fetches nxnative (the host this runs on, more below) at the exact commit this is made for, applies the Switch 2
 patch to it, and builds the shader lowering tool. About a minute.
 
 `build` does everything else. It creates a build folder **beside** your dump (`<dump folder>_native`; `--out` names
