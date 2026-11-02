@@ -604,8 +604,13 @@ def st_chain(b, ios):
     if ios: env['IOSOUT'] = str(b.ios)
     if WIN: env['DMSH_TARGETS'] = 'ios'   # no Mac host here: the macOS libraries are not needed (the tables are still made from the Mac-side reflection)
     b.cache.mkdir(parents=True, exist_ok=True)
-    run([PY, NX / 'dm/gfx/tools/own_compilers.py', b.pkg, b.cache], b.logs / 'chain.log', env=env, cwd=NX / 'dm/gfx/tools', heartbeat=60,
-        show=r'Metal cache|compiled|reused|\[RED\]|failed|success|lock')
+    cmd = [PY, NX / 'dm/gfx/tools/own_compilers.py', b.pkg, b.cache]
+    try: run(cmd, b.logs / 'chain.log', env=env, cwd=NX / 'dm/gfx/tools', heartbeat=60, show=r'Metal cache|compiled|reused|\[RED\]|failed|success|lock')
+    except Fail:
+        # Python 3.12.0 on Windows once failed c1_guard.py with "internal error in regular expression engine" and passed on the next run: one retry, which reuses every library built
+        if 'internal error in regular expression engine' not in (b.logs / 'chain.log').read_text(encoding='utf-8', errors='replace'): raise
+        say('the shader step hit an intermittent Python regex error; running it once more (everything built so far is reused)')
+        run(cmd, b.logs / 'chain.log', env=env, cwd=NX / 'dm/gfx/tools', heartbeat=60, show=r'Metal cache|compiled|reused|\[RED\]|failed|success|lock')
     lib = b.lib()
     if not (lib / 'inputs.tsv').is_file(): raise Fail(f'the chain left no library stamp at {lib}/inputs.tsv; see {b.logs / "chain.log"}')
 
@@ -659,6 +664,8 @@ def st_ipa_windows(b):
     env = b.env(W=str(b.out / 'ipa'), PATCHED=str(b.patched), ROMFS=str(b.romfs_img), MSL_IOS=str(b.ios), AOC='', DM_ENV_FILE=str(b.out / 'phone_env.txt'), DM_SHOW_FPS='1',
                 DM_PSO_GPUS='none', DM_LANG='en-US', DM_BUNDLE_ID=f'org.nxnative.{TITLE.lower()}', NXW_EXTENDED_VA='1', NXW_ROMFS_SEPARATE='1', NXW_ENTITLEMENTS='1')
     (b.out / 'ipa').mkdir(parents=True, exist_ok=True)
+    for old in (out, out.with_name(out.name + '.idx')):   # pack_ipa.py reuses an existing IPA through its .idx with os.pread, which Windows lacks: pack it whole instead
+        if old.exists(): old.unlink()
     say('building the IPA (unsigned; LLVM and Metal Developer Tools for Windows)')
     run([PY, NX / 'win/build_app.py', out], b.logs / 'build_ipa.log', env=env, show=r'^\[\d\d:\d\d:\d\d\]|FAIL|error')
     if not out.is_file(): raise Fail(f'no IPA at {out}; see {b.logs / "build_ipa.log"}')
