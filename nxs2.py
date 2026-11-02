@@ -403,6 +403,7 @@ def setup_windows(patch_key):
     say('tool lock: the translator, SPIRV-Cross and Metal compiler on this PC')
     run([PY, NX / 'dm/gfx/tools/tool_lock.py', '--update-lock'], HERE / 'setup-lock.log', env=env, cwd=NX / 'dm/gfx/tools')
     run([PY, NX / 'dm/gfx/tools/dmsh_chain.py', '--header'], HERE / 'setup-header.log', env=env, cwd=NX / 'dm/gfx/tools')
+    fetch_rcodesign()   # signs the IPA on this PC (nxs2.py sign --p12 --profile)
 
 
 # ---------------------------------------------------------------- the dump
@@ -685,10 +686,104 @@ def st_xcode(b, team):
     return proj
 
 
+RCODESIGN_VERSION = '0.29.0'
+RCODESIGN_ZIP = f'apple-codesign-{RCODESIGN_VERSION}-x86_64-pc-windows-msvc.zip'
+RCODESIGN_URL = f'https://github.com/indygreg/apple-platform-rs/releases/download/apple-codesign%2F{RCODESIGN_VERSION}/{RCODESIGN_ZIP}'
+RCODESIGN_SHA256 = '54bb500e2da7a8de02fcae0f331d1cac6e6d7173b4281042ff9c528ba3159aaa'   # the release's own .sha256
+
+
+def rcodesign():
+    """rcodesign (apple-codesign, MIT/Apache-2.0): RCODESIGN, on PATH, or the copy setup fetched on Windows into tools-bin/"""
+    for p in (os.environ.get('RCODESIGN'), shutil.which('rcodesign'), HERE / 'tools-bin' / ('rcodesign.exe' if WIN else 'rcodesign')):
+        if p and pathlib.Path(p).is_file(): return pathlib.Path(p)
+    return None
+
+
+def fetch_rcodesign():
+    """Windows: the pinned rcodesign release into tools-bin/, checked against its SHA-256 (setup)"""
+    if rcodesign(): return
+    import hashlib, io, urllib.request, zipfile
+    say(f'fetching rcodesign {RCODESIGN_VERSION} (signs the IPA with your own certificate on Windows)')
+    data = urllib.request.urlopen(RCODESIGN_URL, timeout=120).read()
+    if hashlib.sha256(data).hexdigest() != RCODESIGN_SHA256: raise Fail(f'rcodesign download does not match its published SHA-256: {RCODESIGN_URL}')
+    z = zipfile.ZipFile(io.BytesIO(data)); exe = next(n for n in z.namelist() if n.endswith('/rcodesign.exe'))
+    (HERE / 'tools-bin').mkdir(exist_ok=True); (HERE / 'tools-bin/rcodesign.exe').write_bytes(z.read(exe))
+    lic = next((n for n in z.namelist() if n.endswith('/COPYING')), None)
+    if lic: (HERE / 'tools-bin/rcodesign-COPYING.txt').write_bytes(z.read(lic))
+
+
+def profile_plist(path):
+    """The plist inside a provisioning profile (a CMS-signed blob; the plist is stored in it as is)"""
+    import plistlib
+    b = pathlib.Path(path).read_bytes(); i = b.find(b'<?xml'); j = b.find(b'</plist>', i)
+    if i < 0 or j < 0: raise Fail(f'{path} is not a provisioning profile (.mobileprovision)')
+    return plistlib.loads(b[i:j + len(b'</plist>')])
+
+
+def sign_with_certificate(b, p12, profile, password_stdin=False):
+    """A development IPA from the unsigned one without Xcode (Windows, or a Mac without it): your Apple Development certificate and its key as a .p12,
+    and a development provisioning profile for org.nxnative.<title id> that lists your iPhone and grants Increased Memory Limit and Extended Virtual
+    Addressing (an App ID with both capabilities on a paid team; the profile Xcode made for the Mac build is one). The profile goes into the app as
+    embedded.mobileprovision, its entitlements are signed in by rcodesign, and the result is <build>/out/PokemonPokopia-signed.ipa"""
+    import datetime, getpass, plistlib, tempfile, zipfile
+    rc = rcodesign() or Fail('rcodesign not found: run nxs2.py setup (it fetches it on Windows), or set RCODESIGN=<path>')
+    if isinstance(rc, Fail): raise rc
+    src = b.outputs / f'{NAME.replace(" ", "")}-unsigned.ipa'
+    if not src.is_file(): raise Fail(f'no unsigned IPA at {src}: build with --ipa first')
+    prof = profile_plist(profile); ents = dict(prof.get('Entitlements', {})); team = (prof.get('TeamIdentifier') or ['?'])[0]
+    with zipfile.ZipFile(src) as z:
+        info = plistlib.loads(z.read('Payload/DmIOS.app/Info.plist'))
+    bundle = info['CFBundleIdentifier']; appid = ents.get('application-identifier', '')
+    if appid.endswith('*'): ents['application-identifier'] = f'{team}.{bundle}'   # a wildcard profile: this app's own identifier
+    elif appid != f'{team}.{bundle}': raise Fail(f'the profile is for {appid}, the app is {team}.{bundle}: make a profile for the app\'s bundle ID')
+    exp = prof.get('ExpirationDate')
+    if isinstance(exp, datetime.datetime) and exp < datetime.datetime.now(): raise Fail(f'the profile "{prof.get("Name")}" expired on {exp:%Y-%m-%d}')
+    for need in ('com.apple.developer.kernel.extended-virtual-addressing', 'com.apple.developer.kernel.increased-memory-limit'):
+        if not ents.get(need): say(f'WARNING: the profile does not grant {need.split(".")[-1]}: the game will stop at start-up for lack of memory')
+    say(f'signing for team {team}, profile "{prof.get("Name")}" ({len(prof.get("ProvisionedDevices", []))} device(s), expires {exp:%Y-%m-%d})' if exp else f'signing for team {team}')
+    pw = sys.stdin.readline().rstrip('\r\n') if password_stdin else getpass.getpass(f'password of {pathlib.Path(p12).name}: ')
+    work = b.out / 'sign-work'
+    if work.exists(): shutil.rmtree(work)
+    work.mkdir(parents=True)
+    try:
+        say('unpacking the unsigned IPA')
+        with zipfile.ZipFile(src) as z: z.extractall(work)
+        app = work / 'Payload/DmIOS.app'
+        shutil.copyfile(profile, app / 'embedded.mobileprovision')
+        (work / 'entitlements.plist').write_bytes(plistlib.dumps(ents))
+        pwf = work / 'p12.pw'; pwf.write_text(pw, encoding='utf-8'); pw = None
+        say('signing (rcodesign)')
+        try:
+            run([rc, 'sign', '--p12-file', p12, '--p12-password-file', pwf, '--entitlements-xml-file', work / 'entitlements.plist', app], b.logs / 'sign.log')
+        finally:
+            pwf.unlink(missing_ok=True)
+        out = b.outputs / f'{NAME.replace(" ", "")}-signed.ipa'
+        say('packing the signed IPA')
+        tmp = out.with_name(out.name + '.part')
+        with zipfile.ZipFile(tmp, 'w', zipfile.ZIP_DEFLATED, compresslevel=6) as z:
+            for p in sorted((work / 'Payload').rglob('*')):
+                rel = p.relative_to(work).as_posix()
+                if p.is_dir():
+                    zi = zipfile.ZipInfo(rel + '/'); zi.external_attr = (0o40755 << 16) | 0x10; z.writestr(zi, b''); continue
+                zi = zipfile.ZipInfo.from_file(p, rel)
+                zi.external_attr = ((0o100755 if rel == 'Payload/DmIOS.app/DmIOS' else 0o100644) << 16)   # Windows has no x bit: the executable gets it here
+                zi.compress_type = zipfile.ZIP_STORED if p.suffix in ('.metallib', '.bin', '.fdata', '.webm') else zipfile.ZIP_DEFLATED
+                with open(p, 'rb') as f, z.open(zi, 'w', force_zip64=True) as w: shutil.copyfileobj(f, w, 16 << 20)
+        os.replace(tmp, out)
+        say(f'signed IPA: {out}  (install: pymobiledevice3 apps install "{out}"; the game files: docs/IPHONE.md)')
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
+
+
 def sign(args):
     """Archive and export a development IPA from the prepared Xcode project with automatic signing (your Apple ID signed into Xcode, the
-    iPhone's UDID on the team). The first run should happen in Terminal on the Mac itself: Xcode may ask for the keychain."""
-    if WIN: raise Fail('signing with Xcode needs a Mac; on Windows, sign the unsigned IPA with your own signing tool and team (docs/IPHONE.md)')
+    iPhone's UDID on the team). The first run should happen in Terminal on the Mac itself: Xcode may ask for the keychain.
+    With --p12 and --profile: the unsigned IPA signed with your certificate and profile instead, without Xcode (sign_with_certificate)"""
+    if args.p12 or args.profile:
+        if not (args.p12 and args.profile): raise Fail('--p12 and --profile go together')
+        return sign_with_certificate(Build(args.build), args.p12, args.profile, args.password_stdin)
+    if WIN: raise Fail('on Windows: nxs2.py sign <build> --p12 <your certificate .p12> --profile <your .mobileprovision> (docs/WINDOWS.md)')
+    if not args.team_id: raise Fail('--team-id <your Apple developer team ID> (Xcode signing), or --p12 and --profile')
     b = Build(args.build); team = args.team_id
     x = b.out / 'xcode'; d = b.out / 'build-ios'; ar = d / 'app.xcarchive'; ex = d / 'export'
     if not (x / 'DmIOS.xcodeproj').is_dir(): raise Fail(f'no Xcode project at {x}: run nxs2.py build ... --xcode --team-id {team} first')
@@ -952,7 +1047,10 @@ def main():
     s = sub.add_parser('refresh'); s.add_argument('build'); s.add_argument('dumps', nargs='*'); s.add_argument('--team-id')
     s.add_argument('-j', '--jobs', type=int); s.add_argument('--full-speed', action='store_true'); s.set_defaults(f=refresh)
     s = sub.add_parser('run'); s.add_argument('build'); s.add_argument('--lang', default='en-US'); s.add_argument('env', nargs='*', help='extra DM_* switches, KEY=VALUE'); s.set_defaults(f=run_mac)
-    s = sub.add_parser('sign'); s.add_argument('build'); s.add_argument('--team-id', required=True); s.add_argument('--method', default='debugging', help='export method: debugging (default), ad-hoc, release-testing'); s.set_defaults(f=sign)
+    s = sub.add_parser('sign'); s.add_argument('build'); s.add_argument('--team-id', help='Xcode signing: your Apple developer team ID')
+    s.add_argument('--method', default='debugging', help='Xcode export method: debugging (default), ad-hoc, release-testing')
+    s.add_argument('--p12', help='without Xcode: your Apple Development certificate and key (.p12)'); s.add_argument('--profile', help='without Xcode: the development provisioning profile (.mobileprovision)')
+    s.add_argument('--password-stdin', action='store_true', help='read the .p12 password from the first line of stdin (the window passes it so)'); s.set_defaults(f=sign)
     s = sub.add_parser('status'); s.add_argument('build'); s.set_defaults(f=status)
     s = sub.add_parser('icon', help='the apps\' icon from the title screen: your own game on a Mac, or a picture of it')
     s.add_argument('build'); s.add_argument('picture', nargs='?', help='a 16:9 screenshot of the title screen (your Switch 2\'s Capture button), or a square icon')

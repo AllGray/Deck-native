@@ -61,10 +61,27 @@ the two kernel entitlements in an ad-hoc signature, plus `romfs.id`, the identit
 ## Sign and install
 
 The IPA has to be signed with a **paid Apple Developer Program** team (see the README: the game's memory needs the
-Extended Virtual Addressing entitlement, which only that signing carries). On a Mac that is Xcode; on Windows it is a
-signing tool that keeps the entitlements the executable asks for and signs with your team's certificate and a
-profile that grants them. I signed my builds on a Mac and have not tested a Windows signing tool for this; if you make
-one work, say which in the issues.
+Extended Virtual Addressing entitlement, which only that signing carries). On Windows the build tool signs it itself,
+with [rcodesign](https://github.com/indygreg/apple-platform-rs) (fetched by Setup and checked against its published
+checksum). It needs two files from your developer account:
+
+- **Your Apple Development certificate with its private key, as a `.p12`.** If you have a Mac with Xcode, export it from
+  Keychain Access (My Certificates, right-click "Apple Development: ...", Export). Without a Mac: make a certificate
+  signing request with `tools-bin\rcodesign.exe generate-certificate-signing-request`, upload it at developer.apple.com →
+  Certificates (+, Apple Development), download the certificate and combine it with the key into a `.p12`.
+- **A development provisioning profile (`.mobileprovision`)** for the bundle ID `org.nxnative.0400a3a01ee4c000`, with your
+  iPhone on it. At developer.apple.com: Identifiers (+, App IDs, that bundle ID, and tick **Increased Memory Limit** and
+  **Extended Virtual Addressing** under Capabilities), Devices (your iPhone's UDID), Profiles (+, iOS App Development,
+  that App ID, your certificate, your iPhone). If Xcode already signed this app for you, that profile works too.
+
+Then **Sign IPA** in the window (it asks for both files and the certificate's password), or:
+
+```
+python nxs2.py sign "<build folder>" --p12 my-cert.p12 --profile Pokopia.mobileprovision
+```
+
+The result is `<build folder>\out\PokemonPokopia-signed.ipa`. The tool checks that the profile matches the app and
+grants both memory capabilities, and warns when it doesn't.
 
 Then, as on the Mac ([IPHONE.md](IPHONE.md)): `pymobiledevice3 apps install <ipa>`, and `tools\phone_setup.py --romfs
 <build folder>\extract\RomFS.img` for the game files. The shaders the game makes while running come back with

@@ -87,7 +87,7 @@ class App(tk.Tk):
         b = ttk.Frame(f); b.grid(row=9, column=0, columnspan=3, sticky='ew', padx=8, pady=(10, 4))
         self.buttons = {}
         for key, text, cmd in (('doctor', 'Check tools', self.do_doctor), ('setup', 'Setup', self.do_setup), ('build', 'Build', self.do_build),
-                               ('refresh', 'Refresh shaders', self.do_refresh)) + ((('sign', 'Sign IPA', self.do_sign),) if MAC else ()):
+                               ('refresh', 'Refresh shaders', self.do_refresh), ('sign', 'Sign IPA', self.do_sign)):
             self.buttons[key] = ttk.Button(b, text=text, command=cmd); self.buttons[key].pack(side='left', padx=(0, 6))
         self.stop_btn = ttk.Button(b, text='Stop', command=self.do_stop, state='disabled'); self.stop_btn.pack(side='left', padx=(0, 6))
         ttk.Button(b, text='Open build folder', command=self.open_out).pack(side='right')
@@ -131,7 +131,7 @@ class App(tk.Tk):
             self.status.set('Ready. Choose your dump folder and press Build.')
 
     # ---------------------------------------------------------------- running nxs2.py
-    def start(self, what, args):
+    def start(self, what, args, secret=None):   # secret: one line handed to the command on its stdin (the .p12 password), never shown or logged
         if self.proc: return
         cmd = [sys.executable, '-u', str(NXS2)] + [str(a) for a in args]
         self.write('$ ' + ' '.join(cmd[2:]))
@@ -139,7 +139,9 @@ class App(tk.Tk):
             kw = {}
             if WIN: kw['creationflags'] = subprocess.CREATE_NEW_PROCESS_GROUP
             else: kw['start_new_session'] = True
-            self.proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, errors='replace', cwd=str(HERE), **kw)
+            self.proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, stdin=subprocess.PIPE if secret is not None else subprocess.DEVNULL,
+                                         text=True, errors='replace', cwd=str(HERE), **kw)
+            if secret is not None: self.proc.stdin.write(secret + '\n'); self.proc.stdin.close()
         except OSError as e:
             return messagebox.showerror('Cannot start', f'{e}')
         self.running = what; self.t0 = time.time(); self.result = {}
@@ -243,9 +245,23 @@ class App(tk.Tk):
 
     def do_sign(self):
         b = self.build_dir()
+        unsigned = b / 'out' / 'PokemonPokopia-unsigned.ipa' if b else None
+        if WIN or (MAC and not (b and (b / 'xcode' / 'DmIOS.xcodeproj').is_dir()) and unsigned and unsigned.is_file()):
+            return self.do_sign_certificate(b, unsigned)
         if not b or not (b / 'xcode' / 'DmIOS.xcodeproj').is_dir(): return messagebox.showwarning('Sign', 'No Xcode project yet: tick "Xcode project" with your team ID and build first.')
         if not re.fullmatch(r'[A-Z0-9]{10}', self.team.get().strip()): return messagebox.showwarning('Team ID', 'Enter your Apple developer team ID (10 characters).')
         self.last_stage = 'starting'; self.start('Sign', ['sign', str(b), '--team-id', self.team.get().strip()])
+
+    def do_sign_certificate(self, b, unsigned):   # without Xcode: your certificate (.p12) and development profile (.mobileprovision); docs/WINDOWS.md
+        if not unsigned or not unsigned.is_file(): return messagebox.showwarning('Sign', 'No unsigned IPA yet: tick "iPhone IPA" and build first.')
+        from tkinter import simpledialog
+        p12 = filedialog.askopenfilename(title='Your Apple Development certificate (.p12)', filetypes=[('Certificate', '*.p12 *.pfx'), ('All files', '*.*')])
+        if not p12: return
+        prof = filedialog.askopenfilename(title='Your development provisioning profile (.mobileprovision)', filetypes=[('Provisioning profile', '*.mobileprovision'), ('All files', '*.*')])
+        if not prof: return
+        pw = simpledialog.askstring('Certificate password', f'Password of {pathlib.Path(p12).name}:', show='*', parent=self)
+        if pw is None: return
+        self.last_stage = 'starting'; self.start('Sign', ['sign', str(b), '--p12', p12, '--profile', prof, '--password-stdin'], secret=pw)
 
 
 def _self_shot(app, path):   # NXS2_GUI_SHOT=<png>: save a picture of the window and quit (the project's own layout check; needs Pillow)
