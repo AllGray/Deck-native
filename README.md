@@ -24,6 +24,8 @@ is the right version and refuses anything else, and it needs no keys of any kind
 
 Hey guys, I really hope you enjoy this. I just have to give a massive shout-out to the people at NxNative, this wouldn't be possible without them. I'd never tried to do any of this until last week, when they went viral, and once I found out, I kept going. This all started after 0x2593 posted their fork of Eden for NS2, shout out to them as well, that was a great help for getting this going. After running the first emulation of Pokopia, I just knew I needed to fix it and put it on my phone and Mac. Right now all of the PC emulators with Pokopia have issues with the shaders. My work on this native build allowed me to dig deeper and fix all of those issues. If you want to play emulated Pokopia with Eden, that's my other repository "pokopia-fixes" (https://github.com/xFractals/Eden-NS2), which is a fork of https://github.com/0x2593/Eden-NS2. Go check it out if you want, hopefully it gets merged into main soon. Anyways Enjoy!
 
+Also, if you find any bugs, please feel free to let me know or submit a PR. More than happy to take a look. I've played up to after the first wake-up and encountered zero issues.
+
 ## Comparison Test Gameplay    (Switch 2 Left, IPhone Right)
 
 <img width="1749" height="516" alt="05d-night-switch-vs-phone" src="https://github.com/user-attachments/assets/01ee60a1-737f-4f84-a644-ac3abb1342be" />
