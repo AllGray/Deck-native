@@ -1,0 +1,73 @@
+--- a/build_app.py
++++ b/build_app.py
+@@ -37,11 +37,11 @@
+ def host_sources(game_h_dir):
+     """(sources, include dirs) exactly as `make -n -B dmhost` lists them: SRC, GFX and the libvpx objects' sources; the include order of the host's link line, then libvpx's"""
+     mk = (HOST / 'Makefile').read_text(encoding='utf-8')
+-    want_src = 'SRC=main.c loader.c hle.c crash.c probe.c thread.c memstat.m haptics_apple.m $(sort $(wildcard hle_*.c)) front_mac.m entry.S'
++    want_src = 'SRC=main.c loader.c hle.c crash.c probe.c thread.c save_sync.c memstat.m haptics_apple.m $(sort $(wildcard hle_*.c)) front_mac.m entry.S'   # nxnative c1df4dd
+     want_gfx = 'GFX=$(sort $(wildcard ../gfx/*.c ../gfx/nvn/*.c ../gfx/nvn/*.m ../gfx/nvn/*.S ../gfx/tex/*.c ../gfx/tex/*.m ../gfx/vk/*.m ../gfx/gl/*.m))'
+     for w in (want_src, want_gfx):
+         if w not in mk: die(f'dm/host/Makefile changed ({w.split("=")[0]}= line): update host_sources() in win/build_app.py')
+-    src = [HOST / n for n in 'main.c loader.c hle.c crash.c probe.c thread.c memstat.m haptics_apple.m'.split()]
++    src = [HOST / n for n in 'main.c loader.c hle.c crash.c probe.c thread.c save_sync.c memstat.m haptics_apple.m'.split()]
+     src += sorted(HOST.glob('hle_*.c'), key=lambda p: p.name)
+     src += [HOST / 'front_mac.m', HOST / 'entry.S']
+     gfx = []
+@@ -105,7 +105,7 @@
+         if r.returncode == 0: os.replace(str(o) + '.tmp', o)
+         return f, r
+     bad = []
+-    with cf.ThreadPoolExecutor(max_workers=os.cpu_count() or 4) as ex:
++    with cf.ThreadPoolExecutor(max_workers=int(os.environ.get('J') or 0) or os.cpu_count() or 4) as ex:   # nxs2.py's load setting (J)
+         for i, (f, r) in enumerate(ex.map(one, jobs), 1):
+             if r.returncode: bad.append((f, r.stderr))
+             if i % 50 == 0 or i == len(jobs): t(f'compile: {i}/{len(jobs)}')
+@@ -314,6 +314,8 @@
+     (gen / 'profile').mkdir(parents=True); app.mkdir(parents=True)
+     t('generate Gen/ (profile header, embedded modules, tables)')
+     py(DM / 'games/game.py', 'header', game, gen / 'profile/game_profile.h')
++    msl_h = gen / 'msl-iphoneos/host_msl_gen.h'; msl_h.parent.mkdir(parents=True, exist_ok=True)   # the host's own Metal shaders for iOS (dm/host/Makefile host_msl, MSL_MIN_iphoneos)
++    py(DM / 'gfx/tools/host_msl.py', '--sdk', 'iphoneos', '--min', '26.0', msl_h, *sorted((DM / 'gfx/msl').glob('*.metal')))
+     flags = py(IOS / 'tools/gen_embed.py', patched, gen / 'embed.S', *mods)
+     es = gen / 'embed.S'
+     es.write_text(re.sub(r'\.incbin "([^"]*)"', lambda m: '.incbin "' + m.group(1).replace('\\', '/') + '"', es.read_text(encoding='utf-8')), encoding='utf-8')   # assembler strings take \ as an escape
+@@ -351,7 +353,8 @@
+     py(DM / 'tools/make_ext_font.py', dmres / 'font/nintendo_ext.ttf', tc.letter_font() or die('no bold TTF for the button icons: set LETTER_FONT'))
+ 
+     files, incs = host_sources(gen / 'profile')
+-    files += [p.resolve() for p in sorted((IOS / 'Sources').glob('*.m'))] + [(WIN / 'ios/Launcher.m').resolve(), (WIN / 'ios/DataHelp.m').resolve(), (WIN / 'ios/nxw_unzip.c').resolve(), es.resolve()]
++    incs.insert(1, msl_h.parent)   # -I$(dir $(MSL_H)), right after the NVN headers as in the Makefile's link line
++    files += [p.resolve() for p in sorted((IOS / 'Sources').glob('*.m'))] + [(WIN / 'ios/Launcher.m').resolve(), es.resolve()]   # nxs2.py: not the split-data screen (DataHelp.m, nxw_unzip.c), which only the port's own main.m / front_ios.m use
+     fws = frameworks(sdk, files)
+     rt = compat_rt_needed(clang)
+     if rt:
+@@ -367,6 +370,7 @@
+     if env.get('NXW_ENTITLEMENTS', '1') != '0':
+       import macho_sign
+       ents = {'com.apple.developer.kernel.increased-memory-limit': True}
++      if os.environ.get('NXW_EXTENDED_VA'): ents['com.apple.developer.kernel.extended-virtual-addressing'] = True   # a Switch 2 game's heap needs the larger address space (nxs2.py)
+       t(f'entitlements asked for: {", ".join(ents)} (' + str(macho_sign.sign(str(app / 'DmIOS'), bundle_id, ents)) + '-byte ad-hoc signature)')
+ 
+     icon = Path(env.get('DM_ICON') or romfs.parent / 'icon.jpg')
+@@ -375,6 +379,8 @@
+     with open(app / 'Info.plist', 'wb') as f:
+         pl = info_plist(bundle_id, name, version, gp('app_category'), show_fps, lang, sdk_ver, sdk_build, icons)
+         if env.get('DM_METAL_CAPTURE') == '1': pl['MetalCaptureEnabled'] = True; t('Metal frame capture: enabled (DM_METAL_CAPTURE=1)')   # the host's DM_GPU_CAPTURE switch
++        if msldir.startswith('b-'): pl['DMChain'] = msldir[2:]   # build_ipa.sh: the shader chain the app carries
++        pl['DMCommit'] = 'windows-build'
+         sp = env.get('NXW_SPLIT_DATA', '')
+         if sp and sp != '0':   # a split build: the app's "game data needed" screen (win/ios/DataHelp.m) names the data folder and its size
+             dname = Path(sp).name if sp not in ('1', 'YES') else out_ipa.stem + '-data'
+@@ -401,7 +407,10 @@
+     else:
+         maps.append(f'Payload/DmIOS.app/msl/{msldir}={msl_ios / msldir}')
+         if has_aoc: maps.append(f'Payload/DmIOS.app/aoc={aoc}')
+-        maps.append(f'Payload/DmIOS.app/romfs.img={romfs}' if image else f'Payload/DmIOS.app/romfs={romfs}')   # main.m romfs_locate opens <App>/romfs.img (build_ipa.sh)
++        if os.environ.get('NXW_ROMFS_SEPARATE'):   # nxs2.py: the game files stay out of the IPA (build_ipa.sh's DM_COPY_ROMFS=NO); the app takes Documents/romfs.img and checks it against romfs.id
++            if image: (app / 'romfs.id').write_text(py(DM / 'tools/romfs_image.py', '--identity', romfs, game, version, pkg) + '\n', encoding='utf-8'); t('no game files in the IPA (NXW_ROMFS_SEPARATE): the app takes Documents/romfs.img')
++            else: die('NXW_ROMFS_SEPARATE needs the RomFS as an image (RomFS.img)')
++        else: maps.append(f'Payload/DmIOS.app/romfs.img={romfs}' if image else f'Payload/DmIOS.app/romfs={romfs}')   # main.m romfs_locate opens <App>/romfs.img (build_ipa.sh)
+     t('pack IPA (already-compressed game files stored, everything else deflated)')
+     r = subprocess.run([sys.executable, str(IOS / 'tools/pack_ipa.py'), str(out_ipa), '--store', ':'.join(gp('zip_store').split(':')),
+                         '--exec', 'Payload/DmIOS.app/DmIOS', '--skip', 'Payload/DmIOS.app/msl', '--skip', 'Payload/DmIOS.app/aoc', '--skip', 'Payload/DmIOS.app/romfs', '--skip', 'Payload/DmIOS.app/romfs.img',

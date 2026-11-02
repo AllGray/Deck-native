@@ -1,3 +1,41 @@
+diff --git a/dm/games/game.py b/dm/games/game.py
+index 6089fe9..6dcf723 100644
+--- a/dm/games/game.py
++++ b/dm/games/game.py
+@@ -119,7 +119,10 @@ def header(g):
+     sf = g.get('shared_font', 'bfttf')   # what the shared-font address points at (hle_sdk16.c): bfttf = 8-byte header + TTF, ttf = the TTF alone
+     if sf not in ('bfttf', 'ttf'): sys.exit(f'{g.id}: shared_font must be bfttf or ttf: {sf}')
+     pl = g.get('pad_layout', 'simple')   # the virtual gamepad's first layout (DmGamepad.m; afterwards whatever the player switched to in game is kept): simple = 2D, full = 3D (D-pad, right stick, L3 / R3),
+-    if pl not in ('simple', 'full', 'touch'): sys.exit(f'{g.id}: pad_layout must be simple, full or touch: {pl}')   # touch = Tap (no control: every touch goes to the game's touch screen)
++    if pl not in ('simple', 'full', 'touch'): sys.exit(f'{g.id}: pad_layout must be simple, full or touch: {pl}')
++    lr = float(g.get('look_rate', '0'))   # pointer look (hle_hid.c dm_look_add): the camera's turn rate at full right-stick tilt, degrees per second; 0 = off (the pointer is not a look control)
++    ld = float(g.get('look_dead', '0.2'))   # pointer look: the right stick's deadzone for the camera, a fraction of full tilt (round)
++    if lr < 0 or not 0 <= ld < 1: sys.exit(f'{g.id}: look_rate must be >= 0 and look_dead in [0, 1): {lr} {ld}')   # touch = Tap (no control: every touch goes to the game's touch screen)
+     sks = g.get('shader_key_skip', '')   # control-section bytes the shader keys hash as zeros, <offset>+<length> (hle_nvn.c keys_hash, shader_split.py key_ctl; Batman: Arkham Knight: GLSLC's compile information, 0x770+0x78)
+     m = re.fullmatch(r'(0x[0-9a-fA-F]+|\d+)\+(0x[0-9a-fA-F]+|\d+)', sks) if sks else None
+     if sks and (not m or not 0x30 <= int(m[1], 0) or not 0 < int(m[2], 0) or int(m[1], 0) + int(m[2], 0) > 0x880 or (int(m[1], 0) < 0x760 and int(m[1], 0) + int(m[2], 0) > 0x700)):   # not over +0x700..+0x75f, the code area and compute fields the tools read
+@@ -180,6 +183,8 @@ def header(g):
+          f'#define DM_GAME_ENC_THREAD {int(et == "on")}',
+          *([f'#define DM_GAME_SHARED_FONT_TTF {int(sf == "ttf")}'] if g.get('shared_font', '') else []),   # without the key the host decides by the SDK version (hle_sdk16.c)
+          f'#define DM_GAME_PAD_LAYOUT {("simple", "full", "touch").index(pl)}',
++         f'#define DM_GAME_LOOK_RATE {lr!r}f',   # pointer look (hle_hid.c)
++         f'#define DM_GAME_LOOK_DEAD {ld!r}f',
+          f'#define DM_GAME_OPMODE {int(om == "console")}',
+          f'#define DM_GAME_PERF_BOOST {int(pm == "boost")}',
+          f'#define DM_GAME_TEX_FLUSH_UPLOAD {int(tfu == "on")}',
+diff --git a/dm/games/settings.tsv b/dm/games/settings.tsv
+index 00e1ddd..64d3346 100644
+--- a/dm/games/settings.tsv
++++ b/dm/games/settings.tsv
+@@ -23,6 +23,8 @@ DM_LANG	choice	languages	build:DM_LANG	languages>1	Game	Game language		level=bas
+ DM_FULLSCREEN	choice	0=Window,1=Fullscreen	0	platform:mac	Game	Display mode		level=basic
+ DM_SHOW_FPS	toggle	-	build:DM_SHOW_FPS	platform:ios	Game	Frame-rate counter
+ DM_TOUCH_HAPTICS	toggle	-	1	platform:ios	Controls	Touch feedback
++DM_LOOK_SCALE	range	0.25:3.0:0.05	1.0	DM_GAME_LOOK_RATE!=0.0f	Controls	Look sensitivity		level=basic
++DM_LOOK_INVERT_Y	toggle	-	0	DM_GAME_LOOK_RATE!=0.0f	Controls	Invert look up and down
+ DM_RUMBLE	toggle	-	1	always	Controls	Game rumble		level=basic
+ DM_RUMBLE_GAIN	range	0:3:0.1	1.0	always	Controls	Rumble strength		needs=DM_RUMBLE=1
+ DM_RUMBLE_MIN	range	0:0.9:0.05	0	always	Controls	Rumble cutoff
 diff --git a/dm/gfx/hle_vi.c b/dm/gfx/hle_vi.c
 index 9bbe8fb..7ab5b24 100644
 --- a/dm/gfx/hle_vi.c
@@ -3404,6 +3442,113 @@ index 54afe1a..21162d4 100644
  clean:   # the host and everything make generates for it (gen/: the profile headers, the game stamp and the libvpx build; dmhost_* and *.dSYM beside them, as in .gitignore)
  	rm -rf gen dmhost dmhost_* *.dSYM
  .PHONY: clean
+diff --git a/dm/host/front.h b/dm/host/front.h
+index cd517ba..a2724e5 100644
+--- a/dm/host/front.h
++++ b/dm/host/front.h
+@@ -40,7 +40,12 @@ void dm_host_preload_start(int argc, char **argv);
+ // The host converts to the panel coordinates the game reads, 1280x720 (x·1280, y·720), and latches short taps (a down and up between two reads is reported at least once). May be called from any thread.
+ typedef struct { uint32_t id; float x, y; } dm_touch;
+ void dm_touch_set(const dm_touch *t, int n);
+-void dm_touch_script(const dm_touch *t, int n);   // scripted touches (DM_KEYS, DM_CTL; hle_hid.c): as dm_touch_set, but never recorded by DM_REC
++void dm_touch_script(const dm_touch *t, int n);
++// Pointer look (hle_hid.c): turn the camera by this many degrees (right, up) through the right stick, exactly, over the next frames. dm_look_on: the game profile (or
++// DM_LOOK_RATE) gives the camera's turn rate, so a front end offers the mouse / look drags; dm_look_sens: DM_LOOK_SENS (degrees per point of movement), else def
++void dm_look_add(float right_deg, float up_deg);
++int dm_look_on(void);
++float dm_look_sens(float def);   // scripted touches (DM_KEYS, DM_CTL; hle_hid.c): as dm_touch_set, but never recorded by DM_REC
+ 
+ // Save not written (called by the host's hle_fs.c; the iOS front end provides a strong implementation of the same name that shows the native prompt "Not enough storage. Progress was not saved"; the default weak implementation only logs).
+ // Timing: when a save write fails (disk full etc.) within one of the game's save transactions (between two Commits), so that this Commit is refused and the previously committed save is unchanged, it is called once per refused transaction;
+diff --git a/dm/host/front_mac.m b/dm/host/front_mac.m
+index 0834238..18b33eb 100644
+--- a/dm/host/front_mac.m
++++ b/dm/host/front_mac.m
+@@ -106,9 +106,28 @@ static void cursor_hide_for_input(void) {
+     NSView *v = g_win.contentView;
+     if (NSPointInRect([v convertPoint:g_win.mouseLocationOutsideOfEventStream fromView:nil], v.bounds)) [NSCursor setHiddenUntilMouseMoves:YES];
+ }
++// Pointer look (hle_hid.c dm_look_add), for a game whose profile has a look rate: a click on the picture captures the mouse (the pointer hides and stays put), its movement
++// turns the camera by DM_LOOK_SENS degrees per point (default 0.12), the left button is A, the right one B and the middle one the right stick's press; Esc, or the window
++// losing focus, lets the mouse go, and the next click takes it again. While it is not captured the left button is the touch screen, as before
++static int g_look_cap;
++static void look_capture(int on) {
++    if (on == g_look_cap) return;
++    g_look_cap = on;
++    CGAssociateMouseAndMouseCursorPosition(on ? false : true);
++    if (on) [NSCursor hide]; else [NSCursor unhide];
++    g_win.title = on ? @DM_GAME_NAME @" - mouse look (Esc releases the mouse)" : @DM_GAME_NAME;
++    LOG("front end: mouse look %s", on ? "on (Esc releases the mouse)" : "off");
++}
++static uint64_t g_look_btn;   // the mouse buttons while it looks, ORed into the keyboard's
++static void look_button(uint64_t bit, int down) { g_look_btn = down ? g_look_btn | bit : g_look_btn & ~bit; }
++static void look_move(NSEvent *e) {
++    if (!g_look_cap || !g_input_on) return;
++    static float sens = -1; if (sens < 0) sens = dm_look_sens(0.12f);
++    dm_look_add((float)e.deltaX * sens, (float)-e.deltaY * sens);   // AppKit's mouse deltas are positive to the right and down
++}
+ static void push(void) {
+     int32_t lx = (g_d - g_a) * 32767, ly = (g_w - g_s) * 32767;
+-    dm_input_set(g_btn, lx, ly, 0, 0);
++    dm_input_set(g_btn | g_look_btn, lx, ly, 0, 0);
+ }
+ static int key_bit(unsigned short code) {
+     switch (code) {
+@@ -123,6 +142,7 @@ static int key_bit(unsigned short code) {
+ static void on_key(NSEvent *e, int down) {
+     if (!g_input_on) return;
+     unsigned short c = e.keyCode;
++    if (c == 53 && g_look_cap) { if (down) { look_capture(0); g_look_btn = 0; push(); } return; }   // Esc lets the mouse go (pointer look)
+     switch (c) { case 13: g_w = down; break; case 0: g_a = down; break; case 1: g_s = down; break; case 2: g_d = down; break; }
+     int b = key_bit(c);
+     uint64_t m = b >= 0 ? 1ull << b : c == 49 ? DM_BTN_SHAKE : 0;   // Space: shaken while held
+@@ -219,6 +239,7 @@ static void input_release(void) {
+     [NSCursor setHiddenUntilMouseMoves:NO];
+     g_input_on = 0;
+     dm_motion_pro_active(0);
++    look_capture(0); g_look_btn = 0;
+     g_btn = 0; g_w = g_a = g_s = g_d = 0; push();
+     if (g_mouse_down) { g_mouse_down = 0; dm_touch_set(NULL, 0); }
+     if (g_merge) { if (merge_pads_left(nil)) dm_pad_set(0, 0, 0, 0, 0); return; }
+@@ -273,8 +294,19 @@ static void pads_start(void) {
+ // not a window-wide event monitor, so clicks on the title bar, the window buttons and the resize edges still reach AppKit.
+ @interface DmGameView : NSView @end
+ @implementation DmGameView
+-- (void)mouseDown:(NSEvent *)e { [self mouseDragged:e]; }
++- (BOOL)acceptsFirstResponder { return YES; }
++- (void)mouseDown:(NSEvent *)e {
++    if (g_input_on && dm_look_on()) { if (!g_look_cap) look_capture(1); else { look_button(DM_BTN_A, 1); push(); } return; }   // pointer look: the first click captures, then the left button is A
++    [self mouseDragged:e]; }
++- (void)mouseMoved:(NSEvent *)e { look_move(e); }
++- (void)rightMouseDown:(NSEvent *)e { (void)e; if (g_look_cap) { look_button(DM_BTN_B, 1); push(); } }
++- (void)rightMouseUp:(NSEvent *)e { (void)e; if (g_look_btn & DM_BTN_B) { look_button(DM_BTN_B, 0); push(); } }
++- (void)rightMouseDragged:(NSEvent *)e { look_move(e); }
++- (void)otherMouseDown:(NSEvent *)e { (void)e; if (g_look_cap) { look_button(DM_BTN_RS, 1); push(); } }
++- (void)otherMouseUp:(NSEvent *)e { (void)e; if (g_look_btn & DM_BTN_RS) { look_button(DM_BTN_RS, 0); push(); } }
++- (void)otherMouseDragged:(NSEvent *)e { look_move(e); }
+ - (void)mouseDragged:(NSEvent *)e {
++    if (g_look_cap) { look_move(e); return; }
+     if (!g_input_on) return;
+     NSPoint p = [self convertPoint:e.locationInWindow fromView:nil]; NSSize b = self.bounds.size;
+     double w = b.width, h = b.height;
+@@ -284,7 +316,7 @@ - (void)mouseDragged:(NSEvent *)e {
+     dm_touch t = {0, (float)fmin(fmax((p.x - x0) / w, 0), 0.999), (float)fmin(fmax(1 - (p.y - y0) / h, 0), 0.999)};   // The AppKit view origin is at bottom left, the touchscreen origin is at top left
+     dm_touch_set(&t, 1); g_mouse_down = 1;
+ }
+-- (void)mouseUp:(NSEvent *)e { (void)e; if (g_mouse_down) { g_mouse_down = 0; dm_touch_set(NULL, 0); } }
++- (void)mouseUp:(NSEvent *)e { (void)e; if (g_look_btn & DM_BTN_A) { look_button(DM_BTN_A, 0); push(); } if (g_mouse_down) { g_mouse_down = 0; dm_touch_set(NULL, 0); } }
+ // The drawable follows the view in pixels: a layer assigned to a layer-backed view kept the drawable at the first window's 1280x720 in fullscreen too, so the game picture was
+ // scaled down to it and up again by the compositor
+ - (void)fitDrawable {
+@@ -1182,6 +1214,8 @@ void front_run(void (*guest)(void)) {
+         g_layer.contentsScale = win.backingScaleFactor;
+         if (getenv("DM_METAL_HUD") && atoi(getenv("DM_METAL_HUD"))) { g_layer.developerHUDProperties = @{@"mode": @"default"}; LOG("front end: Metal performance HUD on (DM_METAL_HUD)"); }   // Apple's HUD over the game: frame rate, frame and GPU time, memory
+         v.layer = g_layer; [(DmGameView *)v fitDrawable];
++        win.acceptsMouseMovedEvents = YES; [win makeFirstResponder:v];   // pointer look: the view gets the mouse's movement
++        if (dm_look_on()) LOG("front end: mouse look available: click the picture to capture the mouse, Esc releases it (DM_LOOK_SENS %.3f degrees per point)", dm_look_sens(0.12f));
+         [win center];
+         [win makeKeyAndOrderFront:nil];
+         screen_refresh(win.screen ?: NSScreen.mainScreen);
 diff --git a/dm/host/hle.c b/dm/host/hle.c
 index de79bc9..e09a927 100644
 --- a/dm/host/hle.c
@@ -3417,6 +3562,92 @@ index de79bc9..e09a927 100644
                  regs[g->arg] = t;
                  return t;
              }
+diff --git a/dm/host/hle_hid.c b/dm/host/hle_hid.c
+index 768a357..8a111f9 100644
+--- a/dm/host/hle_hid.c
++++ b/dm/host/hle_hid.c
+@@ -58,6 +58,59 @@ void dm_pad_set_player(int p, uint64_t buttons, int32_t lx, int32_t ly, int32_t
+     if (!p) shake_note();
+ }
+ void dm_pad_set(uint64_t buttons, int32_t lx, int32_t ly, int32_t rx, int32_t ry) { dm_pad_set_player(0, buttons, lx, ly, rx, ry); }
++
++// Pointer look (front.h dm_look_add): the Mac's captured mouse and the iPhone's look drags turn the camera by exactly how far they moved, through the right stick, the only
++// input the game turns its camera by. The game profile's look_rate is the camera's turn rate at full tilt (degrees per second) and look_dead its deadzone (a fraction of full
++// tilt, round); Pokopia, measured from its view matrix: 110 deg/s times the tilt above 0.51, frame-time based, no acceleration or smoothing. Each game frame (dm_guest_frame)
++// the host emits the tilt that turns the camera by what has gathered since, at most full tilt (the rest carries over to the next frames, up to LOOK_BACKLOG degrees), and
++// nothing while less than the deadzone's worth has gathered: then it fires once enough has (steps of look_dead x look_rate x frame time, about 1 degree at 60 fps). A remainder
++// smaller than a step that is left when the movement stops is rounded to the nearest step. DM_LOOK_RATE / DM_LOOK_DEAD override the profile (DM_LOOK_RATE=0: off), DM_LOOK_INVERT_Y=1 inverts up / down
++#define LOOK_BACKLOG 180.0
++static pthread_mutex_t g_look_mu = PTHREAD_MUTEX_INITIALIZER;
++static double g_look_acc[2], g_look_last;   // degrees still to turn (right, up); when movement last arrived (monotonic seconds)
++static uint64_t g_look_frame = ~0ull; static double g_look_t;
++static int32_t g_look_axes[2];              // this frame's tilt
++static double look_now(void) { struct timespec ts; clock_gettime(CLOCK_MONOTONIC, &ts); return (double)ts.tv_sec + (double)ts.tv_nsec * 1e-9; }
++static float look_env(const char *k, float def) { const char *e = getenv(k); return e && *e ? (float)atof(e) : def; }
++static float look_rate(void) { static float r = -1; if (r < 0) { r = look_env("DM_LOOK_RATE", DM_GAME_LOOK_RATE); if (r < 0) r = 0; } return r; }
++static float look_dead(void) { static float d = -1; if (d < 0) { d = look_env("DM_LOOK_DEAD", DM_GAME_LOOK_DEAD); if (d < 0 || d >= 1) d = DM_GAME_LOOK_DEAD; } return d; }
++int dm_look_on(void) { return look_rate() > 0; }
++float dm_look_sens(float def) {   // DM_LOOK_SENS (degrees per point) else the front end's default, times DM_LOOK_SCALE (the launcher's Look sensitivity, 1 = 100 %)
++    float s = look_env("DM_LOOK_SENS", def), k = look_env("DM_LOOK_SCALE", 1.0f);
++    return (s > 0 ? s : def) * (k > 0 ? k : 1.0f);
++}
++void dm_look_add(float right_deg, float up_deg) {
++    if (!dm_look_on()) return;
++    static int inv = -1; if (inv < 0) { const char *e = getenv("DM_LOOK_INVERT_Y"); inv = e && atoi(e) ? 1 : 0; }
++    if (inv) up_deg = -up_deg;
++    pthread_mutex_lock(&g_look_mu);
++    g_look_acc[0] += right_deg; g_look_acc[1] += up_deg; g_look_last = look_now();
++    double n = hypot(g_look_acc[0], g_look_acc[1]); if (n > LOOK_BACKLOG) { g_look_acc[0] *= LOOK_BACKLOG / n; g_look_acc[1] *= LOOK_BACKLOG / n; }
++    pthread_mutex_unlock(&g_look_mu);
++}
++static void look_apply(int32_t *rx, int32_t *ry) {   // player 1's read: this frame's look tilt, which wins over a resting right stick
++    if (!dm_look_on()) return;
++    pthread_mutex_lock(&g_look_mu);
++    uint64_t f = dm_guest_frame();
++    if (f != g_look_frame) {   // the first read of a new frame: what this frame turns
++        double now = look_now(), dt = g_look_t > 0 ? now - g_look_t : 1.0 / 60;
++        g_look_frame = f; g_look_t = now;
++        dt = fmax(1.0, round(dt * 60.0)) / 60.0;   // the game steps its camera by whole 1/60 s ticks (measured: exactly 1.833 degrees a frame at full tilt at 60 fps, while frames took 16.85 ms)
++        if (dt > 0.05) dt = 0.05;   // and caps the step at 50 ms (measured: 5.5 degrees a frame at full tilt below 20 fps)
++        double ax = g_look_acc[0], ay = g_look_acc[1], need = hypot(ax, ay), cap = look_rate() * dt;
++        g_look_axes[0] = g_look_axes[1] = 0;
++        if (need > 0 && need >= look_dead() * cap) {
++            double m = fmin(need / cap, 1.0), ux = ax / need, uy = ay / need;
++            g_look_axes[0] = (int32_t)lrint(ux * m * DM_STICK_MAX); g_look_axes[1] = (int32_t)lrint(uy * m * DM_STICK_MAX);
++            g_look_acc[0] -= ux * m * cap; g_look_acc[1] -= uy * m * cap;
++        } else if (need > 0 && now - g_look_last > 0.06) {   // the movement has stopped with less than one step left: rounded to the nearest step (one at the deadzone's tilt, or none)
++            if (need >= 0.5 * look_dead() * cap) { double m = look_dead() + 0.005; g_look_axes[0] = (int32_t)lrint(ax / need * m * DM_STICK_MAX); g_look_axes[1] = (int32_t)lrint(ay / need * m * DM_STICK_MAX); }
++            g_look_acc[0] = g_look_acc[1] = 0;
++        }
++    }
++    if (g_look_axes[0] || g_look_axes[1]) { *rx = g_look_axes[0]; *ry = g_look_axes[1]; }
++    pthread_mutex_unlock(&g_look_mu);
++}
+ static void script_set(uint64_t buttons, int32_t lx, int32_t ly, int32_t rx, int32_t ry) {
+     uint64_t old = atomic_exchange(&g_sc_btn, buttons); atomic_fetch_or(&g_sc_latch, buttons & ~old); atomic_store(&g_sc_axes, pack(lx, ly, rx, ry));
+     shake_note();
+@@ -229,6 +282,13 @@ static void *ctl_main(void *arg) {
+                 if (!strncmp(line, "env ", 4)) { char *eq = strchr(line + 4, '='); if (eq) { *eq = 0; setenv(line + 4, eq + 1, 1); LOG("DM_CTL: env %s=%s", line + 4, eq + 1); } continue; }
+                 if (!strncmp(line, "texdump ", 8)) { void dm_gfx_texdump_next(const char *path); dm_gfx_texdump_next(line + 8); LOG("DM_CTL: colour targets of the next frame → %s (as DM_NVN_TEXDUMP)", line + 8); continue; }
+                 if (!strncmp(line, "passdump ", 9)) { void dm_gfx_passdump_next(long n); dm_gfx_passdump_next(atol(line + 9)); LOG("DM_CTL: passes of the next %ld frames (as DM_NVN_PASSDUMP)", atol(line + 9)); continue; }
++                if (!strncmp(line, "look ", 5)) {   // pointer look as a front end feeds it: "look <right degrees> <up degrees> [seconds=0.3]", in steps every 4 ms
++                    float dx, dy, s = 0.3f; if (sscanf(line + 5, "%f %f %f", &dx, &dy, &s) < 2) { LOG("[RED] DM_CTL look wants right up [seconds]"); continue; }
++                    int n = (int)(s / 0.004f); if (n < 1) n = 1;
++                    LOG("DM_CTL: look %.2f right %.2f up over %.2f s%s", dx, dy, s, dm_look_on() ? "" : " (look is off: the game profile has no look_rate)");
++                    for (int i = 0; i < n; i++) { dm_look_add(dx / (float)n, dy / (float)n); usleep((useconds_t)(s * 1e6f / (float)n)); }
++                    continue;
++                }
+                 if (!strncmp(line, "drag ", 5)) {   // one finger, a step every 8 ms
+                     float x0, y0, x1, y1, s = 0.3f; if (sscanf(line + 5, "%f %f %f %f %f", &x0, &y0, &x1, &y1, &s) < 4) { LOG("[RED] DM_CTL drag wants x0 y0 x1 y1 [seconds]"); continue; }
+                     int n = (int)(s / 0.008f); if (n < 2) n = 2;
+@@ -427,6 +487,7 @@ static void fill(NpadState *s, uint32_t id, uint32_t style) {
+         if (atomic_load_explicit(&g_rec_on, memory_order_relaxed)) rec_read((b & 0xffffull) | ((atomic_load(&g_btn) | atomic_load(&g_pad_btn[0])) & DM_BTN_SHAKE), a);
+         b |= atomic_load(&g_sc_btn) | atomic_exchange(&g_sc_latch, 0);
+         uint64_t c = atomic_load(&g_sc_axes); for (int i = 0; i < 4; i++) a[i] = pick(a[i], ax(c, i));
++        if (abs(a[2]) < DM_STICK_MAX / 5 && abs(a[3]) < DM_STICK_MAX / 5) look_apply(&a[2], &a[3]);   // pointer look, unless a right stick is in use
+     }
+     s->lx = a[0]; s->ly = a[1]; s->rx = a[2]; s->ry = a[3];
+     b &= 0xffffull;
 diff --git a/dm/host/hle_oe.c b/dm/host/hle_oe.c
 index 71a90bc..29862f0 100644
 --- a/dm/host/hle_oe.c
@@ -3546,18 +3777,28 @@ index 4f440a0..32498e1 100644
          }
          regs[0] = 0; regs[1] = v; return 0;
 diff --git a/dm/ios/Sources/DmGamepad.m b/dm/ios/Sources/DmGamepad.m
-index a079d7f..8f89a60 100644
+index a079d7f..9bd20d2 100644
 --- a/dm/ios/Sources/DmGamepad.m
 +++ b/dm/ios/Sources/DmGamepad.m
-@@ -138,6 +138,7 @@ @implementation DmGamepad {
+@@ -30,7 +30,7 @@
+ #include <stdatomic.h>
+ 
+ enum { B_A = 0, B_B, B_X, B_Y, B_LS, B_RS, B_L, B_R, B_ZL, B_ZR, B_PLUS, B_MINUS, B_LEFT, B_UP, B_RIGHT, B_DOWN, B_N };
+-enum { C_NONE = 0, C_STICK, C_DPAD, C_FACE, C_BTN, C_SWAP, C_GAME };   // which control a touch holds; C_GAME: none, the touch goes to the game's touch screen (finger slot << 8)
++enum { C_NONE = 0, C_STICK, C_DPAD, C_FACE, C_BTN, C_SWAP, C_GAME, C_LOOK };   // C_LOOK: a look drag (pointer look, hle_hid.c dm_look_add)   // which control a touch holds; C_GAME: none, the touch goes to the game's touch screen (finger slot << 8)
+ 
+ static pthread_mutex_t g_mu = PTHREAD_MUTEX_INITIALIZER;
+ static uint64_t g_touch_btn, g_shake_btn;
+@@ -138,6 +138,8 @@ @implementation DmGamepad {
      NSMapTable<UITouch *, NSNumber *> *_owner;     // touch → control (with the key for C_BTN or the stick for C_STICK, << 8)
      UITouch *_stick[2]; CGPoint _stickNow[2];      // the touch holding each stick and where it is now (0 left, 1 right)
      CGPoint _rCentre;                              // the right stick's centre: where its touch landed, dragged along past K_RSTICK_R
++    UITouch *_look; CGPoint _lookAt;               // pointer look: the touch dragging the camera and where it was last (a game with a look rate, see touchesBegan)
 +    float _autorun;                                // DM_TOUCH_AUTORUN: left-stick tilt (fraction of full) beyond which B is held as well; 0 = off
      uint64_t _faceBits, _dpadBits, _btnBits;
      NSMapTable<UITouch *, NSNumber *> *_faceOf;    // which keys each touch on the diamond currently holds
      CAShapeLayer *_key[B_N]; CATextLayer *_label[B_N];   // one layer per key
-@@ -170,6 +171,8 @@ - (instancetype)initWithFrame:(CGRect)f {
+@@ -170,6 +172,8 @@ - (instancetype)initWithFrame:(CGRect)f {
      if ((self = [super initWithFrame:f])) {
          self.multipleTouchEnabled = YES; self.opaque = NO; self.backgroundColor = UIColor.clearColor;
          const char *feedback = getenv("DM_TOUCH_HAPTICS");
@@ -3566,7 +3807,7 @@ index a079d7f..8f89a60 100644
          if (!feedback || atoi(feedback)) {
              _touchFeedback = [[UIImpactFeedbackGenerator alloc] initWithStyle:UIImpactFeedbackStyleLight];
              [_touchFeedback prepare];
-@@ -298,6 +301,7 @@ - (void)recompute {
+@@ -298,6 +302,7 @@ - (void)recompute {
          CGFloat m = fmin((d - dz) / (R * K_FULL - dz), 1) / d;   // outside the dead zone: 0 rising to full at the full-tilt radius
          ax[i * 2] = (int32_t)lrint(o.x * m * 32767); ax[i * 2 + 1] = (int32_t)lrint(-o.y * m * 32767);   // host: up is positive; rounded so full tilt is exactly 32767
      }
@@ -3574,6 +3815,42 @@ index a079d7f..8f89a60 100644
      BOOL changed = face != _faceBits || dpad != _dpadBits || btn != _btnBits || swap != _swapHeld;
      uint64_t pressed = (face | dpad | btn) & ~(_faceBits | _dpadBits | _btnBits);
      unsigned gripping = (_stick[0] ? 1u : 0) | (_stick[1] ? 2u : 0);
+@@ -345,6 +350,9 @@ - (void)touchesBegan:(NSSet<UITouch *> *)ts withEvent:(UIEvent *)e {
+         CGFloat f = dist(p, self.faceCenter) / (self.faceGap + self.faceR * 1.6); if (f <= best) { best = f; kind = C_FACE; }
+         if (_full) { CGFloat d = dist(p, self.dpadCenter) / (self.dpadR * K_DPAD_GRAB); if (d < best) { best = d; kind = C_DPAD; } }
+         if (!_stick[0]) { CGFloat s = dist(p, self.stickHome) / ([self stickR:0] * K_STICK_GRAB); if (s < best) { best = s; kind = C_STICK; } }
++        // pointer look (a game whose profile has a look rate): a touch on no control in the right half, in any layout but Tap, drags the camera by how far it moves
++        // (DM_LOOK_SENS degrees per point, default 0.3); without a look rate, in 3D the right third holds an invisible right stick centred where the touch lands
++        if (kind == C_NONE && dm_look_on() && !_look && p.x >= CGRectGetMidX(self.bounds)) { [_owner setObject:@(C_LOOK) forKey:t]; _look = t; _lookAt = p; continue; }
+         if (kind == C_NONE && _full && !_stick[1] && [self inRightArea:p]) { kind = C_STICK; idx = 1; _rCentre = p; }   // the right stick: centred where the touch lands
+         if (kind == C_FACE) { [_owner setObject:@(C_FACE) forKey:t]; [_faceOf setObject:@([self faceAt:p]) forKey:t]; }
+         else if (kind == C_DPAD) [_owner setObject:@(C_DPAD) forKey:t];
+@@ -363,6 +371,8 @@ - (void)touchesMoved:(NSSet<UITouch *> *)ts withEvent:(UIEvent *)e {
+             if ((v >> 8) == 1) { CGFloat d = dist(p, _rCentre), R = [self stickR:1];   // the right stick's centre follows a finger past its radius, so turning back responds at once
+                 if (d > R) _rCentre = CGPointMake(p.x - (p.x - _rCentre.x) * R / d, p.y - (p.y - _rCentre.y) * R / d); } }
+         else if (c == C_GAME) game = YES;
++        else if (c == C_LOOK) { static float sens = -1; if (sens < 0) sens = dm_look_sens(0.3f);
++            dm_look_add((float)(p.x - _lookAt.x) * sens, (float)(_lookAt.y - p.y) * sens); _lookAt = p; }   // UIKit's y grows downward
+     }
+     if (game) [self pushGame];
+     [self recompute];
+@@ -373,6 +383,7 @@ - (void)endTouches:(NSSet<UITouch *> *)ts tapped:(BOOL)ended {
+         uint64_t v = [_owner objectForKey:t].unsignedLongLongValue;
+         if (ended && (v & 0xff) == C_SWAP && [self inSwap:[t locationInView:self]]) swap = YES;   // layout button: counts only when released on the button
+         if ((v & 0xff) == C_GAME && (v >> 8) < 16) { _game[v >> 8] = nil; game = YES; }
++        if (t == _look) _look = nil;
+         [_owner removeObjectForKey:t]; [_faceOf removeObjectForKey:t]; for (int i = 0; i < 2; i++) if (t == _stick[i]) _stick[i] = nil;
+     }
+     if (game) [self pushGame];
+@@ -381,7 +392,7 @@ - (void)endTouches:(NSSet<UITouch *> *)ts tapped:(BOOL)ended {
+ }
+ - (void)touchesEnded:(NSSet<UITouch *> *)ts withEvent:(UIEvent *)e { [self endTouches:ts tapped:YES]; }
+ - (void)touchesCancelled:(NSSet<UITouch *> *)ts withEvent:(UIEvent *)e { [self endTouches:ts tapped:NO]; }
+-- (void)reset { [_owner removeAllObjects]; [_faceOf removeAllObjects]; _stick[0] = _stick[1] = nil; for (int i = 0; i < 16; i++) _game[i] = nil; [self pushGame]; [self recompute]; }
++- (void)reset { [_owner removeAllObjects]; [_faceOf removeAllObjects]; _stick[0] = _stick[1] = nil; _look = nil; for (int i = 0; i < 16; i++) _game[i] = nil; [self pushGame]; [self recompute]; }
+ 
+ // ---- Shapes ----
+ static CGPathRef circlePath(CGPoint c, CGFloat r) { return CGPathCreateWithEllipseInRect(CGRectMake(c.x - r, c.y - r, 2 * r, 2 * r), NULL); }
 diff --git a/dm/third_party/ryujinx/src/Ryujinx.Graphics.Shader/Decoders/Decoder.cs b/dm/third_party/ryujinx/src/Ryujinx.Graphics.Shader/Decoders/Decoder.cs
 index 45250a4..8bc9d08 100644
 --- a/dm/third_party/ryujinx/src/Ryujinx.Graphics.Shader/Decoders/Decoder.cs

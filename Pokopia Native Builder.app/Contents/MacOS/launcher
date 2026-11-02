@@ -1,0 +1,14 @@
+#!/bin/zsh
+# Pokopia Native Builder.app: opens the window (nxs2_gui.py) with a Python 3.12+ that has Tk. The app lives inside the
+# repository folder, so the repository root is three levels up. A double-clicked app gets a bare PATH, hence the list.
+HERE="${0:A:h}"; ROOT="${HERE:h:h:h}"
+export PATH="/opt/homebrew/bin:/usr/local/bin:$HOME/.local/bin:$PATH"
+for p in python3.12 python3.13 python3.14 python3 /opt/homebrew/bin/python3.12 /usr/local/bin/python3.12 "$HOME/.local/bin/python3.12"; do
+  P=$(command -v "$p" 2>/dev/null) || P="$p"
+  [ -x "$P" ] || continue
+  if "$P" -c 'import sys, tkinter; sys.exit(0 if sys.version_info >= (3, 12) else 1)' 2>/dev/null; then
+    cd "$ROOT" && exec "$P" "$ROOT/nxs2_gui.py"
+  fi
+done
+osascript -e 'display dialog "Python 3.12 or newer with Tk was not found.\n\nIn Terminal:\n  brew install python@3.12 python-tk@3.12\n\nthen open Pokopia Native Builder again." buttons {"OK"} default button 1 with icon stop with title "Pokopia Native Builder"'
+exit 1

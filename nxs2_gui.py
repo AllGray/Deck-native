@@ -1,0 +1,264 @@
+#!/usr/bin/env python3
+"""nxs2_gui.py: the window around nxs2.py. Pick your dump folder, tick what you want, press Build; the stages scroll by
+in the window. Everything is done by nxs2.py underneath (the same commands the README lists), so a build started here
+can be continued from Terminal and the other way round.
+
+Mac: double-click "Pokopia Native Builder.app" (or: python3.12 nxs2_gui.py). Windows: "Pokopia Native Builder.cmd".
+Needs Python 3.12+ with Tk (macOS Homebrew: brew install python-tk@3.12; python.org installers have it).
+"""
+import json, os, pathlib, queue, re, subprocess, sys, threading, time
+import tkinter as tk
+from tkinter import filedialog, messagebox, ttk
+
+HERE = pathlib.Path(__file__).resolve().parent
+NXS2 = HERE / 'nxs2.py'
+TITLE = '0400A3A01EE4C000'
+NAME = 'Pokemon Pokopia'
+MAC = sys.platform == 'darwin'
+WIN = sys.platform == 'win32'
+SETTINGS = pathlib.Path.home() / ('.nxs2_gui.json')
+
+
+def build_dir_for(dump):
+    d = pathlib.Path(dump).expanduser()
+    return d.parent / f'{d.name}_native' if dump else None
+
+
+class App(tk.Tk):
+    def __init__(self):
+        super().__init__()
+        self.title('Pokémon Pokopia native builder')
+        self.minsize(760, 560)
+        self.proc = None; self.q = queue.Queue(); self.t0 = None; self.running = None
+        self.settings = self.load_settings()
+        self.build_ui()
+        self.after(100, self.poll)
+        self.check_setup()
+
+    # ---------------------------------------------------------------- settings
+    def load_settings(self):
+        try: return json.loads(SETTINGS.read_text())
+        except Exception: return {}
+
+    def save_settings(self):
+        s = {'dump': self.dump.get(), 'out': self.out.get(), 'mac_app': self.mac_app.get(), 'ipa': self.ipa.get(), 'xcode': self.xcode.get(),
+             'team': self.team.get(), 'no_ios': self.no_ios.get()}
+        try: SETTINGS.write_text(json.dumps(s))
+        except Exception: pass
+
+    # ---------------------------------------------------------------- the window
+    def build_ui(self):
+        s = self.settings
+        pad = {'padx': 8, 'pady': 4}
+        f = ttk.Frame(self); f.pack(fill='both', expand=True, padx=10, pady=10)
+
+        ttk.Label(f, text='Your dump folder', font=('', 12, 'bold')).grid(row=0, column=0, sticky='w', **pad)
+        self.dump = tk.StringVar(value=s.get('dump', ''))
+        ttk.Entry(f, textvariable=self.dump, width=70).grid(row=1, column=0, columnspan=2, sticky='ew', **pad)
+        ttk.Button(f, text='Choose…', command=self.choose_dump).grid(row=1, column=2, sticky='w', **pad)
+        ttk.Label(f, text='the folder with updates/327680/exefs and romfs inside (or exefs and romfs directly); the game is never written to',
+                  foreground='#666', wraplength=720, justify='left').grid(row=2, column=0, columnspan=3, sticky='w', padx=8)
+
+        ttk.Label(f, text='Build folder', font=('', 12, 'bold')).grid(row=3, column=0, sticky='w', **pad)
+        self.out = tk.StringVar(value=s.get('out', ''))
+        ttk.Entry(f, textvariable=self.out, width=70).grid(row=4, column=0, columnspan=2, sticky='ew', **pad)
+        ttk.Button(f, text='Change…', command=self.choose_out).grid(row=4, column=2, sticky='w', **pad)
+        ttk.Label(f, text='empty = beside the dump, "<dump folder>_native"; everything made from the game goes here and nowhere else',
+                  foreground='#666', wraplength=720, justify='left').grid(row=5, column=0, columnspan=3, sticky='w', padx=8)
+
+        ttk.Label(f, text='Outputs', font=('', 12, 'bold')).grid(row=6, column=0, sticky='w', **pad)
+        o = ttk.Frame(f); o.grid(row=7, column=0, columnspan=3, sticky='w', padx=8)
+        self.mac_app = tk.BooleanVar(value=s.get('mac_app', MAC)); self.ipa = tk.BooleanVar(value=s.get('ipa', True))
+        self.xcode = tk.BooleanVar(value=s.get('xcode', False)); self.team = tk.StringVar(value=s.get('team', ''))
+        self.no_ios = tk.BooleanVar(value=s.get('no_ios', False))
+        self.full_speed = tk.BooleanVar(value=False)   # never remembered: every session starts gentle
+        if MAC: ttk.Checkbutton(o, text='Mac app', variable=self.mac_app).pack(side='left', padx=(0, 14))
+        ttk.Checkbutton(o, text='iPhone IPA (unsigned)', variable=self.ipa).pack(side='left', padx=(0, 14))
+        if MAC:
+            ttk.Checkbutton(o, text='Xcode project, team ID:', variable=self.xcode).pack(side='left')
+            ttk.Entry(o, textvariable=self.team, width=12).pack(side='left', padx=(4, 14))
+            ttk.Checkbutton(o, text='Mac only (skip the iPhone shader libraries, faster)', variable=self.no_ios).pack(side='left')
+
+        sp = ttk.Frame(f); sp.grid(row=8, column=0, columnspan=3, sticky='w', padx=8, pady=(6, 0))
+        ttk.Checkbutton(sp, text='Full speed (every CPU thread)', variable=self.full_speed).pack(side='left')
+        ttk.Label(sp, text='  off = a few cores at low priority: slower, but the computer stays cool and usable' if not MAC else
+                  '  off = all cores at low priority; on = the same at normal priority', foreground='#666').pack(side='left')
+
+        b = ttk.Frame(f); b.grid(row=9, column=0, columnspan=3, sticky='ew', padx=8, pady=(10, 4))
+        self.buttons = {}
+        for key, text, cmd in (('doctor', 'Check tools', self.do_doctor), ('setup', 'Setup', self.do_setup), ('build', 'Build', self.do_build),
+                               ('refresh', 'Refresh shaders', self.do_refresh)) + ((('sign', 'Sign IPA', self.do_sign),) if MAC else ()):
+            self.buttons[key] = ttk.Button(b, text=text, command=cmd); self.buttons[key].pack(side='left', padx=(0, 6))
+        self.stop_btn = ttk.Button(b, text='Stop', command=self.do_stop, state='disabled'); self.stop_btn.pack(side='left', padx=(0, 6))
+        ttk.Button(b, text='Open build folder', command=self.open_out).pack(side='right')
+
+        self.status = tk.StringVar(value='')
+        ttk.Label(f, textvariable=self.status, font=('', 11)).grid(row=10, column=0, columnspan=3, sticky='w', padx=8, pady=(6, 2))
+        self.log = tk.Text(f, height=18, wrap='none', font=('Menlo' if MAC else 'Consolas', 10), state='disabled')
+        self.log.grid(row=11, column=0, columnspan=3, sticky='nsew', padx=8, pady=(0, 4))
+        sb = ttk.Scrollbar(f, orient='vertical', command=self.log.yview); sb.grid(row=11, column=3, sticky='ns'); self.log['yscrollcommand'] = sb.set
+        f.columnconfigure(0, weight=1); f.rowconfigure(11, weight=1)
+        self.protocol('WM_DELETE_WINDOW', self.on_close)
+
+    # ---------------------------------------------------------------- helpers
+    def choose_dump(self):
+        d = filedialog.askdirectory(title='Your dump folder', initialdir=self.dump.get() or str(pathlib.Path.home()))
+        if d: self.dump.set(d); self.save_settings()
+
+    def choose_out(self):
+        d = filedialog.askdirectory(title='Build folder', initialdir=self.out.get() or str(pathlib.Path.home()))
+        if d: self.out.set(d); self.save_settings()
+
+    def build_dir(self):
+        if self.out.get().strip(): return pathlib.Path(self.out.get().strip()).expanduser()
+        return build_dir_for(self.dump.get().strip()) if self.dump.get().strip() else None
+
+    def open_out(self):
+        d = self.build_dir()
+        if not d or not d.exists(): return messagebox.showinfo('Build folder', 'No build folder yet: choose your dump and press Build.')
+        if MAC: subprocess.Popen(['open', str(d)])
+        elif WIN: os.startfile(str(d))
+        else: subprocess.Popen(['xdg-open', str(d)])
+
+    def write(self, line):
+        self.log['state'] = 'normal'; self.log.insert('end', line + '\n'); self.log.see('end'); self.log['state'] = 'disabled'
+
+    def check_setup(self):
+        nx = pathlib.Path(os.environ.get('NXNATIVE') or HERE / 'nxnative')
+        if not (nx / 'dm' / 'host' / 'Makefile').is_file():
+            self.status.set('First time here: press Setup (fetches nxnative and builds the shader tool, about a minute).')
+        else:
+            self.status.set('Ready. Choose your dump folder and press Build.')
+
+    # ---------------------------------------------------------------- running nxs2.py
+    def start(self, what, args):
+        if self.proc: return
+        cmd = [sys.executable, '-u', str(NXS2)] + [str(a) for a in args]
+        self.write('$ ' + ' '.join(cmd[2:]))
+        try:
+            kw = {}
+            if WIN: kw['creationflags'] = subprocess.CREATE_NEW_PROCESS_GROUP
+            else: kw['start_new_session'] = True
+            self.proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, errors='replace', cwd=str(HERE), **kw)
+        except OSError as e:
+            return messagebox.showerror('Cannot start', f'{e}')
+        self.running = what; self.t0 = time.time(); self.result = {}
+        for k in self.buttons.values(): k['state'] = 'disabled'
+        self.stop_btn['state'] = 'normal'
+        threading.Thread(target=self.pump, daemon=True).start()
+
+    def pump(self):
+        for line in self.proc.stdout: self.q.put(line.rstrip('\n'))
+        self.q.put(('exit', self.proc.wait()))
+
+    def poll(self):
+        try:
+            while True:
+                item = self.q.get_nowait()
+                if isinstance(item, tuple): self.finished(item[1])
+                else: self.on_line(item)
+        except queue.Empty: pass
+        if self.proc and self.t0: self.status.set(self.status_text())
+        self.after(150, self.poll)
+
+    def status_text(self):
+        el = int(time.time() - self.t0); el = f'{el // 60}:{el % 60:02d}'
+        return f'{self.running}… {el}   {self.last_stage}'
+
+    def on_line(self, line):
+        self.write(line)
+        m = re.match(r'^\[\d+:\d\d(?::\d\d)?\] (.*)', line)
+        if m: self.last_stage = m.group(1)[:90]
+        for key, pat in (('app', r'Mac app: (.*)'), ('ipa', r'IPA: (.*?) \('), ('xcode', r'Xcode project: (.*)'), ('signed', r'signed IPA: (.*?)  ')):
+            m = re.search(pat, line)
+            if m: self.result[key] = m.group(1)
+        if line.startswith('[FAIL]'): self.result['fail'] = line[7:]
+
+    def finished(self, rc):
+        self.proc = None
+        for k in self.buttons.values(): k['state'] = 'normal'
+        self.stop_btn['state'] = 'disabled'
+        el = int(time.time() - self.t0); el = f'{el // 60}:{el % 60:02d}'
+        if rc == 0:
+            made = ', '.join(v for k, v in self.result.items() if k != 'fail')
+            self.status.set(f'{self.running} done in {el}.' + (f'  {made}' if made else ''))
+            if self.running == 'Build' and made: messagebox.showinfo('Done', f'Build finished in {el}.\n\n{chr(10).join(self.result.values())}\n\nOpen the build folder for the outputs; the README says how to get the IPA onto the phone.')
+        elif rc in (130, -15, -2, 143, 1) and self.result.get('stopped'):
+            self.status.set(f'{self.running} stopped after {el}. Press the button again to continue where it left off.')
+        else:
+            self.status.set(f'{self.running} failed after {el}: {self.result.get("fail", f"exit {rc}")}')
+            messagebox.showerror(f'{self.running} failed', self.result.get('fail', f'exit code {rc}') + '\n\nThe full output of every stage is in <build folder>/logs/.')
+        self.t0 = None
+
+    def do_stop(self):
+        if not self.proc: return
+        self.result['stopped'] = True
+        try:
+            if WIN: subprocess.run(['taskkill', '/T', '/F', '/PID', str(self.proc.pid)], capture_output=True)
+            else: os.killpg(os.getpgid(self.proc.pid), 15)
+        except Exception: pass
+
+    def on_close(self):
+        if self.proc and not messagebox.askyesno('A build is running', 'Stop the build and close? (It can be continued later.)'): return
+        self.do_stop(); self.save_settings(); self.destroy()
+
+    # ---------------------------------------------------------------- the buttons
+    def need_dump(self):
+        d = self.dump.get().strip()
+        if not d or not pathlib.Path(d).expanduser().is_dir():
+            messagebox.showwarning('Dump folder', 'Choose your dump folder first.'); return None
+        return d
+
+    def common(self):
+        return ['--out', self.out.get().strip()] if self.out.get().strip() else []
+
+    def do_doctor(self):
+        self.last_stage = ''; self.start('Check tools', ['doctor'] + (['--no-ios'] if self.no_ios.get() else []))
+
+    def do_setup(self):
+        self.last_stage = ''; self.start('Setup', ['setup'] + (['--no-ios'] if self.no_ios.get() else []))
+
+    def do_build(self):
+        d = self.need_dump()
+        if not d: return
+        self.save_settings()
+        args = ['build', d] + self.common()
+        if MAC and self.mac_app.get(): args.append('--mac-app')
+        if self.ipa.get(): args.append('--ipa')
+        if MAC and self.xcode.get():
+            if not re.fullmatch(r'[A-Z0-9]{10}', self.team.get().strip()): return messagebox.showwarning('Team ID', 'The Xcode project needs your Apple developer team ID (10 characters).')
+            args += ['--xcode', '--team-id', self.team.get().strip()]
+        if MAC and self.no_ios.get(): args.append('--no-ios')
+        if self.full_speed.get(): args.append('--full-speed')
+        if not any(a in args for a in ('--mac-app', '--ipa', '--xcode')): return messagebox.showwarning('Outputs', 'Tick at least one output.')
+        self.last_stage = 'starting'; self.start('Build', args)
+
+    def do_refresh(self):
+        b = self.build_dir()
+        if not b or not b.is_dir(): return messagebox.showwarning('Refresh', 'No build folder yet: build first. Refresh adds the shaders recorded while playing.')
+        args = ['refresh', str(b)]
+        if MAC and self.xcode.get() and self.team.get().strip(): args += ['--team-id', self.team.get().strip()]
+        if self.full_speed.get(): args.append('--full-speed')
+        self.last_stage = 'starting'; self.start('Refresh', args)
+
+    def do_sign(self):
+        b = self.build_dir()
+        if not b or not (b / 'xcode' / 'DmIOS.xcodeproj').is_dir(): return messagebox.showwarning('Sign', 'No Xcode project yet: tick "Xcode project" with your team ID and build first.')
+        if not re.fullmatch(r'[A-Z0-9]{10}', self.team.get().strip()): return messagebox.showwarning('Team ID', 'Enter your Apple developer team ID (10 characters).')
+        self.last_stage = 'starting'; self.start('Sign', ['sign', str(b), '--team-id', self.team.get().strip()])
+
+
+def _self_shot(app, path):   # NXS2_GUI_SHOT=<png>: save a picture of the window and quit (the project's own layout check; needs Pillow)
+    from PIL import ImageGrab
+    app.update_idletasks(); app.update()
+    x, y = app.winfo_rootx(), app.winfo_rooty(); w, h = app.winfo_width(), app.winfo_height()
+    ImageGrab.grab(bbox=(x, y, x + w, y + h)).save(path); app.destroy()
+
+
+if __name__ == '__main__':
+    if not NXS2.is_file(): sys.exit(f'nxs2.py not found beside {__file__}')
+    app = App()
+    if os.environ.get('NXS2_GUI_SHOT'):
+        app.attributes('-topmost', True); app.lift(); app.focus_force()
+        app.after(2500, lambda: _self_shot(app, os.environ['NXS2_GUI_SHOT']))
+    app.mainloop()

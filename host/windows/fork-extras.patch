@@ -1,0 +1,79 @@
+diff --git a/dm/gfx/tools/shader_split.py b/dm/gfx/tools/shader_split.py
+index dd9ac57..8f01cc3 100644
+--- a/dm/gfx/tools/shader_split.py
++++ b/dm/gfx/tools/shader_split.py
+@@ -2267,7 +2267,7 @@ def main():
+     files, results, common = [], [], None
+     for i, (romfs, mainnso) in enumerate(zip(romfs_v, main_v)):
+         tag = os.path.basename(os.path.dirname(os.path.abspath(romfs))) if i else ''
+-        files += sorted((os.path.join(dp, f), (tag + '/' if tag else '') + os.path.relpath(os.path.join(dp, f), romfs)) for dp, _, fs in os.walk(romfs) for f in fs)
++        files += sorted((os.path.join(dp, f).replace(os.sep, '/'), (tag + '/' if tag else '') + os.path.relpath(os.path.join(dp, f), romfs).replace(os.sep, '/')) for dp, _, fs in os.walk(romfs) for f in fs)   # '/' on every host: the paths sort and name packages as on a Mac
+         img = nso_image(mainnso)
+         if not i:
+             import unityfs
+diff --git a/dm/ios/tools/pack_ipa.py b/dm/ios/tools/pack_ipa.py
+index e46b7e3..daf3717 100644
+--- a/dm/ios/tools/pack_ipa.py
++++ b/dm/ios/tools/pack_ipa.py
+@@ -21,6 +21,7 @@ BIG = 256 << 20      # files above this are streamed by the writer; smaller ones
+ WINDOW = 2 << 30     # input bytes in the pool at once
+ QUEUE = 4096         # entries in the pool at once (folders of tiny files)
+ CHUNK = 16 << 20
++EXEC = set()   # --exec: archive paths that get mode 755 when packing on Windows (the app's executable)
+ L32, L16 = 0xFFFFFFFF, 0xFFFF
+ DIR_MODE = stat.S_IFDIR | 0o755   # a parent folder no source folder stands for (Payload/, msl/); its time is 1980-01-01, so it is the same in every pack
+ Entry = collections.namedtuple('Entry', 'name path st root')   # st None: a synthetic parent; root: the mapping's source folder
+@@ -117,6 +118,8 @@ class Zip:
+         z = [v for v in (usize, csize, off) if v >= L32]   # zip64 extra: the fields that do not fit, in this order
+         ext = struct.pack(f'<HH{len(z)}Q', 1, 8 * len(z), *z) if z else b''
+         mode = e.st.st_mode if e.st else DIR_MODE
++        if os.name == 'nt' and e.st:   # Windows has no Unix modes (files read as 0o666 without x): folders 755, the --exec files 755, everything else 644, as Info-ZIP on a Mac writes them
++            mode = DIR_MODE if stat.S_ISDIR(mode) else stat.S_IFREG | (0o755 if e.name in EXEC else 0o644)
+         self.cd.append(struct.pack('<IHHHHHHIIIHHHHHII', 0x02014B50, 0x031E, 45 if z else 20 if method == 8 else 10, fl, method, t, d, crc, min(csize, L32), min(usize, L32),
+                                    len(nb), len(ext), 0, 0, 0, (mode << 16) | (0x10 if stat.S_ISDIR(mode) else 0), min(off, L32)) + nb + ext)
+         self.stats['deflated' if method == 8 else 'stored'] += usize
+@@ -232,7 +235,9 @@ def main():
+     ap.add_argument('--skip', action='append', default=[], help='an archive path left out of the folder walk that would add it')
+     ap.add_argument('--skip-suffix', action='append', default=[], help='files whose names end so are left out of every folder walk')
+     ap.add_argument('--no-reuse', action='store_true', help='pack every file again, without copying from the old IPA')
++    ap.add_argument('--exec', action='append', default=[], help='an archive path packed with mode 755 on Windows, which has no x bit (the app executable)')
+     a = ap.parse_args()
++    EXEC.update(p.strip('/') for p in a.exec)
+     maps = []
+     for m in a.maps:
+         arc, sep, src = m.partition('=')
+diff --git a/dm/tools/romfs.py b/dm/tools/romfs.py
+index 7736ad2..8db3a02 100644
+--- a/dm/tools/romfs.py
++++ b/dm/tools/romfs.py
+@@ -91,6 +91,7 @@ def is_image(path):
+ 
+ def _resolve(path):
+     p = _os.path.abspath(_os.fsdecode(path))
++    if _os.sep != '/': p = p.replace(_os.sep, '/')
+     parts = p.split('/')
+     for i, part in enumerate(parts):
+         if not part.endswith('.img'): continue
+@@ -113,7 +114,7 @@ _fd_ranges = {}
+ 
+ class _File(io.RawIOBase):
+     def __init__(self, image, k):
+-        self.fd = _os.open(image.path, _os.O_RDONLY)
++        self.fd = _os.open(image.path, _os.O_RDONLY | getattr(_os, 'O_BINARY', 0))
+         self.start, self.length = image.entry(k)[:2]
+         self.pos = 0
+         _fd_ranges[self.fd] = (self.start, self.length)
+@@ -127,7 +128,12 @@ class _File(io.RawIOBase):
+         self.pos = pos; return pos
+     def readinto(self, buffer):
+         size = min(len(buffer), max(0, self.length - self.pos))
+-        data = _os.pread(self.fd, size, self.start + self.pos)
++        if hasattr(_os, 'pread'):
++            data = _os.pread(self.fd, size, self.start + self.pos)
++        else:
++            # Windows has no pread; each view owns its descriptor and file offset.
++            _os.lseek(self.fd, self.start + self.pos, _os.SEEK_SET)
++            data = _os.read(self.fd, size)
+         buffer[:len(data)] = data; self.pos += len(data)
+         return len(data)
+     def close(self):

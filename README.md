@@ -68,8 +68,10 @@ Mac compiling 3,800 shaders. After that, rebuilds take a couple of minutes.
   update **v327680** of Pokémon Pokopia (title `0400A3A01EE4C000`) and checks the build IDs. Another version will not
   build, because the patch recipe and the shader tables are for this one.
 - For the **iPhone**: see the next section.
+- **No Mac?** A Windows PC builds the iPhone app alone: [docs/WINDOWS.md](docs/WINDOWS.md).
 
-`python3.12 nxs2.py doctor` checks all of this and tells you how to get whatever is missing.
+`python3.12 nxs2.py doctor` (or the window's **Check tools** button) checks all of this and tells you how to get whatever
+is missing.
 
 ## The Apple developer thing (iPhone only, read this)
 
@@ -92,6 +94,16 @@ Memory on the phone itself matters too. The game uses a lot of it. I run it on a
 phone has less memory than the recent Pro models, expect trouble.
 
 ## How to build
+
+There is a window and there is a command line; they do the same thing.
+
+**The window.** Clone or download the repository, then double-click **Pokopia Native Builder.app** on the Mac
+(**Pokopia Native Builder.cmd** on Windows). Press **Setup** once, choose your dump folder, tick what you want, press
+**Build**. The stages scroll by in the window with the elapsed time; **Refresh shaders** is the refresh step explained
+further down, **Open build folder** shows the outputs. If the app will not open, it tells you what to install (Python
+3.12 with Tk: `brew install python@3.12 python-tk@3.12`).
+
+**The command line.**
 
 ```bash
 git clone https://github.com/xFractals/pokopia-native.git
@@ -129,6 +141,14 @@ Outputs land in `<build folder>/out/`:
 Use `--no-ios` if you only want the Mac: it halves the compile. `python3.12 nxs2.py run "<build folder>"` plays straight
 from the build folder in a window, which is handy while you are fiddling with things.
 
+## No Mac? Windows builds the iPhone app
+
+A Windows PC can build the iPhone IPA (not the Mac app, and it cannot run the game: the game's code needs an Apple chip).
+It uses the tools nxnative's Windows port put together: Apple's own Metal compiler for Windows for the shaders, LLVM with
+the iPhone SDK for the app. The same window and the same commands, `--ipa` only. What to install and how to get the SDK
+is in [docs/WINDOWS.md](docs/WINDOWS.md). Signing still needs a paid team, and on Windows a signing tool that keeps the
+entitlements; I sign on a Mac and have not tested one, so that part is yours to report.
+
 ## The shaders, and what "refresh" is for (read this too)
 
 Here is the one thing about this port that is not just "build and play", and I want to explain it properly so nobody
@@ -165,6 +185,26 @@ after the first build, and after a refresh with a full set of recordings `140 of
 If you find run-time shaders beyond the 140, your refresh handles them exactly the same way. Tell me about them in the
 issues, with the count the build prints, so the list can grow. Do not attach the recordings; they are game code.
 
+## Controls: mouse look on the Mac, drag to look on the iPhone
+
+The game only turns its camera with the right stick, so out of the box a mouse or a finger can only fake holding a stick,
+and that feels like a console. I wanted it to feel like a PC or a phone game, so the build now has real look controls:
+
+- **Mac:** click the game picture and the mouse is captured. Move it to look around; left click is A, right click is
+  B, the middle button resets the camera. **Esc** gives the mouse back. Keyboard: WASD moves, J K U I are A B X Y, Q E
+  are L R, Z C are ZL ZR, Return is + and Tab is −.
+- **iPhone:** drag anywhere on the right half of the screen that isn't a button, and the camera follows your finger.
+
+**Sensitivity and invert** are in the app's launcher under Controls ("Look sensitivity", "Invert look up and down"),
+or in `env.txt` as `DM_LOOK_SCALE` (1.0 = default) and `DM_LOOK_INVERT_Y=1`.
+
+How it works, because it's not just "mouse = stick": I measured exactly how Pokopia's camera answers the stick by
+reading its camera angle every frame. It turns at 110° per second at full tilt, ignores the stick below about half
+tilt, and has no acceleration or smoothing. Every frame, the app works out the exact stick tilt that turns the camera by
+however far you moved since the last frame. Moving the mouse a given amount turns the camera by that amount, within
+about a degree. The one limit is the game's own top speed: a flick faster than 110° per second still lands where you
+aimed, a moment later. Keep the game's own camera speed setting at its default; the conversion is tuned to it.
+
 ## Phone settings and heat
 
 The app reads `Documents/env.txt` on the phone at start, one `KEY=VALUE` per line, and the build writes sensible defaults.
@@ -176,6 +216,8 @@ The ones worth knowing:
 | `DM_OPMODE=0` | handheld mode (default). `1` is docked: the game picks its higher resolution. |
 | `DM_RENDER_SCALE=0.8` | render at a fraction of the game's resolution, 0.5 to 1.0. Cooler phone, softer picture. |
 | `DM_TOUCH_AUTORUN=1` | the touch stick makes you run when pushed to its edge. My addition; I like it. |
+| `DM_LOOK_SCALE=1.5` | look sensitivity for drags (and the Mac's mouse), as a multiple of the default. Same as the launcher's slider. |
+| `DM_LOOK_INVERT_Y=1` | drag up to look down. |
 | `DM_SHOW_FPS=1` | frame counter on screen. |
 
 The phone gets hot. At 30 fps mine reaches iOS's "serious" thermal state after about six minutes of play and stays

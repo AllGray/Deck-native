@@ -55,6 +55,14 @@ COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER I
 OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 ```
 
+## nxnative's Windows port (`windows/`)
+
+On Windows, `nxs2.py setup` also fetches the `win/` folder of [NXNativeWindows](https://github.com/zenvyzenshiro/NXNativeWindows)
+(MIT, the same licence text as nxnative's, whose fork it is) at a pinned commit: the tool shim, the LLVM build of the iPhone
+app, the SDK extractor. `windows/fork-extras.patch` carries three of that port's fixes to nxnative files (RomFS image reads,
+the process-pool size, IPA packing on Windows), `windows/build_app.patch` this project's changes to its app builder, and
+`windows/dmsh_xlate_bin/` the translator above built for Windows (AnyCPU) from the same patched sources.
+
 ## The changes themselves
 
 The Switch 2 changes in the patch and the `dmsh_xlate` wrapper build are released under this repository's MIT licence

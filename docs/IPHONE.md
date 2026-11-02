@@ -61,6 +61,8 @@ One `KEY=VALUE` per line; the app reads it at start and it overrides the build's
 | `DM_OPMODE=0` | handheld mode (0, default in the build) or docked (1): the game's own resolution choice |
 | `DM_RENDER_SCALE=0.8` | render at a fraction of the game's resolution (0.5 to 1.0); cooler phone, softer picture |
 | `DM_TOUCH_AUTORUN=1` | the touch stick runs when pushed to its edge (the port's own option) |
+| `DM_LOOK_SCALE=1.0` | look sensitivity of drags on the right half of the screen, a multiple of the default (the launcher's "Look sensitivity") |
+| `DM_LOOK_INVERT_Y=1` | drag up to look down (the launcher's "Invert look up and down") |
 | `DM_NVN_SHDUMP=shdump` | record shaders the game builds while running (on by default; see below) |
 | `DM_SHOW_FPS=1` | frame counter on screen |
 

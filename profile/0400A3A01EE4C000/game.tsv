@@ -43,3 +43,8 @@ mem_used	0x5600000
 # ---- Pipelines ----
 # SWITCH2: the Mac bring-up ran the Metal 4 path (bases, pipeline archive), the Mac default; iOS turns it on only with this key
 pso_mtl4	on
+
+# ---- Input ----
+# pointer look (hle_hid.c): the camera turns at 110 deg/s times the right stick's tilt above a round deadzone of 0.51, frame-time based (measured from the view matrix)
+look_rate	110
+look_dead	0.52

@@ -30,10 +30,13 @@ VERSION = 327680
 NAME = 'Pokemon Pokopia'
 UPSTREAM = 'https://github.com/seedds/nxnative'
 UPSTREAM_COMMIT = 'c1df4dd'   # the nxnative commit host/nxnative-switch2.patch is made against
+FORK = 'https://github.com/zenvyzenshiro/NXNativeWindows'   # nxnative's Windows port: its win/ folder builds the iPhone app with LLVM, Metal Developer Tools for Windows and .NET
+FORK_COMMIT = '269d61ff974b2e8e073d7357466ae130c3f6812f'   # fetched by its full id (a sparse checkout of its win/ folder only)
+WIN = sys.platform == 'win32'
 HERE = pathlib.Path(__file__).resolve().parent
 PROFILE_SRC = HERE / 'profile' / TITLE
 TOOLS = HERE / 'tools'
-AMPERE = HERE / 'ampere-lower' / 'ampere-lower'
+AMPERE = HERE / 'ampere-lower' / ('windows/ampere-lower.exe' if WIN else 'ampere-lower')
 NX = pathlib.Path(os.environ.get('NXNATIVE') or HERE / 'nxnative')
 PY = sys.executable
 T0 = time.time()
@@ -98,6 +101,42 @@ def dotnet_root():   # the .NET install that holds the runtime: on PATH, in ~/.d
     return pathlib.Path(d).resolve().parent if d else None
 
 
+# ---- Windows: where the fork's toolchain lives (win/toolchain.py reads the same names: NXW_IOS_SDK, SPIRV_CROSS, win/toolchain.json)
+def program_files(): return [pathlib.Path(os.environ.get(k, d)) for k, d in (('ProgramFiles', r'C:\Program Files'), ('ProgramFiles(x86)', r'C:\Program Files (x86)'))]
+
+
+def spirv_cross():
+    p = os.environ.get('SPIRV_CROSS') or shutil.which('spirv-cross')
+    if p and pathlib.Path(p).is_file(): return pathlib.Path(p)
+    for root in (pathlib.Path('C:/VulkanSDK'),) + tuple(pathlib.Path(v) for v in (os.environ.get('VULKAN_SDK'),) if v):
+        hits = sorted(root.glob('*/Bin/spirv-cross.exe')) + sorted(root.glob('Bin/spirv-cross.exe'))
+        if hits: return hits[-1]
+    return None
+
+
+def ios_sdk():
+    p = os.environ.get('NXW_IOS_SDK')
+    if p and pathlib.Path(p).is_dir(): return pathlib.Path(p)
+    hits = sorted((NX / 'win/sdk/out').glob('**/iPhoneOS*.sdk')) if (NX / 'win/sdk/out').is_dir() else []
+    return hits[-1] if hits else None
+
+
+def metal_tools():
+    for pf in program_files():
+        hits = sorted(pf.glob('Metal Developer Tools*'))
+        if hits: return hits[-1]
+    return None
+
+
+def llvm_tool(name):
+    p = shutil.which(name)
+    if p: return pathlib.Path(p)
+    for pf in program_files():
+        q = pf / 'LLVM/bin' / f'{name}.exe'
+        if q.is_file(): return q
+    return None
+
+
 def fingerprint(*parts):
     h = hashlib.sha256()
     for p in parts:
@@ -133,9 +172,12 @@ class Build:
 
     def env(self, **more):
         e = {'DM_GAMES_DIR': str(self.profile_root), 'DM_GAMES_FIRST': '1', 'DM_GAME': TITLE, 'GAME': TITLE, 'DM_ALLOW_OTHER_METAL': '1', 'NXNATIVE': str(NX),
-             'AMPERE_LOWER': str(AMPERE), 'PYTHONDONTWRITEBYTECODE': '1'}
-        d = dotnet_root()
-        if d: e['DOTNET_ROOT'] = str(d); e['PATH'] = f'{d}:{os.environ.get("PATH", "")}'
+             'AMPERE_LOWER': str(AMPERE), 'PYTHONDONTWRITEBYTECODE': '1', 'PYTHONUTF8': '1',
+             'J': str(JOBS)}   # every worker pool of the build: the shader chain (dmsh_build.py), the lowering, the iPhone app compile on Windows
+        if WIN: e.update(windows_env())
+        else:
+            d = dotnet_root()
+            if d: e['DOTNET_ROOT'] = str(d); e['PATH'] = f'{d}:{os.environ.get("PATH", "")}'
         e.update(more); return e
 
     def corpus_dirs(self): return [d for d in (self.corpus / n for n in ('rdb', 'main-embedded', 'linkdata', 'dumps')) if d.is_dir()]
@@ -161,13 +203,49 @@ def build_id(nso):
         f.seek(0x40); return f.read(16).hex()
 
 
+def gentle_jobs():
+    """How many worker processes the build runs at once by default. Shader compiles keep every worker at 100 %, for half an hour or more. On a Mac with Apple
+    silicon that is fine at all cores. On a PC it is a long all-core load that some machines do not take: 13th and 14th generation Intel Core CPUs without
+    Intel's 2024 microcode fix (BIOS update) crash under it. The default leaves most of a PC's cores alone; --full-speed or -j N uses more."""
+    n = os.cpu_count() or 4
+    return n if sys.platform == 'darwin' else max(2, min(8, n // 4))
+
+
+def lower_priority():
+    """The whole build at low priority (its child processes inherit it), so the machine stays responsive and the build takes only the time other work leaves."""
+    try:
+        if WIN:
+            import ctypes
+            k = ctypes.windll.kernel32
+            k.GetCurrentProcess.restype = ctypes.c_void_p   # a pseudo-handle (-1): as a 32-bit int it would be truncated and the call would fail
+            k.SetPriorityClass.argtypes = (ctypes.c_void_p, ctypes.c_uint32)
+            k.SetPriorityClass(k.GetCurrentProcess(), 0x00004000)   # BELOW_NORMAL_PRIORITY_CLASS: the children inherit it
+        else:
+            os.nice(10)
+    except Exception: pass
+
+
+def windows_env():
+    """What every tool started on Windows needs: the fork's shim on PYTHONPATH (it maps xcrun to Metal Developer Tools for Windows, the translator to
+    `dotnet`, build_ipa.sh to win/build_app.py), the native SPIRV-Cross, the iPhoneOS SDK, and the shader workers the fork recommends."""
+    e = {'PYTHONPATH': os.pathsep.join([str(NX / 'win/pyshim')] + [p for p in os.environ.get('PYTHONPATH', '').split(os.pathsep) if p])}
+    sc = spirv_cross()
+    if sc: e['SPIRV_CROSS'] = str(sc)
+    sdk = ios_sdk()
+    if sdk: e['NXW_IOS_SDK'] = str(sdk)
+    llvm = llvm_tool('clang')
+    if llvm: e['PATH'] = f'{llvm.parent}{os.pathsep}{os.environ.get("PATH", "")}'
+    return e
+
+
 # ---------------------------------------------------------------- environment
 def doctor(need_ios=True, quiet=False):
-    """What this Mac has of what the build needs. Returns the list of problems (empty = ready)."""
+    """What this machine has of what the build needs. Returns the list of problems (empty = ready)."""
     bad = []
     def ok(name, cond, hint):
         if not quiet: print(f'  {"ok     " if cond else "MISSING"}  {name}' + ('' if cond else f'   -> {hint}'))
         if not cond: bad.append(name)
+    if WIN: return doctor_windows(ok, bad)
     ok('macOS on Apple silicon', sys.platform == 'darwin' and platform.machine() == 'arm64', 'the host runs the game\'s arm64 code natively: an Apple silicon Mac is required')
     ok(f'Python 3.12+ (running {platform.python_version()})', sys.version_info >= (3, 12), 'brew install python@3.12, then run nxs2.py with python3.12')
     for mod, pip in (('capstone', 'capstone>=5,<6'), ('lz4', 'lz4'), ('fontTools', 'fonttools')):
@@ -197,6 +275,57 @@ def doctor(need_ios=True, quiet=False):
     return bad
 
 
+def intel_microcode_warning():
+    """13th and 14th generation Intel Core CPUs crash under long heavy loads until the BIOS carries Intel's 2024 microcode fix (0x12B or newer); the shader
+    compile is such a load. A warning, not a requirement: the gentle default load keeps the risk low, a BIOS update removes it."""
+    try:
+        import winreg
+        k = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r'HARDWARE\DESCRIPTION\System\CentralProcessor\0')
+        name = winreg.QueryValueEx(k, 'ProcessorNameString')[0].strip()
+        raw = winreg.QueryValueEx(k, 'Update Revision')[0]
+    except Exception: return None
+    if not re.search(r'\b1[34]th Gen Intel', name): return None
+    rev = int.from_bytes(raw[4:8] if len(raw) >= 8 else raw[:4], 'little')
+    if rev >= 0x12B: return None
+    return (f'{name} runs microcode {rev:#x}: these CPUs need Intel\'s 0x12B fix or newer (a BIOS update from your motherboard maker), '
+            'or long full loads can crash Windows. The build\'s default load is gentle; avoid --full-speed until the BIOS is updated')
+
+
+def doctor_windows(ok, bad):
+    """The Windows build (the iPhone IPA only; a Mac app needs a Mac): the toolchain nxnative's Windows port documents."""
+    w = intel_microcode_warning()
+    if w: print(f'  WARNING  {w}')
+    ok('Windows on x64', platform.machine().lower() in ('amd64', 'x86_64'), 'the Windows tools are x64 builds')
+    ok(f'Python 3.12+ (running {platform.python_version()})', sys.version_info >= (3, 12), 'https://www.python.org/downloads/ (tick "Add python.exe to PATH")')
+    for mod, pip in (('capstone', 'capstone>=5,<6'), ('lz4', 'lz4'), ('fontTools', 'fonttools'), ('PIL', 'pillow')):
+        try: __import__(mod); have = True
+        except ImportError: have = False
+        ok(f'python module {mod}', have, f'{PY} -m pip install "{pip}"')
+    try:
+        import capstone; ok('capstone 5.x', capstone.__version__.startswith('5.'), f'{PY} -m pip install "capstone>=5,<6"')
+    except ImportError: pass
+    try: import tkinter; ok('Tk (the window)', True, '')
+    except ImportError: ok('Tk (the window)', False, 'reinstall Python from python.org with "tcl/tk and IDLE" ticked (the command line works without it)')
+    dn = shutil.which('dotnet'); have_rt = False
+    if dn:
+        r = subprocess.run([dn, '--list-runtimes'], capture_output=True, text=True)
+        have_rt = any(l.startswith('Microsoft.NETCore.App 10.') for l in r.stdout.splitlines())
+    ok('.NET 10 runtime (the shader translator)', have_rt, 'https://dotnet.microsoft.com/download/dotnet/10.0 (the .NET Runtime is enough)')
+    ok('LLVM for Windows: clang', llvm_tool('clang') is not None, 'https://github.com/llvm/llvm-project/releases (LLVM-<version>-win64.exe)')
+    ok('LLVM for Windows: ld64.lld', llvm_tool('ld64.lld') is not None, 'comes with LLVM for Windows')
+    mt = metal_tools()   # 4.x: ios/bin and macos/bin toolchains; 5.x and 6.x: one bin/ for every target
+    ok('Metal Developer Tools for Windows (metal.exe)', mt is not None and any(mt.glob(p) for p in ('bin/metal.exe', 'ios/bin/metal.exe', 'ios/*/bin/metal.exe')),
+       'https://developer.apple.com/download/all/?q=Metal%20Developer%20Tools (sign in with an Apple ID)')
+    sdk = ios_sdk()
+    ok(f'iPhoneOS SDK{f" ({sdk.name})" if sdk else ""}', sdk is not None, 'after setup: python nxnative\\win\\sdk\\extract_xip.py <Xcode.xip> (the SDK is taken from Xcode, downloaded from developer.apple.com), or NXW_IOS_SDK=<path>')
+    ok('SPIRV-Cross (spirv-cross.exe)', spirv_cross() is not None, 'the Vulkan SDK from https://vulkan.lunarg.com (its Bin folder has it), or SPIRV_CROSS=<path>')
+    ok('git', shutil.which('git') is not None, 'https://git-scm.com/download/win')
+    fonts = pathlib.Path(os.environ.get('WINDIR', r'C:\Windows')) / 'Fonts'
+    ok('a standard font (Arial Unicode or Arial)', any((fonts / n).is_file() for n in ('ARIALUNI.TTF', 'arial.ttf')) or bool(os.environ.get('STD_FONT')), 'STD_FONT=<a Unicode TTF>')
+    ok('a bold font for the button icons (Arial Bold)', any((fonts / n).is_file() for n in ('ARLRDBD.TTF', 'arialbd.ttf')) or bool(os.environ.get('LETTER_FONT')), 'LETTER_FONT=<a bold TTF>')
+    return bad
+
+
 def setup(args):
     """nxnative at the pinned commit with the Switch 2 patch and the rebuilt translator, and ampere-lower built."""
     bad = doctor(need_ios=not args.no_ios)
@@ -204,6 +333,7 @@ def setup(args):
     if not (NX / '.git').is_dir():
         say(f'fetching nxnative ({UPSTREAM} at {UPSTREAM_COMMIT}) into {NX}')
         run(['git', 'clone', '--filter=blob:none', '--no-checkout', UPSTREAM, NX], HERE / 'setup-clone.log')
+    run(['git', 'config', 'core.autocrlf', 'false'], HERE / 'setup-config.log', cwd=NX)   # the sources as on a Mac: the chain version hashes them, and the patches expect LF
     def head(): return subprocess.run(['git', 'rev-parse', '--short', 'HEAD'], capture_output=True, text=True, cwd=NX).stdout.strip()
     marker = NX / 'dm/gfx/nvn/.switch2-patch'
     patch = HERE / 'host/nxnative-switch2.patch'
@@ -211,7 +341,8 @@ def setup(args):
     if not head().startswith(UPSTREAM_COMMIT[:7]):
         say(f'checking out nxnative {UPSTREAM_COMMIT} (was {head() or "nothing"})')
         run(['git', 'checkout', '-q', '--', '.'], HERE / 'setup-reset.log', cwd=NX, ok=(0, 1))   # drop a patch applied to another commit
-        if marker.exists(): marker.unlink()
+        for m in (marker, NX / 'dm/gfx/nvn/.windows-extras'):
+            if m.exists(): m.unlink()
         run(['git', 'fetch', 'origin', UPSTREAM_COMMIT], HERE / 'setup-fetch.log', cwd=NX, ok=(0, 128))
         run(['git', 'checkout', '-q', UPSTREAM_COMMIT], HERE / 'setup-checkout.log', cwd=NX)
     if not (marker.is_file() and marker.read_text().strip() == want):
@@ -219,19 +350,54 @@ def setup(args):
         if dirty:
             say('resetting nxnative to the pinned commit before applying the patch')
             run(['git', 'checkout', '-q', '--', '.'], HERE / 'setup-reset.log', cwd=NX)
+            if (NX / 'dm/gfx/nvn/.windows-extras').exists(): (NX / 'dm/gfx/nvn/.windows-extras').unlink()
         say('applying the Switch 2 host patch')
         run(['git', 'apply', '--whitespace=nowarn', patch], HERE / 'setup-patch.log', cwd=NX)
         marker.write_text(want + '\n')
     bin_dst = NX / 'dm/gfx/tools/dmsh_xlate_bin'
-    for f in sorted((HERE / 'host/dmsh_xlate_bin').iterdir()):
+    for f in sorted((HERE / ('host/windows/dmsh_xlate_bin' if WIN else 'host/dmsh_xlate_bin')).iterdir()):
         dst = bin_dst / f.name
         if not dst.is_file() or dst.read_bytes() != f.read_bytes():
             shutil.copy2(f, dst); say(f'translator: {f.name} installed')
-    (bin_dst / 'dmsh_xlate').chmod(0o755)
-    if not AMPERE.is_file() or AMPERE.stat().st_mtime < (HERE / 'ampere-lower/main.cpp').stat().st_mtime:
+    if not WIN: (bin_dst / 'dmsh_xlate').chmod(0o755)
+    if WIN: setup_windows(want)
+    elif not AMPERE.is_file() or AMPERE.stat().st_mtime < (HERE / 'ampere-lower/main.cpp').stat().st_mtime:
         say('building ampere-lower (the Switch 2 shader lowering)')
         run(['sh', HERE / 'ampere-lower/build.sh'], HERE / 'setup-ampere.log')
     say(f'setup done: nxnative {head()} + Switch 2 patch at {NX}, ampere-lower at {AMPERE}')
+
+
+def setup_windows(patch_key):
+    """The Windows side on top of the patched nxnative: the fork's win/ folder (LLVM + Metal Developer Tools build of the iPhone app, the tool shim), its three
+    Windows fixes to nxnative, this project's changes to its app builder, and the tool lock rewritten for the tools on this PC (the native SPIRV-Cross and the
+    Windows Metal compiler), followed by the chain header that carries the lock."""
+    src = HERE / 'nxnativewindows-src'
+    if not (src / '.git').is_dir():
+        say(f'fetching nxnative\'s Windows port ({FORK} at {FORK_COMMIT[:7]}, its win/ folder)')
+        if src.exists(): shutil.rmtree(src)
+        run(['git', 'clone', '--filter=blob:none', '--no-checkout', '--sparse', FORK, src], HERE / 'setup-fork-clone.log')
+        run(['git', 'config', 'core.autocrlf', 'false'], HERE / 'setup-fork-config.log', cwd=src)
+        run(['git', 'sparse-checkout', 'set', 'win'], HERE / 'setup-fork-sparse.log', cwd=src)
+    cur = subprocess.run(['git', 'rev-parse', 'HEAD'], capture_output=True, text=True, cwd=src).stdout.strip()
+    if cur != FORK_COMMIT: run(['git', 'fetch', 'origin', FORK_COMMIT], HERE / 'setup-fork-fetch.log', cwd=src, ok=(0, 128))
+    if cur != FORK_COMMIT or not (src / 'win/build_app.py').is_file():   # a --no-checkout clone has HEAD but no files yet
+        run(['git', 'checkout', '-q', FORK_COMMIT], HERE / 'setup-fork-checkout.log', cwd=src)
+    if not (src / 'win/build_app.py').is_file(): raise Fail(f'the Windows port\'s win/ folder did not arrive in {src}; see {HERE / "setup-fork-checkout.log"}')
+    if (NX / 'win').is_dir(): shutil.rmtree(NX / 'win')
+    shutil.copytree(src / 'win', NX / 'win', ignore=shutil.ignore_patterns('__pycache__', 'build', 'sdk'))
+    (NX / 'win/sdk').mkdir(exist_ok=True); shutil.copy2(src / 'win/sdk/extract_xip.py', NX / 'win/sdk/extract_xip.py')   # the SDK extractor; the SDK itself stays where the player put it (win/sdk/out)
+    say('Windows port: win/ installed')
+    extras = HERE / 'host/windows/fork-extras.patch'; marker = NX / 'dm/gfx/nvn/.windows-extras'   # beside the Switch 2 patch's marker; setup's reset removes both
+    key = fingerprint(extras, patch_key)
+    if not (marker.is_file() and marker.read_text().strip() == key):
+        run(['git', 'apply', '--whitespace=nowarn', extras], HERE / 'setup-extras.log', cwd=NX); marker.write_text(key + '\n'); say('Windows fixes applied (RomFS image reads, process pool size, IPA packing)')
+    run(['git', 'apply', '--whitespace=nowarn', '--directory=win', HERE / 'host/windows/build_app.patch'], HERE / 'setup-build-app.log', cwd=NX)
+    say('app builder: Switch 2 changes applied')
+    env = dict(os.environ, **windows_env())
+    if not spirv_cross(): raise Fail('no spirv-cross.exe: install the Vulkan SDK (vulkan.lunarg.com) or set SPIRV_CROSS=<path to spirv-cross.exe>')
+    say('tool lock: the translator, SPIRV-Cross and Metal compiler on this PC')
+    run([PY, NX / 'dm/gfx/tools/tool_lock.py', '--update-lock'], HERE / 'setup-lock.log', env=env, cwd=NX / 'dm/gfx/tools')
+    run([PY, NX / 'dm/gfx/tools/dmsh_chain.py', '--header'], HERE / 'setup-header.log', env=env, cwd=NX / 'dm/gfx/tools')
 
 
 # ---------------------------------------------------------------- the dump
@@ -302,9 +468,10 @@ def st_rewrite(b):
     key = fingerprint(*(b.exefs / m for m in b.modules), NX / 'dm/tools/patch_nso.py', PROFILE_SRC / 'game.tsv')
     if b.fresh('rewrite', key) and all((b.patched / f'{m}.patched.bin').is_file() for m in b.modules): return say('rewrite: up to date')
     b.patched.mkdir(parents=True, exist_ok=True)
+    env = b.env(DM_REWRITE_J='1' if WIN else str(JOBS))   # the rewriter's worker pool forks (no fork on Windows): one worker runs the same code inline, about a minute
     for m in b.modules:
-        say(f'rewriting {m}')
-        run([PY, NX / 'dm/tools/patch_nso.py', b.exefs / m, b.patched, m], b.logs / f'rewrite_{m}.log', env=b.env(), cwd=NX)
+        say(f'rewriting {m}' + (' (one worker on Windows: a few minutes for main)' if WIN and m == 'main' else ''))
+        run([PY, NX / 'dm/tools/patch_nso.py', b.exefs / m, b.patched, m], b.logs / f'rewrite_{m}.log', env=env, cwd=NX)
     b.stamp('rewrite', key)
 
 
@@ -408,9 +575,10 @@ def st_package(b):
 def st_chain(b, ios):
     """nxnative's shader chain: the lowered programs to Metal libraries for the Mac (and the iPhone), in <shader>/cache/b-<chain>/ and <shader>/ios/b-<chain>/.
     Incremental through the chain's own cache; the first run compiles everything (around half an hour on an M-series Mac, more with the iOS libraries)."""
-    say('Metal libraries (nxnative chain: translate, cross-compile, metal)' + (' for the Mac and the iPhone' if ios else ' for the Mac'))
+    say('Metal libraries (nxnative chain: translate, cross-compile, metal)' + (' for the iPhone' if WIN else ' for the Mac and the iPhone' if ios else ' for the Mac'))
     env = b.env(DMSH_S2_CS='1', DMSH_S2_CENSUS='1')
     if ios: env['IOSOUT'] = str(b.ios)
+    if WIN: env['DMSH_TARGETS'] = 'ios'   # no Mac host here: the macOS libraries are not needed (the tables are still made from the Mac-side reflection)
     b.cache.mkdir(parents=True, exist_ok=True)
     run([PY, NX / 'dm/gfx/tools/own_compilers.py', b.pkg, b.cache], b.logs / 'chain.log', env=env, cwd=NX / 'dm/gfx/tools', heartbeat=60,
         show=r'Metal cache|compiled|reused|\[RED\]|failed|success|lock')
@@ -456,6 +624,22 @@ def st_ipa(b):
     return out
 
 
+def st_ipa_windows(b):
+    """The unsigned IPA on Windows: the fork's win/build_app.py (LLVM clang + ld64.lld with the iPhoneOS SDK, the host's shaders through Metal Developer Tools for
+    Windows) with the same inputs as build_ipa.sh; the executable carries both kernel entitlements in an ad-hoc signature, the game files stay out (romfs.id instead)."""
+    (b.out / 'phone_env.txt').write_text(PHONE_ENV)
+    b.outputs.mkdir(parents=True, exist_ok=True)
+    out = b.outputs / f'{NAME.replace(" ", "")}-unsigned.ipa'
+    env = b.env(W=str(b.out / 'ipa'), PATCHED=str(b.patched), ROMFS=str(b.romfs_img), MSL_IOS=str(b.ios), AOC='', DM_ENV_FILE=str(b.out / 'phone_env.txt'), DM_SHOW_FPS='1',
+                DM_PSO_GPUS='none', DM_LANG='en-US', DM_BUNDLE_ID=f'org.nxnative.{TITLE.lower()}', NXW_EXTENDED_VA='1', NXW_ROMFS_SEPARATE='1', NXW_ENTITLEMENTS='1')
+    (b.out / 'ipa').mkdir(parents=True, exist_ok=True)
+    say('building the IPA (unsigned; LLVM and Metal Developer Tools for Windows)')
+    run([PY, NX / 'win/build_app.py', out], b.logs / 'build_ipa.log', env=env, show=r'^\[\d\d:\d\d:\d\d\]|FAIL|error')
+    if not out.is_file(): raise Fail(f'no IPA at {out}; see {b.logs / "build_ipa.log"}')
+    say(f'IPA: {out} ({out.stat().st_size // (1 << 20)} MiB; sign it with your own team, then romfs.img goes to the app\'s Documents: docs/IPHONE.md)')
+    return out
+
+
 def st_xcode(b, team):
     """An Xcode project for the game, to sign with your Apple developer team (nxs2.py sign, or Xcode itself)."""
     (b.out / 'phone_env.txt').write_text(PHONE_ENV)
@@ -471,6 +655,7 @@ def st_xcode(b, team):
 def sign(args):
     """Archive and export a development IPA from the prepared Xcode project with automatic signing (your Apple ID signed into Xcode, the
     iPhone's UDID on the team). The first run should happen in Terminal on the Mac itself: Xcode may ask for the keychain."""
+    if WIN: raise Fail('signing with Xcode needs a Mac; on Windows, sign the unsigned IPA with your own signing tool and team (docs/IPHONE.md)')
     b = Build(args.build); team = args.team_id
     x = b.out / 'xcode'; d = b.out / 'build-ios'; ar = d / 'app.xcarchive'; ex = d / 'export'
     if not (x / 'DmIOS.xcodeproj').is_dir(): raise Fail(f'no Xcode project at {x}: run nxs2.py build ... --xcode --team-id {team} first')
@@ -546,27 +731,28 @@ def status(args):
 
 # ---------------------------------------------------------------- commands
 def build(args):
-    need_ios = not args.no_ios
+    need_ios = True if WIN else not args.no_ios
+    if WIN and (args.mac_app or args.xcode): raise Fail('the Mac app and the Xcode project need a Mac; on Windows the output is the iPhone IPA (--ipa)')
     bad = doctor(need_ios=need_ios, quiet=True)
     if bad: doctor(need_ios=need_ios); raise Fail('install the missing tools above (nxs2.py doctor), then build again')
-    if not (NX / 'dm/host/Makefile').is_file() or not AMPERE.is_file(): raise Fail(f'run nxs2.py setup first (nxnative at {NX}, ampere-lower at {AMPERE})')
+    if not (NX / 'dm/host/Makefile').is_file() or not AMPERE.is_file() or (WIN and not (NX / 'win/build_app.py').is_file()): raise Fail(f'run nxs2.py setup first (nxnative at {NX}, ampere-lower at {AMPERE})')
     exefs, romfs = find_dump(args)
     if args.out: out = pathlib.Path(args.out).expanduser()
     elif args.dump: d = pathlib.Path(args.dump).expanduser().resolve(); out = d.parent / f'{d.name}_native'   # beside the dump, never inside it
     else: raise Fail('--exefs/--romfs need --out <build folder>')
-    b = Build(out); jobs = args.jobs or os.cpu_count() or 4
+    b = Build(out); jobs = JOBS
     say(f'{NAME} v{VERSION}: dump {exefs.parent}, build folder {b.out}')
+    say(f'load: {jobs} worker(s) of {os.cpu_count()} CPU threads, low priority' + ('' if args.full_speed or args.jobs else ' (gentle default; --full-speed uses them all)'))
     st_profile(b)
     st_extract(b, exefs, romfs)
     st_rewrite(b)
-    st_host(b, jobs)
-    st_font(b)
+    if not WIN: st_host(b, jobs); st_font(b)   # the Mac host and its fonts: the Windows build makes the iPhone app only (its fonts come from win/toolchain.py)
     st_corpus(b, romfs, args.dumps or [])
     st_lower(b, jobs)
     st_package(b)
     st_chain(b, need_ios)
     if args.mac_app: st_mac_app(b)
-    if args.ipa: st_ipa(b)
+    if args.ipa: st_ipa_windows(b) if WIN else st_ipa(b)
     if args.xcode:
         if not args.team_id: raise Fail('--xcode needs --team-id <your Apple developer team ID>')
         st_xcode(b, args.team_id)
@@ -588,12 +774,11 @@ def refresh(args):
     if not dirs: raise Fail('no shader dumps found: give the folder(s) (DM_NVN_SHDUMP output: <key>.ctl + <key>.code files)')
     before = coverage(b)
     add_dumps(b, dirs)
-    jobs = args.jobs or os.cpu_count() or 4
-    st_lower(b, jobs); st_package(b)
-    st_chain(b, (b.ios / b.lib().name / 'inputs.tsv').is_file())   # iPhone libraries again when the build had them
-    if (b.outputs / f'{NAME}.app').is_dir(): st_mac_app(b)
-    if b.outputs.is_dir() and any(b.outputs.glob('*-unsigned.ipa')): st_ipa(b)
-    if (b.out / 'xcode' / 'DmIOS.xcodeproj').is_dir():
+    st_lower(b, JOBS); st_package(b)
+    st_chain(b, WIN or (b.ios / b.lib().name / 'inputs.tsv').is_file())   # iPhone libraries again when the build had them
+    if not WIN and (b.outputs / f'{NAME}.app').is_dir(): st_mac_app(b)
+    if b.outputs.is_dir() and any(b.outputs.glob('*-unsigned.ipa')): st_ipa_windows(b) if WIN else st_ipa(b)
+    if not WIN and (b.out / 'xcode' / 'DmIOS.xcodeproj').is_dir():
         team = args.team_id
         if not team and (b.out / 'xcode' / 'project.yml').is_file():
             m = re.search(r'DEVELOPMENT_TEAM\s*[:=]\s*"?([A-Z0-9]{10})', (b.out / 'xcode' / 'project.yml').read_text()); team = m.group(1) if m else None
@@ -606,6 +791,7 @@ def refresh(args):
 
 def run_mac(args):
     """The game in a window on this Mac, straight from the build folder (the host, not the app): saves in <build>/run/save, dumps in <build>/run/shdump."""
+    if WIN: raise Fail('playing from the build folder needs a Mac (the host runs the game\'s arm64 code natively); on Windows the output is the iPhone IPA')
     b = Build(args.build)
     for p in (b.host, b.romfs_img, b.patched / 'main.patched.bin'):
         if not p.exists(): raise Fail(f'{p} is missing: run nxs2.py build first')
@@ -633,18 +819,25 @@ def main():
     s.add_argument('dump', nargs='?', help='the dump folder (<game>/updates/<version>/{exefs,romfs} inside, or exefs/ and romfs/ directly)')
     s.add_argument('--exefs'); s.add_argument('--romfs'); s.add_argument('--out', help=f'the build folder (default: <dump>/../{TITLE}_native)')
     s.add_argument('--mac-app', action='store_true'); s.add_argument('--ipa', action='store_true'); s.add_argument('--xcode', action='store_true')
-    s.add_argument('--team-id'); s.add_argument('--dumps', nargs='*', default=[]); s.add_argument('--no-ios', action='store_true'); s.add_argument('-j', '--jobs', type=int)
+    s.add_argument('--team-id'); s.add_argument('--dumps', nargs='*', default=[]); s.add_argument('--no-ios', action='store_true')
+    s.add_argument('-j', '--jobs', type=int, help='worker processes at once (default: all cores on a Mac, a quarter of them, at most 8, on a PC)')
+    s.add_argument('--full-speed', action='store_true', help='every CPU thread (fastest; a long all-core load, see docs/WINDOWS.md)')
     s.set_defaults(f=build)
-    s = sub.add_parser('refresh'); s.add_argument('build'); s.add_argument('dumps', nargs='*'); s.add_argument('--team-id'); s.add_argument('-j', '--jobs', type=int); s.set_defaults(f=refresh)
+    s = sub.add_parser('refresh'); s.add_argument('build'); s.add_argument('dumps', nargs='*'); s.add_argument('--team-id')
+    s.add_argument('-j', '--jobs', type=int); s.add_argument('--full-speed', action='store_true'); s.set_defaults(f=refresh)
     s = sub.add_parser('run'); s.add_argument('build'); s.add_argument('--lang', default='en-US'); s.add_argument('env', nargs='*', help='extra DM_* switches, KEY=VALUE'); s.set_defaults(f=run_mac)
     s = sub.add_parser('sign'); s.add_argument('build'); s.add_argument('--team-id', required=True); s.add_argument('--method', default='debugging', help='export method: debugging (default), ad-hoc, release-testing'); s.set_defaults(f=sign)
     s = sub.add_parser('status'); s.add_argument('build'); s.set_defaults(f=status)
     a = ap.parse_args(); VERBOSE = a.verbose
     if a.cmd == 'build' and not (a.dump or (a.exefs and a.romfs)): ap.error('build needs the dump folder, or --exefs and --romfs')
+    global JOBS
+    JOBS = max(1, getattr(a, 'jobs', None) or ((os.cpu_count() or 4) if getattr(a, 'full_speed', False) else gentle_jobs()))
+    if a.cmd in ('setup', 'build', 'refresh'): lower_priority()
     try: a.f(a)
     except Fail as e: print(f'\n[FAIL] {e}', file=sys.stderr); sys.exit(1)
     except KeyboardInterrupt: print('\ninterrupted', file=sys.stderr); sys.exit(130)
 
 
 VERBOSE = False
+JOBS = 4   # set in main() from -j / --full-speed / gentle_jobs()
 if __name__ == '__main__': main()
