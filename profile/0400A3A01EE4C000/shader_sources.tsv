@@ -1,0 +1,7 @@
+# Where the game's shaders are: kind <TAB> path(s) relative to the RomFS (or 'main' for the executable's read-only data).
+# kinds: blob = a plain region holding shader containers; linkdata = Koei Tecmo LINKDATA (index, data); rdb = Koei Tecmo RDB data files (IDRK entries)
+blob	main
+linkdata	LI_C0_R.IDX	LD_C0_R.BIN
+rdb	motor_asset_re/KIDS_PLATFORM_OUNCE/0x05d525ae.fdata
+rdb	motor_asset_re/KIDS_PLATFORM_OUNCE/0x2943e4da.fdata
+rdb	motor_asset_re/KIDS_PLATFORM_OUNCE/0x52482d03.fdata

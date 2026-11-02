@@ -1,0 +1,3672 @@
+diff --git a/dm/gfx/hle_vi.c b/dm/gfx/hle_vi.c
+index 9bbe8fb..7ab5b24 100644
+--- a/dm/gfx/hle_vi.c
++++ b/dm/gfx/hle_vi.c
+@@ -74,3 +74,8 @@ HLE_FORCE("_ZN2nn2vi12ListDisplaysEPNS0_11DisplayInfoEi", "list displays; the ho
+ HLE_FORCE("_ZN2nn2vi12DestroyLayerEPNS0_5LayerE", "destroy layer; host static object", void, h_vi_DestroyLayer, void *layer) { (void)layer; }
+ HLE_FORCE("_ZN2nn2vi12CloseDisplayEPNS0_7DisplayE", "close display; host static object", void, h_vi_CloseDisp, void *disp) { (void)disp; }
+ HLE_FORCE("_ZN2nn2vi8FinalizeEv", "display service shutdown; the host has no vi service", void, h_vi_Fini, void) {}
++
++// ---------- SWITCH2 (private bring-up, Pokopia SDK 20.5.25): display calls that only exist on the Switch 2 vi service ----------
++HLE_FORCE("_ZN2nn2vi23SetDisplayVrrCapabilityEPNS0_7DisplayEb", "SWITCH2: variable refresh rate capability of the display; the host ignores it", Result, h_vi_SetVrr, void *disp, unsigned on) { (void)disp; (void)on; return 0; }
++HLE_FORCE("_ZN2nn2vi52SetLayerNextHdrExtendedContentLuminanceRangeMetadataEPNS0_5LayerEtt", "SWITCH2: HDR extended luminance range metadata for the next frame; the host presents SDR", Result, h_vi_HdrExt, void *layer, unsigned lo, unsigned hi) { (void)layer; (void)lo; (void)hi; return 0; }
++HLE_FORCE("_ZN2nn2vi52SetLayerNextHdrStandardContentLuminanceRangeMetadataEPNS0_5LayerEtt", "SWITCH2: HDR standard luminance range metadata for the next frame; the host presents SDR", Result, h_vi_HdrStd, void *layer, unsigned lo, unsigned hi) { (void)layer; (void)lo; (void)hi; return 0; }
+diff --git a/dm/gfx/msl/deswz.metal b/dm/gfx/msl/deswz.metal
+index 8beb8ff..9b45b21 100644
+--- a/dm/gfx/msl/deswz.metal
++++ b/dm/gfx/msl/deswz.metal
+@@ -1,20 +1,23 @@
+ // Block-linear textures deswizzled on the GPU (nvn_deswizzle_gpu.m)
+ #include <metal_stdlib>
+ using namespace metal;
+-struct P { ulong src_off, dst_off, base, pitch; uint row_bytes, rows, slices, th, td, gobs_x; };
++struct P { ulong src_off, dst_off, base, pitch; uint row_bytes, rows, slices, th, td, gobs_x, native; };   // native: SWITCH2 in-GOB order (bits 5 and 6 swapped)
+ kernel void deswz(device const uchar *src [[buffer(0)]], device uchar *dst [[buffer(1)]], constant P& p [[buffer(2)]], uint3 id [[thread_position_in_grid]]) {
+  uint bh = 1u << p.th, bd = 1u << p.td, gobs_x = p.gobs_x, blocks_y = (p.rows + (8u * bh) - 1u) >> (3u + p.th);
+- uint tid = id.x & 31u, gob_x = id.x >> 5, gob_y = id.y, z = id.z; uint xseg = ((tid >> 4) << 1) | ((tid >> 1) & 1u), y = (gob_y << 3) | (((tid >> 2) & 3u) << 1) | (tid & 1u), x = (gob_x << 6) | (xseg << 4);
++ uint tid = id.x & 31u, gob_x = id.x >> 5, gob_y = id.y, z = id.z;
++ uint xseg = p.native ? (((tid >> 4) << 1) | ((tid >> 2) & 1u)) : (((tid >> 4) << 1) | ((tid >> 1) & 1u));
++ uint y = p.native ? ((gob_y << 3) | (((tid >> 3) & 1u) << 2) | (((tid >> 1) & 1u) << 1) | (tid & 1u)) : ((gob_y << 3) | (((tid >> 2) & 3u) << 1) | (tid & 1u));
++ uint x = (gob_x << 6) | (xseg << 4);
+  if (x >= p.row_bytes || y >= p.rows || z >= p.slices) return;
+  uint n = min(16u, p.row_bytes - x); ulong block = 512ul * bh * bd; ulong gob_in_block = ((ulong)(z & (bd - 1u)) << p.th) + (gob_y & (bh - 1u)); ulong so = p.src_off + p.base + ((ulong)(z >> p.td) * gobs_x * blocks_y + (gob_y >> p.th) * gobs_x + gob_x) * block + gob_in_block * 512ul + (ulong)tid * 16ul; ulong doff = p.dst_off + ((ulong)z * p.rows + y) * p.pitch + x;
+  if (n == 16u && ((so | doff) & 15ul) == 0ul) *(device uint4 *)(dst + doff) = *(device const uint4 *)(src + so);
+  else for (uint i = 0; i < n; i++) dst[doff + i] = src[so + i];
+ }
+-struct D { ulong src_off, base, layer_stride; uint width,height,layers,level,th,gobs_x; };
++struct D { ulong src_off, base, layer_stride; uint width,height,layers,level,th,gobs_x,native; };
+ kernel void deswz_direct(device const uchar *src [[buffer(0)]], constant D& p [[buffer(2)]], texture2d_array<uint, access::write> dst [[texture(0)]], uint3 id [[thread_position_in_grid]]) {
+  if(id.x>=p.width||id.y>=p.height||id.z>=p.layers)return;
+  uint x=id.x*8u,y=id.y,bh=1u<<p.th,gy=y>>3;
+  ulong off=p.src_off+p.base+ulong(id.z)*p.layer_stride+((ulong)(gy>>p.th)*p.gobs_x+(x>>6))*(512ul*bh)+(ulong)(gy&(bh-1u))*512ul;
+- off+=((x&63u)>>5)*256u+((y&7u)>>1)*64u+((x&31u)>>4)*32u+(y&1u)*16u+(x&15u);
++ off+=((x&63u)>>5)*256u+(p.native?(((y&7u)>>2)*128u+((x&31u)>>4)*64u+(((y&7u)>>1)&1u)*32u):(((y&7u)>>1)*64u+((x&31u)>>4)*32u))+(y&1u)*16u+(x&15u);
+  dst.write(uint4(*(device const ushort4*)(src+off)),id.xy,id.z,p.level);
+ }
+diff --git a/dm/gfx/nvn/dmsh_chain.h b/dm/gfx/nvn/dmsh_chain.h
+index 9bcce1a..ee7bcf2 100644
+--- a/dm/gfx/nvn/dmsh_chain.h
++++ b/dm/gfx/nvn/dmsh_chain.h
+@@ -1,3 +1,3 @@
+ // Generated file (dm/gfx/tools/dmsh_chain.py --header): the B shader library translation chain version this source tree expects (default options), one for every game;
+ // the host loads only <library dir>/b-<V>/. Run dmsh_chain.py --header after changing the chain's tools and commit this file with the change
+-#define DMSH_CHAIN "a7dbbce711c3"
++#define DMSH_CHAIN "cac032d8de97"
+diff --git a/dm/gfx/nvn/hle_nvn.c b/dm/gfx/nvn/hle_nvn.c
+index 5e73d6d..7257c12 100644
+--- a/dm/gfx/nvn/hle_nvn.c
++++ b/dm/gfx/nvn/hle_nvn.c
+@@ -610,18 +610,23 @@ static int keys_hash(const NVNshaderData *sd, int mapped, uint8_t out[8]) {
+     uint32_t ncode = 0; void *mb; uint64_t mo;
+     if (!sd->control) return 0;
+     memcpy(&ncode, (const uint8_t *)sd->control + 0x704, 4);
++    // SWITCH2 (private bring-up): GLSLC 0x00220015 control blocks are 0xe0 bytes (+4 = 0xc9, +8 = 0x11, +0x18 = the version); the code area is +0x40 (instructions and padding) plus +0x30 (the 0xe0 reflection trailer)
++    int s2 = 0; { uint32_t a_, b_, v_; memcpy(&a_, (const uint8_t *)sd->control + 4, 4); memcpy(&b_, (const uint8_t *)sd->control + 8, 4); memcpy(&v_, (const uint8_t *)sd->control + 0x18, 4);
++      if (a_ == 0xc9 && (b_ == 0x11 || b_ == 0xb) && v_ == 0x00220015) { uint32_t p_, t_; memcpy(&p_, (const uint8_t *)sd->control + 0x44, 4); memcpy(&t_, (const uint8_t *)sd->control + 0x30, 4); ncode = p_; (void)t_;   /* +0x44 only: the 0xe0 trailer never reaches GPU memory (the next object follows the padding) */ s2 = 1; } }
+     int code = sd->data && ncode && ncode < (1u << 24);
+     if (mapped && !(code && mtl_addr(sd->data, ncode, &mb, &mo))) return 0;
+     // Control +0x20 holds the section's own length: sections of at least 0x880 bytes (all of Mario's, Engage's, Dread's and 13 Sentinels') use the first 0x880; SDK 10's 3D World has 0x850-byte ones followed by other data, so only their own length is used (shader_split.py ctl_len)
+     uint32_t nctl = 0x880, own; memcpy(&own, (const uint8_t *)sd->control + 0x20, 4);
+     if (own >= 0x760 && own < 0x880) nctl = own;
++    if (s2) nctl = 0xe0;   // SWITCH2: the whole control block
+     uint8_t md[CC_SHA256_DIGEST_LENGTH]; CC_SHA256_CTX hc; CC_SHA256_Init(&hc);
+     // Profile key shader_key_skip: bytes of the control section hashed as zeros (shader_split.py key_ctl). Batman: Arkham Knight's engine shares one control section among shaders whose
+     // sections differ only in GLSLC's compile information (+0x778..+0x791, +0x7d0..+0x7e7): it hands a program the section of an earlier shader with the same rest, so the bytes there name another shader
+     if (DM_GAME_SHADER_KEY_SKIP_LEN && DM_GAME_SHADER_KEY_SKIP_OFF + DM_GAME_SHADER_KEY_SKIP_LEN <= nctl) {
+         uint8_t ctl[0x880]; memcpy(ctl, sd->control, nctl); memset(ctl + DM_GAME_SHADER_KEY_SKIP_OFF, 0, DM_GAME_SHADER_KEY_SKIP_LEN);
+         CC_SHA256_Update(&hc, ctl, nctl);
+-    } else CC_SHA256_Update(&hc, sd->control, nctl);
++    } else if (s2) { uint8_t ctl[0xe0]; memcpy(ctl, sd->control, 0xe0); memset(ctl + 0x20, 0, 8); CC_SHA256_Update(&hc, ctl, 0xe0); }   // SWITCH2: +0x20..+0x27 rewritten by the driver per program, hashed as zeros (s2_ctl_scan.py does the same)
++    else CC_SHA256_Update(&hc, sd->control, nctl);
+     if (code) CC_SHA256_Update(&hc, (const void *)(uintptr_t)sd->data, ncode);
+     CC_SHA256_Final(md, &hc); memcpy(out, md, 8);
+     return 1;
+@@ -644,7 +649,9 @@ NVN(nvnProgramSetShaders, NVNboolean, NVNprogram *p, int n, const NVNshaderData
+     prog_keys_t *k = pk_get(p, 1);
+     k->ok = 0;
+     for (int i = 0; i < n; i++) {
+-        if (keys_hash(&sd[i], 1, k->key[i])) k->ok |= (uint8_t)(1u << i);
++        // SWITCH2 (private bring-up): with a Switch 2 control block the code area is not final at SetShaders (4 of 6 keys hashed here differed from the code at the first draw); key it lazily in prog_key
++        int s2_ = 0; if (sd[i].control) { uint32_t a_, b_, v_; memcpy(&a_, (const uint8_t *)sd[i].control + 4, 4); memcpy(&b_, (const uint8_t *)sd[i].control + 8, 4); memcpy(&v_, (const uint8_t *)sd[i].control + 0x18, 4); s2_ = a_ == 0xc9 && (b_ == 0x11 || b_ == 0xb) && v_ == 0x00220015; }
++        if (!s2_ && keys_hash(&sd[i], 1, k->key[i])) k->ok |= (uint8_t)(1u << i);
+         // Diagnostic: trace the loader of selected shader keys (comma-separated hex).
+         if (trace && (k->ok & (1u << i))) {
+             char key[17]; for (int j = 0; j < 8; j++) snprintf(key + j * 2, 3, "%02x", k->key[i][j]);
+diff --git a/dm/gfx/nvn/names.txt b/dm/gfx/nvn/names.txt
+index 479668b..16fe69c 100644
+--- a/dm/gfx/nvn/names.txt
++++ b/dm/gfx/nvn/names.txt
+@@ -535,3 +535,200 @@ nvnDeviceSetAutomaticCheckpointsMask
+ nvnProgramGetSubtileSize
+ nvnTextureBuilderGetViewOffset
+ nvnSetExternalDebuggerEnabledNVX
++nvnDeviceRegisterFastClearColorIndex
++nvnDeviceRegisterFastClearColoriIndex
++nvnDeviceRegisterFastClearColoruiIndex
++nvnDeviceRegisterFastClearDepthIndex
++nvnDeviceRegisterFastClearStencil
++nvnDeviceRegisterFastClearStencilIndex
++nvnDeviceGetFlags
++nvnQueueGetTotalRayTracingMemoryUsed
++nvnQueueBuilderSetRayTracingMemorySize
++nvnQueueBuilderGetRayTracingMemorySize
++nvnQueueBuilderSetPrimaryQueue
++nvnQueueBuilderGetPrimaryQueue
++nvnWindowBuilderSetColorSpace
++nvnWindowBuilderSetHdrDisplayMetadata
++nvnWindowBuilderSetHdrContentMetadata
++nvnWindowBuilderGetColorSpace
++nvnWindowBuilderGetHdrDisplayMetadata
++nvnWindowBuilderGetHdrContentMetadata
++nvnWindowSetHdrDisplayMetadata
++nvnWindowSetHdrContentMetadata
++nvnWindowGetHdrDisplayMetadata
++nvnWindowGetHdrContentMetadata
++nvnProgramBuilderSetDefaults
++nvnProgramBuilderSetDevice
++nvnProgramBuilderGetDevice
++nvnProgramBuilderSetSampleShading
++nvnProgramBuilderGetSampleShading
++nvnProgramBuilderSetDebugDataHashes
++nvnProgramBuilderGetDebugDataHashes
++nvnProgramBuilderSetShaders
++nvnProgramBuilderGetShaders
++nvnProgramBuilderGetShaderCount
++nvnProgramBuilderSetRayTracingModules
++nvnProgramBuilderGetRayTracingModuleCount
++nvnProgramBuilderGetRayTracingModuleData
++nvnProgramBuilderSetSubroutineLinkage
++nvnProgramBuilderGetSubroutineLinkage
++nvnProgramBuilderGetSubroutineLinkageCount
++nvnProgramInitializeFromBuilder
++nvnMultisampleStateSetCoverageTruncationEnable
++nvnMultisampleStateGetCoverageTruncationEnable
++nvnMultisampleStateGetSampleLocations
++nvnCommandBufferSetRecordingMode
++nvnCommandBufferBindAccelerationStructure
++nvnCommandBufferBindAccelerationStructures
++nvnCommandBufferBindAccelerationStructuresDeferred
++nvnCommandBufferSetGeometryProcessingMode
++nvnCommandBufferDrawMeshTasks
++nvnCommandBufferDrawMeshTasksIndirect
++nvnCommandBufferMultiDrawMeshTasksIndirect
++nvnCommandBufferMultiDrawMeshTasksIndirectCount
++nvnCommandBufferDrawMeshTasks3D
++nvnCommandBufferDrawMeshTasks3DIndirect
++nvnCommandBufferMultiDrawMeshTasks3DIndirect
++nvnCommandBufferMultiDrawMeshTasks3DIndirectCount
++nvnCommandBufferSetConservativeRasterMode
++nvnCommandBufferComputeDirtyTileMap
++nvnCommandBufferComputeDirtyTileMapEx
++nvnCommandBufferSetComputeEnable
++nvnCommandBufferSetComputeEnableConditional
++nvnCommandBufferSetCopyEnable
++nvnCommandBufferSetCopyEnableConditional
++nvnCommandBufferPushDebugGroupGraphics
++nvnCommandBufferPushDebugGroupCompute
++nvnCommandBufferPopDebugGroupGraphics
++nvnCommandBufferPopDebugGroupCompute
++nvnCommandBufferInsertDebugMarkerGraphics
++nvnCommandBufferInsertDebugMarkerCompute
++nvnCommandBufferShadingRateImagePalette
++nvnCommandBufferBindShadingRateImage
++nvnCommandBufferSetShadingRatePaletteMode
++nvnCommandBufferSetExclusiveScissor
++nvnCommandBufferSetExclusiveScissors
++nvnCommandBufferEnableExclusiveScissor
++nvnDeviceCalculateAccelerationStructureMemoryRequirements
++nvnCommandBufferBuildAccelerationStructures
++nvnCommandBufferCopyAccelerationStructure
++nvnCommandBufferCompactAccelerationStructure
++nvnCommandBufferRelocateAccelerationStructure
++nvnCommandBufferDispatchRays
++nvnCommandBufferDispatchRaysIndirect
++nvnProgramGetShaderGroupHandle
++nvnProgramGetScratchBytesPerWarp
++nvnProgramBuilderGetMaxTraceRecursionDepth
++nvnProgramBuilderSetMaxTraceRecursionDepth
++nvnProgramBuilderGetMaxCallableRecursionDepth
++nvnProgramBuilderSetMaxCallableRecursionDepth
++nvnProgramBuilderGetProgramRayTracingFlags
++nvnProgramBuilderSetProgramRayTracingFlags
++nvnDeviceCopyAccelerationStructure
++nvnDeviceCompactAccelerationStructure
++nvnDeviceRelocateAccelerationStructure
++nvnCommandBufferSetRepresentativeFragmentTest
++nvnCommandBufferEvaluateDlss
++nvnDlssNetworkInitialize
++nvnDlssNetworkFinalize
++nvnDlssNetworkResize
++nvnDlssNetworkBuilderSetDefaults
++nvnDlssNetworkBuilderSetDevice
++nvnDlssNetworkBuilderGetDevice
++nvnDlssNetworkBuilderSetFlags
++nvnDlssNetworkBuilderGetFlags
++nvnDlssNetworkBuilderSetOutputResolution
++nvnDlssNetworkBuilderGetOutputResolution
++nvnDlssNetworkBuilderSetMethod
++nvnDlssNetworkBuilderGetMethod
++nvnDlssNetworkBuilderSetPreset
++nvnDlssNetworkBuilderGetPreset
++nvnDlssNetworkBuilderGetOptimalSettings
++nvnDlssNetworkBuilderGetStorageSize
++nvnDlssNetworkBuilderSetStorage
++nvnDlssNetworkBuilderGetMemory
++nvnDlssNetworkBuilderGetMemorySize
++nvnDlssNetworkBuilderSetTextureIDs
++nvnDlssNetworkBuilderGetTexturePool
++nvnDlssNetworkBuilderGetTextureIDs
++nvnDlssNetworkBuilderSetMaxEvaluationEntries
++nvnDlssNetworkBuilderGetMaxEvaluationEntries
++nvnDlssParametersSetDefaults
++nvnDlssParametersSetOverlayDebugLayer
++nvnDlssParametersSetOverlayFullScreen
++nvnDlssParametersSetOverlayShowNans
++nvnDlssParametersSetOverlayJitterDebug
++nvnDlssParametersSetInputColor
++nvnDlssParametersSetOutputColor
++nvnDlssParametersSetMotionVectors
++nvnDlssParametersSetDepth
++nvnDlssParametersSetBiasCurrentColorMask
++nvnDlssParametersSetJitterOffset
++nvnDlssParametersGetJitterOffset
++nvnDlssParametersSetPreExposure
++nvnDlssParametersGetPreExposure
++nvnDlssParametersSetExposureTexture
++nvnDlssParametersSetHistoryReset
++nvnDlssParametersGetHistoryReset
++nvnDlssParametersSetMotionVectorScale
++nvnDlssParametersGetMotionVectorScale
++nvnDlssParametersSetEvaluationIndex
++nvnDlssParametersGetEvaluationIndex
++nvnDlssParametersSetInputSubrectangleSize
++nvnDlssParametersGetInputSubrectangleSize
++nvnDlssParametersSetInputColorSubrectangleBase
++nvnDlssParametersGetInputColorSubrectangleBase
++nvnDlssParametersSetDepthSubrectangleBase
++nvnDlssParametersGetDepthSubrectangleBase
++nvnDlssParametersSetMotionVectorSubrectangleBase
++nvnDlssParametersGetMotionVectorSubrectangleBase
++nvnDlssParametersSetBiasCurrentColorSubrectangleBase
++nvnDlssParametersGetBiasCurrentColorSubrectangleBase
++nvnDlssParametersSetOutputSubrectangleBase
++nvnDlssParametersGetOutputSubrectangleBase
++nvnDeviceGetUniformBufferHandle
++nvnCommandBufferPushComputeConstants
++nvnCommandBufferPushComputeConstantsDeferred
++nvnCommandBufferPushGraphicsConstants
++nvnCommandBufferPushGraphicsConstantsDeferred
++nvnCommandBufferSetComputeOverlapMode
++nvnDeviceMessageBufferSetDefaults
++nvnDeviceMessageBufferSetDevice
++nvnDeviceMessageBufferSetStorage
++nvnDeviceMessageBufferBeginMessages
++nvnDeviceMessageBufferGetNextMessage
++nvnDeviceMessageBufferEndMessages
++nvnDeviceMessageBufferReset
++nvnCommandBufferBindDeviceMessageBuffer
++nvnCommandBufferBindDeviceMessageBufferDeferred
++nvnCommandBufferResetDeviceMessageBuffer
++nvnCommandBufferResetDeviceMessageBufferDeferred
++nvnDeviceCommandBufferSetDefaults
++nvnDeviceCommandBufferSetDevice
++nvnDeviceCommandBufferSetStorage
++nvnDeviceCommandBufferSetCommandMemorySize
++nvnDeviceCommandBufferSetComputeMemorySize
++nvnDeviceCommandBufferGetHandle
++nvnCommandBufferBeginDeviceCommands
++nvnCommandBufferEndDeviceCommands
++nvnCommandBufferSubmitDeviceCommands
++nvnDeviceGetCommandHandleMemorySize
++nvnProgramGetDeviceComputeMemorySize
++nvnCommandBufferSetGraphicsWorkloadPriority
++nvnCommandBufferSetComputeWorkloadPriority
++nvnCommandBufferSetResourceOccupancy
++nvnDirtyTileMapParametersSetDefaults
++nvnDirtyTileMapParametersSetTexture
++nvnDirtyTileMapParametersSetInputs
++nvnDirtyTileMapParametersSetOutputs
++nvnDirtyTileMapParametersSetConstantColorTable
++nvnDirtyTileMapParametersSetDepthStencilMask
++nvnDirtyTileMapParametersSetExpandFootprint
++nvnDirtyTileMapParametersGetTexture
++nvnDirtyTileMapParametersGetInputs
++nvnDirtyTileMapParametersGetOutputs
++nvnDirtyTileMapParametersGetConstantColorTable
++nvnDirtyTileMapParametersGetDepthStencilMask
++nvnDirtyTileMapParametersGetExpandFootprint
++nvnCommandBufferSetFloatBlendClamp
++nvnCommandBufferGetAccelerationStructureVisualizationData
+diff --git a/dm/gfx/nvn/nvn_count.h b/dm/gfx/nvn/nvn_count.h
+index 9e28924..2a31677 100644
+--- a/dm/gfx/nvn/nvn_count.h
++++ b/dm/gfx/nvn/nvn_count.h
+@@ -1,3 +1,3 @@
+ // Generated by gen_protos.py
+ #pragma once
+-#define NVN_NFUNC 537
++#define NVN_NFUNC 734
+diff --git a/dm/gfx/nvn/nvn_mtl.m b/dm/gfx/nvn/nvn_mtl.m
+index ac449a5..99cfc30 100644
+--- a/dm/gfx/nvn/nvn_mtl.m
++++ b/dm/gfx/nvn/nvn_mtl.m
+@@ -471,6 +471,7 @@ void mtl_init(void) {
+     g_nvn_deswz_gpu = nvn_deswz_gpu_init(g_dev) == 0;
+     dm_res_report_register(mtl_res_counts);
+     if (!g_nvn_deswz_gpu) MLOG("[RED] GPU deswizzle init failed; swizzled textures fall back to the CPU");
++    if (getenv("DM_NVN_DESWZ_CPU")) { g_nvn_deswz_gpu = 0; MLOG("DM_NVN_DESWZ_CPU: swizzled textures decoded on the CPU (SWITCH2 diagnostic)"); }
+     MLOG("Metal device %s", g_dev.name.UTF8String);
+     udc_selftest();
+ }
+@@ -4105,7 +4106,7 @@ static void draw_gs_check(NvProg *pr) {
+             MLOG("[RED] shader %s is not in the shader map (DM_NVN_SHDUMP=directory saves its control section and code area)", k.UTF8String);
+             // DM_NVN_SHDUMP=directory: shaders missing from the map are saved as <key>.ctl (0x880-byte control section) and <key>.code (code area, length from control +0x704), to trace their source / add them to the map offline
+             static const char *shd; static int shd_init; if (!shd_init) { shd = getenv("DM_NVN_SHDUMP"); shd_init = 1; }
+-            if (shd) { char path[1024]; FILE *f; uint32_t ncode; memcpy(&ncode, (const uint8_t *)p->sd[i].control + 0x704, 4);   // with SHDUMP set the control section is the host's copy
++            if (shd) { char path[1024]; FILE *f; uint32_t ncode; memcpy(&ncode, (const uint8_t *)p->sd[i].control + 0x704, 4); { const uint8_t *c_ = (const uint8_t *)p->sd[i].control; uint32_t a_, b_, v_; memcpy(&a_, c_ + 4, 4); memcpy(&b_, c_ + 8, 4); memcpy(&v_, c_ + 0x18, 4); if (a_ == 0xc9 && (b_ == 0x11 || b_ == 0xb) && v_ == 0x00220015) { uint32_t p_, t_; memcpy(&p_, c_ + 0x44, 4); memcpy(&t_, c_ + 0x30, 4); ncode = p_; (void)t_;   /* +0x44 only: the 0xe0 trailer never reaches GPU memory (the next object follows the padding) */ } }   /* SWITCH2 control block */   // with SHDUMP set the control section is the host's copy
+                 snprintf(path, sizeof path, "%s/%s.ctl", shd, k.UTF8String); if ((f = fopen(path, "wb"))) { fwrite(p->sd[i].control, 1, 0x880, f); fclose(f); }
+                 snprintf(path, sizeof path, "%s/%s.code", shd, k.UTF8String);
+                 if (p->sd[i].data && ncode && ncode < (1u << 24) && (f = fopen(path, "wb"))) { fwrite((const void *)(uintptr_t)p->sd[i].data, 1, ncode, f); fclose(f); } }
+@@ -9893,6 +9894,15 @@ static void dispatch(const p_dispatch *dp) {
+     if (dp->ind) { static int once; if (!once++) MLOG("indirect dispatch: first time (the GPU reads the threadgroup counts from %#llx)", (unsigned long long)dp->ind); }
+     NvShader *cs = prog_get(S.cprog)->sh[5];
+     if (!cs) { RED_ONCE(28, "the dispatched program has no compute shader (or it is not mapped)"); return; }
++    // SWITCH2 (private bring-up) DM_S2_CSBIND=1: once per kernel, the compute-stage texture / image slots the game has bound at this dispatch (to map NVN2 handle words to slots)
++    { static int on = -1; if (on < 0) on = getenv("DM_S2_CSBIND") != NULL;
++      if (on) { static char seen[128][17]; static int ns; int dup = 0; for (int i = 0; i < ns; i++) if (!strcmp(seen[i], cs->key)) dup = 1;
++        if (!dup && ns < 128) { strlcpy(seen[ns++], cs->key, 17); char line[768]; int o = snprintf(line, sizeof line, "[s2csbind] %s tex:", cs->key);
++          for (int r = 0; r < 24 && o < 700; r++) if (S.tex[5][r]) o += snprintf(line + o, sizeof line - o, " %d=%llx", r, (unsigned long long)S.tex[5][r]);
++          o += snprintf(line + o, sizeof line - o, " img:"); for (int r = 0; r < 8 && o < 740; r++) if (S.img[5][r]) o += snprintf(line + o, sizeof line - o, " %d=%llx", r, (unsigned long long)S.img[5][r]);
++          o += snprintf(line + o, sizeof line - o, " ubo:"); for (int r = 0; r < 16 && o < 760; r++) if (S.ubo[5][r].addr) o += snprintf(line + o, sizeof line - o, " %d", r);
++          o += snprintf(line + o, sizeof line - o, " ssbo:"); for (int r = 0; r < 16 && o < 760; r++) if (S.ssbo[5][r].addr) o += snprintf(line + o, sizeof line - o, " %d", r);
++          MLOG("%s", line); } } }
+     const void *k = (__bridge const void *)cs;
+     id<MTLComputePipelineState> ps = hm_get_id(&g_cps, &k);
+     if (!ps) {
+@@ -10512,12 +10522,13 @@ static void sub_cut(void) {
+     up_flush();
+     uint64_t f = atomic_load(&g_cur_frame); gpu_tag_begin(f);
+     uint32_t k = g_seg++; seg_clk *sc = NULL;   // reports encoded so far keep this segment's GPU times (seg_ts)
++    static uint64_t cut_prev_pass, cut_prev_draw; uint64_t sp0 = cut_prev_pass, sd0 = cut_prev_draw, sp1 = g_stat_pass, sd1 = g_stat_draw; cut_prev_pass = sp1; cut_prev_draw = sd1;   // SWITCH2 (private bring-up): the segment's pass / draw range, for its error message
+     if (seg_ts()) { if (!g_sclk) { g_sclk = calloc(1, sizeof *g_sclk); atomic_store(&g_sclk->refs, 1); } sc = g_sclk; atomic_fetch_add(&sc->refs, 1); }
+     MTL4CommitOptions *o = [MTL4CommitOptions new];
+     [o addFeedbackHandler:^(id<MTL4CommitFeedback> cb) {
+         gpu_tag_done(f, cb.GPUStartTime, cb.GPUEndTime);
+         if (sc) { if (k < SEG_CLK_N) { atomic_store(&sc->t[k][0], gpu_s_guest_ns(cb.GPUStartTime)); atomic_store(&sc->t[k][1], gpu_s_guest_ns(cb.GPUEndTime)); } seg_clk_put(sc); }
+-        if (cb.error) { atomic_store(&g_last_commit_error, 1); static int k; if (k++ < 8) MLOG("[RED] segment command buffer execution error: %s", cb.error.description.UTF8String); }
++        if (cb.error) { atomic_store(&g_last_commit_error, 1); static int k; if (k++ < 8) MLOG("[RED] segment command buffer execution error (frame %llu segment %u: passes %llu..%llu draws %llu..%llu): %s", (unsigned long long)f, k, (unsigned long long)sp0, (unsigned long long)sp1, (unsigned long long)sd0, (unsigned long long)sd1, cb.error.description.UTF8String); }
+     }];
+     res_commit();
+     [g_cb endCommandBuffer];
+@@ -11012,11 +11023,14 @@ void dm_gfx_texraw(uint64_t serial, const char *path) {
+     if (t.storageMode == MTLStorageModeMemoryless || t.pixelFormat == MTLPixelFormatInvalid) return;
+     NSUInteger w = t.width, h = t.height, row = w * 16, sz = row * h;   // 16 bytes a texel: a multiple of every uncompressed texel size
+     NSUInteger ns = (t.textureType == MTLTextureTypeCube || t.textureType == MTLTextureTypeCubeArray ? 6 : 1) * MAX(t.arrayLength, 1u);   // every slice (a cube's six faces), one after another
++    NSUInteger nd = t.textureType == MTLTextureType3D ? MAX(t.depth, 1u) : 1;   // SWITCH2 (private bring-up): a 3D texture's depth slices too (the 32^3 colour LUTs)
++    if (nd > 1) ns = nd;
+     id<MTLBuffer> buf = [g_dev newBufferWithLength:sz * ns options:MTLResourceStorageModeShared];
+     id<MTLCommandBuffer> cb = q_cb(); id<MTLBlitCommandEncoder> b = [cb blitCommandEncoder];
+-    MTLBlitOption bo = t.pixelFormat == MTLPixelFormatDepth32Float_Stencil8 ? MTLBlitOptionDepthFromDepthStencil : MTLBlitOptionNone;
++    const char *st_env = getenv("DM_TEXRAW_STENCIL");   // DM_TEXRAW_STENCIL=1 (DM_CTL "env"): the stencil aspect of a depth-stencil texture, one byte a texel
++    MTLBlitOption bo = t.pixelFormat == MTLPixelFormatDepth32Float_Stencil8 ? (st_env && *st_env ? MTLBlitOptionStencilFromDepthStencil : MTLBlitOptionDepthFromDepthStencil) : MTLBlitOptionNone;
+     for (NSUInteger s = 0; s < ns; s++)
+-        [b copyFromTexture:t sourceSlice:s sourceLevel:0 sourceOrigin:MTLOriginMake(0, 0, 0) sourceSize:MTLSizeMake(w, h, 1) toBuffer:buf destinationOffset:sz * s destinationBytesPerRow:row destinationBytesPerImage:sz options:bo];
++        [b copyFromTexture:t sourceSlice:nd > 1 ? 0 : s sourceLevel:0 sourceOrigin:MTLOriginMake(0, 0, nd > 1 ? s : 0) sourceSize:MTLSizeMake(w, h, 1) toBuffer:buf destinationOffset:sz * s destinationBytesPerRow:row destinationBytesPerImage:sz options:bo];
+     [b endEncoding]; [cb commit]; [cb waitUntilCompleted];
+     FILE *f = fopen(path, "wb"); if (f) { fprintf(f, "%lu %lu %lu %lu", (unsigned long)w, (unsigned long)h, (unsigned long)t.pixelFormat, (unsigned long)row); if (ns > 1) fprintf(f, " %lu", (unsigned long)ns); fputc('\n', f); fwrite(buf.contents, 1, sz * ns, f); fclose(f); }
+     const uint8_t *p = buf.contents;
+diff --git a/dm/gfx/nvn/nvn_protos.h b/dm/gfx/nvn/nvn_protos.h
+index 782482a..f7a8047 100644
+--- a/dm/gfx/nvn/nvn_protos.h
++++ b/dm/gfx/nvn/nvn_protos.h
+@@ -541,3 +541,200 @@ typedef void (*NVNT_nvnCommandBufferSignalEvent)(NVNcommandBuffer*, const NVNeve
+ //   nvnProgramGetSubtileSize
+ //   nvnTextureBuilderGetViewOffset
+ //   nvnSetExternalDebuggerEnabledNVX
++//   nvnDeviceRegisterFastClearColorIndex
++//   nvnDeviceRegisterFastClearColoriIndex
++//   nvnDeviceRegisterFastClearColoruiIndex
++//   nvnDeviceRegisterFastClearDepthIndex
++//   nvnDeviceRegisterFastClearStencil
++//   nvnDeviceRegisterFastClearStencilIndex
++//   nvnDeviceGetFlags
++//   nvnQueueGetTotalRayTracingMemoryUsed
++//   nvnQueueBuilderSetRayTracingMemorySize
++//   nvnQueueBuilderGetRayTracingMemorySize
++//   nvnQueueBuilderSetPrimaryQueue
++//   nvnQueueBuilderGetPrimaryQueue
++//   nvnWindowBuilderSetColorSpace
++//   nvnWindowBuilderSetHdrDisplayMetadata
++//   nvnWindowBuilderSetHdrContentMetadata
++//   nvnWindowBuilderGetColorSpace
++//   nvnWindowBuilderGetHdrDisplayMetadata
++//   nvnWindowBuilderGetHdrContentMetadata
++//   nvnWindowSetHdrDisplayMetadata
++//   nvnWindowSetHdrContentMetadata
++//   nvnWindowGetHdrDisplayMetadata
++//   nvnWindowGetHdrContentMetadata
++//   nvnProgramBuilderSetDefaults
++//   nvnProgramBuilderSetDevice
++//   nvnProgramBuilderGetDevice
++//   nvnProgramBuilderSetSampleShading
++//   nvnProgramBuilderGetSampleShading
++//   nvnProgramBuilderSetDebugDataHashes
++//   nvnProgramBuilderGetDebugDataHashes
++//   nvnProgramBuilderSetShaders
++//   nvnProgramBuilderGetShaders
++//   nvnProgramBuilderGetShaderCount
++//   nvnProgramBuilderSetRayTracingModules
++//   nvnProgramBuilderGetRayTracingModuleCount
++//   nvnProgramBuilderGetRayTracingModuleData
++//   nvnProgramBuilderSetSubroutineLinkage
++//   nvnProgramBuilderGetSubroutineLinkage
++//   nvnProgramBuilderGetSubroutineLinkageCount
++//   nvnProgramInitializeFromBuilder
++//   nvnMultisampleStateSetCoverageTruncationEnable
++//   nvnMultisampleStateGetCoverageTruncationEnable
++//   nvnMultisampleStateGetSampleLocations
++//   nvnCommandBufferSetRecordingMode
++//   nvnCommandBufferBindAccelerationStructure
++//   nvnCommandBufferBindAccelerationStructures
++//   nvnCommandBufferBindAccelerationStructuresDeferred
++//   nvnCommandBufferSetGeometryProcessingMode
++//   nvnCommandBufferDrawMeshTasks
++//   nvnCommandBufferDrawMeshTasksIndirect
++//   nvnCommandBufferMultiDrawMeshTasksIndirect
++//   nvnCommandBufferMultiDrawMeshTasksIndirectCount
++//   nvnCommandBufferDrawMeshTasks3D
++//   nvnCommandBufferDrawMeshTasks3DIndirect
++//   nvnCommandBufferMultiDrawMeshTasks3DIndirect
++//   nvnCommandBufferMultiDrawMeshTasks3DIndirectCount
++//   nvnCommandBufferSetConservativeRasterMode
++//   nvnCommandBufferComputeDirtyTileMap
++//   nvnCommandBufferComputeDirtyTileMapEx
++//   nvnCommandBufferSetComputeEnable
++//   nvnCommandBufferSetComputeEnableConditional
++//   nvnCommandBufferSetCopyEnable
++//   nvnCommandBufferSetCopyEnableConditional
++//   nvnCommandBufferPushDebugGroupGraphics
++//   nvnCommandBufferPushDebugGroupCompute
++//   nvnCommandBufferPopDebugGroupGraphics
++//   nvnCommandBufferPopDebugGroupCompute
++//   nvnCommandBufferInsertDebugMarkerGraphics
++//   nvnCommandBufferInsertDebugMarkerCompute
++//   nvnCommandBufferShadingRateImagePalette
++//   nvnCommandBufferBindShadingRateImage
++//   nvnCommandBufferSetShadingRatePaletteMode
++//   nvnCommandBufferSetExclusiveScissor
++//   nvnCommandBufferSetExclusiveScissors
++//   nvnCommandBufferEnableExclusiveScissor
++//   nvnDeviceCalculateAccelerationStructureMemoryRequirements
++//   nvnCommandBufferBuildAccelerationStructures
++//   nvnCommandBufferCopyAccelerationStructure
++//   nvnCommandBufferCompactAccelerationStructure
++//   nvnCommandBufferRelocateAccelerationStructure
++//   nvnCommandBufferDispatchRays
++//   nvnCommandBufferDispatchRaysIndirect
++//   nvnProgramGetShaderGroupHandle
++//   nvnProgramGetScratchBytesPerWarp
++//   nvnProgramBuilderGetMaxTraceRecursionDepth
++//   nvnProgramBuilderSetMaxTraceRecursionDepth
++//   nvnProgramBuilderGetMaxCallableRecursionDepth
++//   nvnProgramBuilderSetMaxCallableRecursionDepth
++//   nvnProgramBuilderGetProgramRayTracingFlags
++//   nvnProgramBuilderSetProgramRayTracingFlags
++//   nvnDeviceCopyAccelerationStructure
++//   nvnDeviceCompactAccelerationStructure
++//   nvnDeviceRelocateAccelerationStructure
++//   nvnCommandBufferSetRepresentativeFragmentTest
++//   nvnCommandBufferEvaluateDlss
++//   nvnDlssNetworkInitialize
++//   nvnDlssNetworkFinalize
++//   nvnDlssNetworkResize
++//   nvnDlssNetworkBuilderSetDefaults
++//   nvnDlssNetworkBuilderSetDevice
++//   nvnDlssNetworkBuilderGetDevice
++//   nvnDlssNetworkBuilderSetFlags
++//   nvnDlssNetworkBuilderGetFlags
++//   nvnDlssNetworkBuilderSetOutputResolution
++//   nvnDlssNetworkBuilderGetOutputResolution
++//   nvnDlssNetworkBuilderSetMethod
++//   nvnDlssNetworkBuilderGetMethod
++//   nvnDlssNetworkBuilderSetPreset
++//   nvnDlssNetworkBuilderGetPreset
++//   nvnDlssNetworkBuilderGetOptimalSettings
++//   nvnDlssNetworkBuilderGetStorageSize
++//   nvnDlssNetworkBuilderSetStorage
++//   nvnDlssNetworkBuilderGetMemory
++//   nvnDlssNetworkBuilderGetMemorySize
++//   nvnDlssNetworkBuilderSetTextureIDs
++//   nvnDlssNetworkBuilderGetTexturePool
++//   nvnDlssNetworkBuilderGetTextureIDs
++//   nvnDlssNetworkBuilderSetMaxEvaluationEntries
++//   nvnDlssNetworkBuilderGetMaxEvaluationEntries
++//   nvnDlssParametersSetDefaults
++//   nvnDlssParametersSetOverlayDebugLayer
++//   nvnDlssParametersSetOverlayFullScreen
++//   nvnDlssParametersSetOverlayShowNans
++//   nvnDlssParametersSetOverlayJitterDebug
++//   nvnDlssParametersSetInputColor
++//   nvnDlssParametersSetOutputColor
++//   nvnDlssParametersSetMotionVectors
++//   nvnDlssParametersSetDepth
++//   nvnDlssParametersSetBiasCurrentColorMask
++//   nvnDlssParametersSetJitterOffset
++//   nvnDlssParametersGetJitterOffset
++//   nvnDlssParametersSetPreExposure
++//   nvnDlssParametersGetPreExposure
++//   nvnDlssParametersSetExposureTexture
++//   nvnDlssParametersSetHistoryReset
++//   nvnDlssParametersGetHistoryReset
++//   nvnDlssParametersSetMotionVectorScale
++//   nvnDlssParametersGetMotionVectorScale
++//   nvnDlssParametersSetEvaluationIndex
++//   nvnDlssParametersGetEvaluationIndex
++//   nvnDlssParametersSetInputSubrectangleSize
++//   nvnDlssParametersGetInputSubrectangleSize
++//   nvnDlssParametersSetInputColorSubrectangleBase
++//   nvnDlssParametersGetInputColorSubrectangleBase
++//   nvnDlssParametersSetDepthSubrectangleBase
++//   nvnDlssParametersGetDepthSubrectangleBase
++//   nvnDlssParametersSetMotionVectorSubrectangleBase
++//   nvnDlssParametersGetMotionVectorSubrectangleBase
++//   nvnDlssParametersSetBiasCurrentColorSubrectangleBase
++//   nvnDlssParametersGetBiasCurrentColorSubrectangleBase
++//   nvnDlssParametersSetOutputSubrectangleBase
++//   nvnDlssParametersGetOutputSubrectangleBase
++//   nvnDeviceGetUniformBufferHandle
++//   nvnCommandBufferPushComputeConstants
++//   nvnCommandBufferPushComputeConstantsDeferred
++//   nvnCommandBufferPushGraphicsConstants
++//   nvnCommandBufferPushGraphicsConstantsDeferred
++//   nvnCommandBufferSetComputeOverlapMode
++//   nvnDeviceMessageBufferSetDefaults
++//   nvnDeviceMessageBufferSetDevice
++//   nvnDeviceMessageBufferSetStorage
++//   nvnDeviceMessageBufferBeginMessages
++//   nvnDeviceMessageBufferGetNextMessage
++//   nvnDeviceMessageBufferEndMessages
++//   nvnDeviceMessageBufferReset
++//   nvnCommandBufferBindDeviceMessageBuffer
++//   nvnCommandBufferBindDeviceMessageBufferDeferred
++//   nvnCommandBufferResetDeviceMessageBuffer
++//   nvnCommandBufferResetDeviceMessageBufferDeferred
++//   nvnDeviceCommandBufferSetDefaults
++//   nvnDeviceCommandBufferSetDevice
++//   nvnDeviceCommandBufferSetStorage
++//   nvnDeviceCommandBufferSetCommandMemorySize
++//   nvnDeviceCommandBufferSetComputeMemorySize
++//   nvnDeviceCommandBufferGetHandle
++//   nvnCommandBufferBeginDeviceCommands
++//   nvnCommandBufferEndDeviceCommands
++//   nvnCommandBufferSubmitDeviceCommands
++//   nvnDeviceGetCommandHandleMemorySize
++//   nvnProgramGetDeviceComputeMemorySize
++//   nvnCommandBufferSetGraphicsWorkloadPriority
++//   nvnCommandBufferSetComputeWorkloadPriority
++//   nvnCommandBufferSetResourceOccupancy
++//   nvnDirtyTileMapParametersSetDefaults
++//   nvnDirtyTileMapParametersSetTexture
++//   nvnDirtyTileMapParametersSetInputs
++//   nvnDirtyTileMapParametersSetOutputs
++//   nvnDirtyTileMapParametersSetConstantColorTable
++//   nvnDirtyTileMapParametersSetDepthStencilMask
++//   nvnDirtyTileMapParametersSetExpandFootprint
++//   nvnDirtyTileMapParametersGetTexture
++//   nvnDirtyTileMapParametersGetInputs
++//   nvnDirtyTileMapParametersGetOutputs
++//   nvnDirtyTileMapParametersGetConstantColorTable
++//   nvnDirtyTileMapParametersGetDepthStencilMask
++//   nvnDirtyTileMapParametersGetExpandFootprint
++//   nvnCommandBufferSetFloatBlendClamp
++//   nvnCommandBufferGetAccelerationStructureVisualizationData
+diff --git a/dm/gfx/nvn/nvn_tex.c b/dm/gfx/nvn/nvn_tex.c
+index 58929e7..3eabf3e 100644
+--- a/dm/gfx/nvn/nvn_tex.c
++++ b/dm/gfx/nvn/nvn_tex.c
+@@ -6,6 +6,7 @@
+ // Linear storage counts pixel rows, also for block-compressed formats. The block depth nibble and the pixel rows were found by digitalhivehub against the original
+ // NVN driver (nxnative PR #11) and taken from MacNativeGames 3c482a7, with the shapes of t_tex_layout.
+ #include "nvn_tex.h"
++#include <stdlib.h>   /* SWITCH2: getenv for DM_S2_TILEH */
+ 
+ typedef struct { uint8_t bpb, bw, bh; } fmt_t;   // Bytes per block, block width, block height (for uncompressed formats block width and height = 1)
+ 
+@@ -151,7 +152,9 @@ void nvn_tex_layout(const nvn_texdesc *d, nvn_texlayout *o) {
+         if (dpl == 3) tileD = pl >> 4;
+     } else if (dpl == 2 && sparse_of(d) && sparse_tile_h(t.bpb) >= 0 && blk(w * sx, t.bw) * t.bpb >= (128u >> sparse_tile_h(t.bpb)) * 64
+                && blk(h * sy, t.bh) >= 8u << sparse_tile_h(t.bpb)) tileH = (unsigned)sparse_tile_h(t.bpb);
+-    else if (dpl == 2) { uint32_t ah = blk(h * sy, t.bh); tileH = pick_tile(ah * 3 / 16); }
++    else if (dpl == 2) { uint32_t ah = blk(h * sy, t.bh); tileH = pick_tile(ah * 3 / 16);
++        // SWITCH2 (private bring-up): DM_S2_TILEH=<log2> overrides the automatic block height of 2D textures without a packaged layout, to find the Switch 2 driver rule
++        static int s2_th = -2; if (s2_th == -2) { const char *e = getenv("DM_S2_TILEH"); s2_th = e ? atoi(e) : -1; } if (s2_th >= 0) tileH = (unsigned)s2_th; }
+     else if (dpl == 3) tileD = pick_tile(z + z / 2);
+     uint64_t ls = layer_bytes(d, dpl, layered, w, h, z, tileH, tileD, t);
+     // MINIMAL_LAYOUT (0x200): the driver keeps the automatic block height and depth only when the whole layer (every level, the layer alignment) is no larger than with 1-GOB blocks,
+diff --git a/dm/gfx/nvn/nvn_thunks.S b/dm/gfx/nvn/nvn_thunks.S
+index b40e1a6..24a0984 100644
+--- a/dm/gfx/nvn/nvn_thunks.S
++++ b/dm/gfx/nvn/nvn_thunks.S
+@@ -5373,6 +5373,1976 @@ _nvnth_536:
+     stadd x17, [x16]
+     ldr x17, [x16, #8]
+     br x17
++    .globl _nvnth_537
++_nvnth_537:
++    adrp x16, _nvn_slot@PAGE
++    add x16, x16, _nvn_slot@PAGEOFF
++    mov x17, #8592
++    add x16, x16, x17
++    mov x17, #1
++    stadd x17, [x16]
++    ldr x17, [x16, #8]
++    br x17
++    .globl _nvnth_538
++_nvnth_538:
++    adrp x16, _nvn_slot@PAGE
++    add x16, x16, _nvn_slot@PAGEOFF
++    mov x17, #8608
++    add x16, x16, x17
++    mov x17, #1
++    stadd x17, [x16]
++    ldr x17, [x16, #8]
++    br x17
++    .globl _nvnth_539
++_nvnth_539:
++    adrp x16, _nvn_slot@PAGE
++    add x16, x16, _nvn_slot@PAGEOFF
++    mov x17, #8624
++    add x16, x16, x17
++    mov x17, #1
++    stadd x17, [x16]
++    ldr x17, [x16, #8]
++    br x17
++    .globl _nvnth_540
++_nvnth_540:
++    adrp x16, _nvn_slot@PAGE
++    add x16, x16, _nvn_slot@PAGEOFF
++    mov x17, #8640
++    add x16, x16, x17
++    mov x17, #1
++    stadd x17, [x16]
++    ldr x17, [x16, #8]
++    br x17
++    .globl _nvnth_541
++_nvnth_541:
++    adrp x16, _nvn_slot@PAGE
++    add x16, x16, _nvn_slot@PAGEOFF
++    mov x17, #8656
++    add x16, x16, x17
++    mov x17, #1
++    stadd x17, [x16]
++    ldr x17, [x16, #8]
++    br x17
++    .globl _nvnth_542
++_nvnth_542:
++    adrp x16, _nvn_slot@PAGE
++    add x16, x16, _nvn_slot@PAGEOFF
++    mov x17, #8672
++    add x16, x16, x17
++    mov x17, #1
++    stadd x17, [x16]
++    ldr x17, [x16, #8]
++    br x17
++    .globl _nvnth_543
++_nvnth_543:
++    adrp x16, _nvn_slot@PAGE
++    add x16, x16, _nvn_slot@PAGEOFF
++    mov x17, #8688
++    add x16, x16, x17
++    mov x17, #1
++    stadd x17, [x16]
++    ldr x17, [x16, #8]
++    br x17
++    .globl _nvnth_544
++_nvnth_544:
++    adrp x16, _nvn_slot@PAGE
++    add x16, x16, _nvn_slot@PAGEOFF
++    mov x17, #8704
++    add x16, x16, x17
++    mov x17, #1
++    stadd x17, [x16]
++    ldr x17, [x16, #8]
++    br x17
++    .globl _nvnth_545
++_nvnth_545:
++    adrp x16, _nvn_slot@PAGE
++    add x16, x16, _nvn_slot@PAGEOFF
++    mov x17, #8720
++    add x16, x16, x17
++    mov x17, #1
++    stadd x17, [x16]
++    ldr x17, [x16, #8]
++    br x17
++    .globl _nvnth_546
++_nvnth_546:
++    adrp x16, _nvn_slot@PAGE
++    add x16, x16, _nvn_slot@PAGEOFF
++    mov x17, #8736
++    add x16, x16, x17
++    mov x17, #1
++    stadd x17, [x16]
++    ldr x17, [x16, #8]
++    br x17
++    .globl _nvnth_547
++_nvnth_547:
++    adrp x16, _nvn_slot@PAGE
++    add x16, x16, _nvn_slot@PAGEOFF
++    mov x17, #8752
++    add x16, x16, x17
++    mov x17, #1
++    stadd x17, [x16]
++    ldr x17, [x16, #8]
++    br x17
++    .globl _nvnth_548
++_nvnth_548:
++    adrp x16, _nvn_slot@PAGE
++    add x16, x16, _nvn_slot@PAGEOFF
++    mov x17, #8768
++    add x16, x16, x17
++    mov x17, #1
++    stadd x17, [x16]
++    ldr x17, [x16, #8]
++    br x17
++    .globl _nvnth_549
++_nvnth_549:
++    adrp x16, _nvn_slot@PAGE
++    add x16, x16, _nvn_slot@PAGEOFF
++    mov x17, #8784
++    add x16, x16, x17
++    mov x17, #1
++    stadd x17, [x16]
++    ldr x17, [x16, #8]
++    br x17
++    .globl _nvnth_550
++_nvnth_550:
++    adrp x16, _nvn_slot@PAGE
++    add x16, x16, _nvn_slot@PAGEOFF
++    mov x17, #8800
++    add x16, x16, x17
++    mov x17, #1
++    stadd x17, [x16]
++    ldr x17, [x16, #8]
++    br x17
++    .globl _nvnth_551
++_nvnth_551:
++    adrp x16, _nvn_slot@PAGE
++    add x16, x16, _nvn_slot@PAGEOFF
++    mov x17, #8816
++    add x16, x16, x17
++    mov x17, #1
++    stadd x17, [x16]
++    ldr x17, [x16, #8]
++    br x17
++    .globl _nvnth_552
++_nvnth_552:
++    adrp x16, _nvn_slot@PAGE
++    add x16, x16, _nvn_slot@PAGEOFF
++    mov x17, #8832
++    add x16, x16, x17
++    mov x17, #1
++    stadd x17, [x16]
++    ldr x17, [x16, #8]
++    br x17
++    .globl _nvnth_553
++_nvnth_553:
++    adrp x16, _nvn_slot@PAGE
++    add x16, x16, _nvn_slot@PAGEOFF
++    mov x17, #8848
++    add x16, x16, x17
++    mov x17, #1
++    stadd x17, [x16]
++    ldr x17, [x16, #8]
++    br x17
++    .globl _nvnth_554
++_nvnth_554:
++    adrp x16, _nvn_slot@PAGE
++    add x16, x16, _nvn_slot@PAGEOFF
++    mov x17, #8864
++    add x16, x16, x17
++    mov x17, #1
++    stadd x17, [x16]
++    ldr x17, [x16, #8]
++    br x17
++    .globl _nvnth_555
++_nvnth_555:
++    adrp x16, _nvn_slot@PAGE
++    add x16, x16, _nvn_slot@PAGEOFF
++    mov x17, #8880
++    add x16, x16, x17
++    mov x17, #1
++    stadd x17, [x16]
++    ldr x17, [x16, #8]
++    br x17
++    .globl _nvnth_556
++_nvnth_556:
++    adrp x16, _nvn_slot@PAGE
++    add x16, x16, _nvn_slot@PAGEOFF
++    mov x17, #8896
++    add x16, x16, x17
++    mov x17, #1
++    stadd x17, [x16]
++    ldr x17, [x16, #8]
++    br x17
++    .globl _nvnth_557
++_nvnth_557:
++    adrp x16, _nvn_slot@PAGE
++    add x16, x16, _nvn_slot@PAGEOFF
++    mov x17, #8912
++    add x16, x16, x17
++    mov x17, #1
++    stadd x17, [x16]
++    ldr x17, [x16, #8]
++    br x17
++    .globl _nvnth_558
++_nvnth_558:
++    adrp x16, _nvn_slot@PAGE
++    add x16, x16, _nvn_slot@PAGEOFF
++    mov x17, #8928
++    add x16, x16, x17
++    mov x17, #1
++    stadd x17, [x16]
++    ldr x17, [x16, #8]
++    br x17
++    .globl _nvnth_559
++_nvnth_559:
++    adrp x16, _nvn_slot@PAGE
++    add x16, x16, _nvn_slot@PAGEOFF
++    mov x17, #8944
++    add x16, x16, x17
++    mov x17, #1
++    stadd x17, [x16]
++    ldr x17, [x16, #8]
++    br x17
++    .globl _nvnth_560
++_nvnth_560:
++    adrp x16, _nvn_slot@PAGE
++    add x16, x16, _nvn_slot@PAGEOFF
++    mov x17, #8960
++    add x16, x16, x17
++    mov x17, #1
++    stadd x17, [x16]
++    ldr x17, [x16, #8]
++    br x17
++    .globl _nvnth_561
++_nvnth_561:
++    adrp x16, _nvn_slot@PAGE
++    add x16, x16, _nvn_slot@PAGEOFF
++    mov x17, #8976
++    add x16, x16, x17
++    mov x17, #1
++    stadd x17, [x16]
++    ldr x17, [x16, #8]
++    br x17
++    .globl _nvnth_562
++_nvnth_562:
++    adrp x16, _nvn_slot@PAGE
++    add x16, x16, _nvn_slot@PAGEOFF
++    mov x17, #8992
++    add x16, x16, x17
++    mov x17, #1
++    stadd x17, [x16]
++    ldr x17, [x16, #8]
++    br x17
++    .globl _nvnth_563
++_nvnth_563:
++    adrp x16, _nvn_slot@PAGE
++    add x16, x16, _nvn_slot@PAGEOFF
++    mov x17, #9008
++    add x16, x16, x17
++    mov x17, #1
++    stadd x17, [x16]
++    ldr x17, [x16, #8]
++    br x17
++    .globl _nvnth_564
++_nvnth_564:
++    adrp x16, _nvn_slot@PAGE
++    add x16, x16, _nvn_slot@PAGEOFF
++    mov x17, #9024
++    add x16, x16, x17
++    mov x17, #1
++    stadd x17, [x16]
++    ldr x17, [x16, #8]
++    br x17
++    .globl _nvnth_565
++_nvnth_565:
++    adrp x16, _nvn_slot@PAGE
++    add x16, x16, _nvn_slot@PAGEOFF
++    mov x17, #9040
++    add x16, x16, x17
++    mov x17, #1
++    stadd x17, [x16]
++    ldr x17, [x16, #8]
++    br x17
++    .globl _nvnth_566
++_nvnth_566:
++    adrp x16, _nvn_slot@PAGE
++    add x16, x16, _nvn_slot@PAGEOFF
++    mov x17, #9056
++    add x16, x16, x17
++    mov x17, #1
++    stadd x17, [x16]
++    ldr x17, [x16, #8]
++    br x17
++    .globl _nvnth_567
++_nvnth_567:
++    adrp x16, _nvn_slot@PAGE
++    add x16, x16, _nvn_slot@PAGEOFF
++    mov x17, #9072
++    add x16, x16, x17
++    mov x17, #1
++    stadd x17, [x16]
++    ldr x17, [x16, #8]
++    br x17
++    .globl _nvnth_568
++_nvnth_568:
++    adrp x16, _nvn_slot@PAGE
++    add x16, x16, _nvn_slot@PAGEOFF
++    mov x17, #9088
++    add x16, x16, x17
++    mov x17, #1
++    stadd x17, [x16]
++    ldr x17, [x16, #8]
++    br x17
++    .globl _nvnth_569
++_nvnth_569:
++    adrp x16, _nvn_slot@PAGE
++    add x16, x16, _nvn_slot@PAGEOFF
++    mov x17, #9104
++    add x16, x16, x17
++    mov x17, #1
++    stadd x17, [x16]
++    ldr x17, [x16, #8]
++    br x17
++    .globl _nvnth_570
++_nvnth_570:
++    adrp x16, _nvn_slot@PAGE
++    add x16, x16, _nvn_slot@PAGEOFF
++    mov x17, #9120
++    add x16, x16, x17
++    mov x17, #1
++    stadd x17, [x16]
++    ldr x17, [x16, #8]
++    br x17
++    .globl _nvnth_571
++_nvnth_571:
++    adrp x16, _nvn_slot@PAGE
++    add x16, x16, _nvn_slot@PAGEOFF
++    mov x17, #9136
++    add x16, x16, x17
++    mov x17, #1
++    stadd x17, [x16]
++    ldr x17, [x16, #8]
++    br x17
++    .globl _nvnth_572
++_nvnth_572:
++    adrp x16, _nvn_slot@PAGE
++    add x16, x16, _nvn_slot@PAGEOFF
++    mov x17, #9152
++    add x16, x16, x17
++    mov x17, #1
++    stadd x17, [x16]
++    ldr x17, [x16, #8]
++    br x17
++    .globl _nvnth_573
++_nvnth_573:
++    adrp x16, _nvn_slot@PAGE
++    add x16, x16, _nvn_slot@PAGEOFF
++    mov x17, #9168
++    add x16, x16, x17
++    mov x17, #1
++    stadd x17, [x16]
++    ldr x17, [x16, #8]
++    br x17
++    .globl _nvnth_574
++_nvnth_574:
++    adrp x16, _nvn_slot@PAGE
++    add x16, x16, _nvn_slot@PAGEOFF
++    mov x17, #9184
++    add x16, x16, x17
++    mov x17, #1
++    stadd x17, [x16]
++    ldr x17, [x16, #8]
++    br x17
++    .globl _nvnth_575
++_nvnth_575:
++    adrp x16, _nvn_slot@PAGE
++    add x16, x16, _nvn_slot@PAGEOFF
++    mov x17, #9200
++    add x16, x16, x17
++    mov x17, #1
++    stadd x17, [x16]
++    ldr x17, [x16, #8]
++    br x17
++    .globl _nvnth_576
++_nvnth_576:
++    adrp x16, _nvn_slot@PAGE
++    add x16, x16, _nvn_slot@PAGEOFF
++    mov x17, #9216
++    add x16, x16, x17
++    mov x17, #1
++    stadd x17, [x16]
++    ldr x17, [x16, #8]
++    br x17
++    .globl _nvnth_577
++_nvnth_577:
++    adrp x16, _nvn_slot@PAGE
++    add x16, x16, _nvn_slot@PAGEOFF
++    mov x17, #9232
++    add x16, x16, x17
++    mov x17, #1
++    stadd x17, [x16]
++    ldr x17, [x16, #8]
++    br x17
++    .globl _nvnth_578
++_nvnth_578:
++    adrp x16, _nvn_slot@PAGE
++    add x16, x16, _nvn_slot@PAGEOFF
++    mov x17, #9248
++    add x16, x16, x17
++    mov x17, #1
++    stadd x17, [x16]
++    ldr x17, [x16, #8]
++    br x17
++    .globl _nvnth_579
++_nvnth_579:
++    adrp x16, _nvn_slot@PAGE
++    add x16, x16, _nvn_slot@PAGEOFF
++    mov x17, #9264
++    add x16, x16, x17
++    mov x17, #1
++    stadd x17, [x16]
++    ldr x17, [x16, #8]
++    br x17
++    .globl _nvnth_580
++_nvnth_580:
++    adrp x16, _nvn_slot@PAGE
++    add x16, x16, _nvn_slot@PAGEOFF
++    mov x17, #9280
++    add x16, x16, x17
++    mov x17, #1
++    stadd x17, [x16]
++    ldr x17, [x16, #8]
++    br x17
++    .globl _nvnth_581
++_nvnth_581:
++    adrp x16, _nvn_slot@PAGE
++    add x16, x16, _nvn_slot@PAGEOFF
++    mov x17, #9296
++    add x16, x16, x17
++    mov x17, #1
++    stadd x17, [x16]
++    ldr x17, [x16, #8]
++    br x17
++    .globl _nvnth_582
++_nvnth_582:
++    adrp x16, _nvn_slot@PAGE
++    add x16, x16, _nvn_slot@PAGEOFF
++    mov x17, #9312
++    add x16, x16, x17
++    mov x17, #1
++    stadd x17, [x16]
++    ldr x17, [x16, #8]
++    br x17
++    .globl _nvnth_583
++_nvnth_583:
++    adrp x16, _nvn_slot@PAGE
++    add x16, x16, _nvn_slot@PAGEOFF
++    mov x17, #9328
++    add x16, x16, x17
++    mov x17, #1
++    stadd x17, [x16]
++    ldr x17, [x16, #8]
++    br x17
++    .globl _nvnth_584
++_nvnth_584:
++    adrp x16, _nvn_slot@PAGE
++    add x16, x16, _nvn_slot@PAGEOFF
++    mov x17, #9344
++    add x16, x16, x17
++    mov x17, #1
++    stadd x17, [x16]
++    ldr x17, [x16, #8]
++    br x17
++    .globl _nvnth_585
++_nvnth_585:
++    adrp x16, _nvn_slot@PAGE
++    add x16, x16, _nvn_slot@PAGEOFF
++    mov x17, #9360
++    add x16, x16, x17
++    mov x17, #1
++    stadd x17, [x16]
++    ldr x17, [x16, #8]
++    br x17
++    .globl _nvnth_586
++_nvnth_586:
++    adrp x16, _nvn_slot@PAGE
++    add x16, x16, _nvn_slot@PAGEOFF
++    mov x17, #9376
++    add x16, x16, x17
++    mov x17, #1
++    stadd x17, [x16]
++    ldr x17, [x16, #8]
++    br x17
++    .globl _nvnth_587
++_nvnth_587:
++    adrp x16, _nvn_slot@PAGE
++    add x16, x16, _nvn_slot@PAGEOFF
++    mov x17, #9392
++    add x16, x16, x17
++    mov x17, #1
++    stadd x17, [x16]
++    ldr x17, [x16, #8]
++    br x17
++    .globl _nvnth_588
++_nvnth_588:
++    adrp x16, _nvn_slot@PAGE
++    add x16, x16, _nvn_slot@PAGEOFF
++    mov x17, #9408
++    add x16, x16, x17
++    mov x17, #1
++    stadd x17, [x16]
++    ldr x17, [x16, #8]
++    br x17
++    .globl _nvnth_589
++_nvnth_589:
++    adrp x16, _nvn_slot@PAGE
++    add x16, x16, _nvn_slot@PAGEOFF
++    mov x17, #9424
++    add x16, x16, x17
++    mov x17, #1
++    stadd x17, [x16]
++    ldr x17, [x16, #8]
++    br x17
++    .globl _nvnth_590
++_nvnth_590:
++    adrp x16, _nvn_slot@PAGE
++    add x16, x16, _nvn_slot@PAGEOFF
++    mov x17, #9440
++    add x16, x16, x17
++    mov x17, #1
++    stadd x17, [x16]
++    ldr x17, [x16, #8]
++    br x17
++    .globl _nvnth_591
++_nvnth_591:
++    adrp x16, _nvn_slot@PAGE
++    add x16, x16, _nvn_slot@PAGEOFF
++    mov x17, #9456
++    add x16, x16, x17
++    mov x17, #1
++    stadd x17, [x16]
++    ldr x17, [x16, #8]
++    br x17
++    .globl _nvnth_592
++_nvnth_592:
++    adrp x16, _nvn_slot@PAGE
++    add x16, x16, _nvn_slot@PAGEOFF
++    mov x17, #9472
++    add x16, x16, x17
++    mov x17, #1
++    stadd x17, [x16]
++    ldr x17, [x16, #8]
++    br x17
++    .globl _nvnth_593
++_nvnth_593:
++    adrp x16, _nvn_slot@PAGE
++    add x16, x16, _nvn_slot@PAGEOFF
++    mov x17, #9488
++    add x16, x16, x17
++    mov x17, #1
++    stadd x17, [x16]
++    ldr x17, [x16, #8]
++    br x17
++    .globl _nvnth_594
++_nvnth_594:
++    adrp x16, _nvn_slot@PAGE
++    add x16, x16, _nvn_slot@PAGEOFF
++    mov x17, #9504
++    add x16, x16, x17
++    mov x17, #1
++    stadd x17, [x16]
++    ldr x17, [x16, #8]
++    br x17
++    .globl _nvnth_595
++_nvnth_595:
++    adrp x16, _nvn_slot@PAGE
++    add x16, x16, _nvn_slot@PAGEOFF
++    mov x17, #9520
++    add x16, x16, x17
++    mov x17, #1
++    stadd x17, [x16]
++    ldr x17, [x16, #8]
++    br x17
++    .globl _nvnth_596
++_nvnth_596:
++    adrp x16, _nvn_slot@PAGE
++    add x16, x16, _nvn_slot@PAGEOFF
++    mov x17, #9536
++    add x16, x16, x17
++    mov x17, #1
++    stadd x17, [x16]
++    ldr x17, [x16, #8]
++    br x17
++    .globl _nvnth_597
++_nvnth_597:
++    adrp x16, _nvn_slot@PAGE
++    add x16, x16, _nvn_slot@PAGEOFF
++    mov x17, #9552
++    add x16, x16, x17
++    mov x17, #1
++    stadd x17, [x16]
++    ldr x17, [x16, #8]
++    br x17
++    .globl _nvnth_598
++_nvnth_598:
++    adrp x16, _nvn_slot@PAGE
++    add x16, x16, _nvn_slot@PAGEOFF
++    mov x17, #9568
++    add x16, x16, x17
++    mov x17, #1
++    stadd x17, [x16]
++    ldr x17, [x16, #8]
++    br x17
++    .globl _nvnth_599
++_nvnth_599:
++    adrp x16, _nvn_slot@PAGE
++    add x16, x16, _nvn_slot@PAGEOFF
++    mov x17, #9584
++    add x16, x16, x17
++    mov x17, #1
++    stadd x17, [x16]
++    ldr x17, [x16, #8]
++    br x17
++    .globl _nvnth_600
++_nvnth_600:
++    adrp x16, _nvn_slot@PAGE
++    add x16, x16, _nvn_slot@PAGEOFF
++    mov x17, #9600
++    add x16, x16, x17
++    mov x17, #1
++    stadd x17, [x16]
++    ldr x17, [x16, #8]
++    br x17
++    .globl _nvnth_601
++_nvnth_601:
++    adrp x16, _nvn_slot@PAGE
++    add x16, x16, _nvn_slot@PAGEOFF
++    mov x17, #9616
++    add x16, x16, x17
++    mov x17, #1
++    stadd x17, [x16]
++    ldr x17, [x16, #8]
++    br x17
++    .globl _nvnth_602
++_nvnth_602:
++    adrp x16, _nvn_slot@PAGE
++    add x16, x16, _nvn_slot@PAGEOFF
++    mov x17, #9632
++    add x16, x16, x17
++    mov x17, #1
++    stadd x17, [x16]
++    ldr x17, [x16, #8]
++    br x17
++    .globl _nvnth_603
++_nvnth_603:
++    adrp x16, _nvn_slot@PAGE
++    add x16, x16, _nvn_slot@PAGEOFF
++    mov x17, #9648
++    add x16, x16, x17
++    mov x17, #1
++    stadd x17, [x16]
++    ldr x17, [x16, #8]
++    br x17
++    .globl _nvnth_604
++_nvnth_604:
++    adrp x16, _nvn_slot@PAGE
++    add x16, x16, _nvn_slot@PAGEOFF
++    mov x17, #9664
++    add x16, x16, x17
++    mov x17, #1
++    stadd x17, [x16]
++    ldr x17, [x16, #8]
++    br x17
++    .globl _nvnth_605
++_nvnth_605:
++    adrp x16, _nvn_slot@PAGE
++    add x16, x16, _nvn_slot@PAGEOFF
++    mov x17, #9680
++    add x16, x16, x17
++    mov x17, #1
++    stadd x17, [x16]
++    ldr x17, [x16, #8]
++    br x17
++    .globl _nvnth_606
++_nvnth_606:
++    adrp x16, _nvn_slot@PAGE
++    add x16, x16, _nvn_slot@PAGEOFF
++    mov x17, #9696
++    add x16, x16, x17
++    mov x17, #1
++    stadd x17, [x16]
++    ldr x17, [x16, #8]
++    br x17
++    .globl _nvnth_607
++_nvnth_607:
++    adrp x16, _nvn_slot@PAGE
++    add x16, x16, _nvn_slot@PAGEOFF
++    mov x17, #9712
++    add x16, x16, x17
++    mov x17, #1
++    stadd x17, [x16]
++    ldr x17, [x16, #8]
++    br x17
++    .globl _nvnth_608
++_nvnth_608:
++    adrp x16, _nvn_slot@PAGE
++    add x16, x16, _nvn_slot@PAGEOFF
++    mov x17, #9728
++    add x16, x16, x17
++    mov x17, #1
++    stadd x17, [x16]
++    ldr x17, [x16, #8]
++    br x17
++    .globl _nvnth_609
++_nvnth_609:
++    adrp x16, _nvn_slot@PAGE
++    add x16, x16, _nvn_slot@PAGEOFF
++    mov x17, #9744
++    add x16, x16, x17
++    mov x17, #1
++    stadd x17, [x16]
++    ldr x17, [x16, #8]
++    br x17
++    .globl _nvnth_610
++_nvnth_610:
++    adrp x16, _nvn_slot@PAGE
++    add x16, x16, _nvn_slot@PAGEOFF
++    mov x17, #9760
++    add x16, x16, x17
++    mov x17, #1
++    stadd x17, [x16]
++    ldr x17, [x16, #8]
++    br x17
++    .globl _nvnth_611
++_nvnth_611:
++    adrp x16, _nvn_slot@PAGE
++    add x16, x16, _nvn_slot@PAGEOFF
++    mov x17, #9776
++    add x16, x16, x17
++    mov x17, #1
++    stadd x17, [x16]
++    ldr x17, [x16, #8]
++    br x17
++    .globl _nvnth_612
++_nvnth_612:
++    adrp x16, _nvn_slot@PAGE
++    add x16, x16, _nvn_slot@PAGEOFF
++    mov x17, #9792
++    add x16, x16, x17
++    mov x17, #1
++    stadd x17, [x16]
++    ldr x17, [x16, #8]
++    br x17
++    .globl _nvnth_613
++_nvnth_613:
++    adrp x16, _nvn_slot@PAGE
++    add x16, x16, _nvn_slot@PAGEOFF
++    mov x17, #9808
++    add x16, x16, x17
++    mov x17, #1
++    stadd x17, [x16]
++    ldr x17, [x16, #8]
++    br x17
++    .globl _nvnth_614
++_nvnth_614:
++    adrp x16, _nvn_slot@PAGE
++    add x16, x16, _nvn_slot@PAGEOFF
++    mov x17, #9824
++    add x16, x16, x17
++    mov x17, #1
++    stadd x17, [x16]
++    ldr x17, [x16, #8]
++    br x17
++    .globl _nvnth_615
++_nvnth_615:
++    adrp x16, _nvn_slot@PAGE
++    add x16, x16, _nvn_slot@PAGEOFF
++    mov x17, #9840
++    add x16, x16, x17
++    mov x17, #1
++    stadd x17, [x16]
++    ldr x17, [x16, #8]
++    br x17
++    .globl _nvnth_616
++_nvnth_616:
++    adrp x16, _nvn_slot@PAGE
++    add x16, x16, _nvn_slot@PAGEOFF
++    mov x17, #9856
++    add x16, x16, x17
++    mov x17, #1
++    stadd x17, [x16]
++    ldr x17, [x16, #8]
++    br x17
++    .globl _nvnth_617
++_nvnth_617:
++    adrp x16, _nvn_slot@PAGE
++    add x16, x16, _nvn_slot@PAGEOFF
++    mov x17, #9872
++    add x16, x16, x17
++    mov x17, #1
++    stadd x17, [x16]
++    ldr x17, [x16, #8]
++    br x17
++    .globl _nvnth_618
++_nvnth_618:
++    adrp x16, _nvn_slot@PAGE
++    add x16, x16, _nvn_slot@PAGEOFF
++    mov x17, #9888
++    add x16, x16, x17
++    mov x17, #1
++    stadd x17, [x16]
++    ldr x17, [x16, #8]
++    br x17
++    .globl _nvnth_619
++_nvnth_619:
++    adrp x16, _nvn_slot@PAGE
++    add x16, x16, _nvn_slot@PAGEOFF
++    mov x17, #9904
++    add x16, x16, x17
++    mov x17, #1
++    stadd x17, [x16]
++    ldr x17, [x16, #8]
++    br x17
++    .globl _nvnth_620
++_nvnth_620:
++    adrp x16, _nvn_slot@PAGE
++    add x16, x16, _nvn_slot@PAGEOFF
++    mov x17, #9920
++    add x16, x16, x17
++    mov x17, #1
++    stadd x17, [x16]
++    ldr x17, [x16, #8]
++    br x17
++    .globl _nvnth_621
++_nvnth_621:
++    adrp x16, _nvn_slot@PAGE
++    add x16, x16, _nvn_slot@PAGEOFF
++    mov x17, #9936
++    add x16, x16, x17
++    mov x17, #1
++    stadd x17, [x16]
++    ldr x17, [x16, #8]
++    br x17
++    .globl _nvnth_622
++_nvnth_622:
++    adrp x16, _nvn_slot@PAGE
++    add x16, x16, _nvn_slot@PAGEOFF
++    mov x17, #9952
++    add x16, x16, x17
++    mov x17, #1
++    stadd x17, [x16]
++    ldr x17, [x16, #8]
++    br x17
++    .globl _nvnth_623
++_nvnth_623:
++    adrp x16, _nvn_slot@PAGE
++    add x16, x16, _nvn_slot@PAGEOFF
++    mov x17, #9968
++    add x16, x16, x17
++    mov x17, #1
++    stadd x17, [x16]
++    ldr x17, [x16, #8]
++    br x17
++    .globl _nvnth_624
++_nvnth_624:
++    adrp x16, _nvn_slot@PAGE
++    add x16, x16, _nvn_slot@PAGEOFF
++    mov x17, #9984
++    add x16, x16, x17
++    mov x17, #1
++    stadd x17, [x16]
++    ldr x17, [x16, #8]
++    br x17
++    .globl _nvnth_625
++_nvnth_625:
++    adrp x16, _nvn_slot@PAGE
++    add x16, x16, _nvn_slot@PAGEOFF
++    mov x17, #10000
++    add x16, x16, x17
++    mov x17, #1
++    stadd x17, [x16]
++    ldr x17, [x16, #8]
++    br x17
++    .globl _nvnth_626
++_nvnth_626:
++    adrp x16, _nvn_slot@PAGE
++    add x16, x16, _nvn_slot@PAGEOFF
++    mov x17, #10016
++    add x16, x16, x17
++    mov x17, #1
++    stadd x17, [x16]
++    ldr x17, [x16, #8]
++    br x17
++    .globl _nvnth_627
++_nvnth_627:
++    adrp x16, _nvn_slot@PAGE
++    add x16, x16, _nvn_slot@PAGEOFF
++    mov x17, #10032
++    add x16, x16, x17
++    mov x17, #1
++    stadd x17, [x16]
++    ldr x17, [x16, #8]
++    br x17
++    .globl _nvnth_628
++_nvnth_628:
++    adrp x16, _nvn_slot@PAGE
++    add x16, x16, _nvn_slot@PAGEOFF
++    mov x17, #10048
++    add x16, x16, x17
++    mov x17, #1
++    stadd x17, [x16]
++    ldr x17, [x16, #8]
++    br x17
++    .globl _nvnth_629
++_nvnth_629:
++    adrp x16, _nvn_slot@PAGE
++    add x16, x16, _nvn_slot@PAGEOFF
++    mov x17, #10064
++    add x16, x16, x17
++    mov x17, #1
++    stadd x17, [x16]
++    ldr x17, [x16, #8]
++    br x17
++    .globl _nvnth_630
++_nvnth_630:
++    adrp x16, _nvn_slot@PAGE
++    add x16, x16, _nvn_slot@PAGEOFF
++    mov x17, #10080
++    add x16, x16, x17
++    mov x17, #1
++    stadd x17, [x16]
++    ldr x17, [x16, #8]
++    br x17
++    .globl _nvnth_631
++_nvnth_631:
++    adrp x16, _nvn_slot@PAGE
++    add x16, x16, _nvn_slot@PAGEOFF
++    mov x17, #10096
++    add x16, x16, x17
++    mov x17, #1
++    stadd x17, [x16]
++    ldr x17, [x16, #8]
++    br x17
++    .globl _nvnth_632
++_nvnth_632:
++    adrp x16, _nvn_slot@PAGE
++    add x16, x16, _nvn_slot@PAGEOFF
++    mov x17, #10112
++    add x16, x16, x17
++    mov x17, #1
++    stadd x17, [x16]
++    ldr x17, [x16, #8]
++    br x17
++    .globl _nvnth_633
++_nvnth_633:
++    adrp x16, _nvn_slot@PAGE
++    add x16, x16, _nvn_slot@PAGEOFF
++    mov x17, #10128
++    add x16, x16, x17
++    mov x17, #1
++    stadd x17, [x16]
++    ldr x17, [x16, #8]
++    br x17
++    .globl _nvnth_634
++_nvnth_634:
++    adrp x16, _nvn_slot@PAGE
++    add x16, x16, _nvn_slot@PAGEOFF
++    mov x17, #10144
++    add x16, x16, x17
++    mov x17, #1
++    stadd x17, [x16]
++    ldr x17, [x16, #8]
++    br x17
++    .globl _nvnth_635
++_nvnth_635:
++    adrp x16, _nvn_slot@PAGE
++    add x16, x16, _nvn_slot@PAGEOFF
++    mov x17, #10160
++    add x16, x16, x17
++    mov x17, #1
++    stadd x17, [x16]
++    ldr x17, [x16, #8]
++    br x17
++    .globl _nvnth_636
++_nvnth_636:
++    adrp x16, _nvn_slot@PAGE
++    add x16, x16, _nvn_slot@PAGEOFF
++    mov x17, #10176
++    add x16, x16, x17
++    mov x17, #1
++    stadd x17, [x16]
++    ldr x17, [x16, #8]
++    br x17
++    .globl _nvnth_637
++_nvnth_637:
++    adrp x16, _nvn_slot@PAGE
++    add x16, x16, _nvn_slot@PAGEOFF
++    mov x17, #10192
++    add x16, x16, x17
++    mov x17, #1
++    stadd x17, [x16]
++    ldr x17, [x16, #8]
++    br x17
++    .globl _nvnth_638
++_nvnth_638:
++    adrp x16, _nvn_slot@PAGE
++    add x16, x16, _nvn_slot@PAGEOFF
++    mov x17, #10208
++    add x16, x16, x17
++    mov x17, #1
++    stadd x17, [x16]
++    ldr x17, [x16, #8]
++    br x17
++    .globl _nvnth_639
++_nvnth_639:
++    adrp x16, _nvn_slot@PAGE
++    add x16, x16, _nvn_slot@PAGEOFF
++    mov x17, #10224
++    add x16, x16, x17
++    mov x17, #1
++    stadd x17, [x16]
++    ldr x17, [x16, #8]
++    br x17
++    .globl _nvnth_640
++_nvnth_640:
++    adrp x16, _nvn_slot@PAGE
++    add x16, x16, _nvn_slot@PAGEOFF
++    mov x17, #10240
++    add x16, x16, x17
++    mov x17, #1
++    stadd x17, [x16]
++    ldr x17, [x16, #8]
++    br x17
++    .globl _nvnth_641
++_nvnth_641:
++    adrp x16, _nvn_slot@PAGE
++    add x16, x16, _nvn_slot@PAGEOFF
++    mov x17, #10256
++    add x16, x16, x17
++    mov x17, #1
++    stadd x17, [x16]
++    ldr x17, [x16, #8]
++    br x17
++    .globl _nvnth_642
++_nvnth_642:
++    adrp x16, _nvn_slot@PAGE
++    add x16, x16, _nvn_slot@PAGEOFF
++    mov x17, #10272
++    add x16, x16, x17
++    mov x17, #1
++    stadd x17, [x16]
++    ldr x17, [x16, #8]
++    br x17
++    .globl _nvnth_643
++_nvnth_643:
++    adrp x16, _nvn_slot@PAGE
++    add x16, x16, _nvn_slot@PAGEOFF
++    mov x17, #10288
++    add x16, x16, x17
++    mov x17, #1
++    stadd x17, [x16]
++    ldr x17, [x16, #8]
++    br x17
++    .globl _nvnth_644
++_nvnth_644:
++    adrp x16, _nvn_slot@PAGE
++    add x16, x16, _nvn_slot@PAGEOFF
++    mov x17, #10304
++    add x16, x16, x17
++    mov x17, #1
++    stadd x17, [x16]
++    ldr x17, [x16, #8]
++    br x17
++    .globl _nvnth_645
++_nvnth_645:
++    adrp x16, _nvn_slot@PAGE
++    add x16, x16, _nvn_slot@PAGEOFF
++    mov x17, #10320
++    add x16, x16, x17
++    mov x17, #1
++    stadd x17, [x16]
++    ldr x17, [x16, #8]
++    br x17
++    .globl _nvnth_646
++_nvnth_646:
++    adrp x16, _nvn_slot@PAGE
++    add x16, x16, _nvn_slot@PAGEOFF
++    mov x17, #10336
++    add x16, x16, x17
++    mov x17, #1
++    stadd x17, [x16]
++    ldr x17, [x16, #8]
++    br x17
++    .globl _nvnth_647
++_nvnth_647:
++    adrp x16, _nvn_slot@PAGE
++    add x16, x16, _nvn_slot@PAGEOFF
++    mov x17, #10352
++    add x16, x16, x17
++    mov x17, #1
++    stadd x17, [x16]
++    ldr x17, [x16, #8]
++    br x17
++    .globl _nvnth_648
++_nvnth_648:
++    adrp x16, _nvn_slot@PAGE
++    add x16, x16, _nvn_slot@PAGEOFF
++    mov x17, #10368
++    add x16, x16, x17
++    mov x17, #1
++    stadd x17, [x16]
++    ldr x17, [x16, #8]
++    br x17
++    .globl _nvnth_649
++_nvnth_649:
++    adrp x16, _nvn_slot@PAGE
++    add x16, x16, _nvn_slot@PAGEOFF
++    mov x17, #10384
++    add x16, x16, x17
++    mov x17, #1
++    stadd x17, [x16]
++    ldr x17, [x16, #8]
++    br x17
++    .globl _nvnth_650
++_nvnth_650:
++    adrp x16, _nvn_slot@PAGE
++    add x16, x16, _nvn_slot@PAGEOFF
++    mov x17, #10400
++    add x16, x16, x17
++    mov x17, #1
++    stadd x17, [x16]
++    ldr x17, [x16, #8]
++    br x17
++    .globl _nvnth_651
++_nvnth_651:
++    adrp x16, _nvn_slot@PAGE
++    add x16, x16, _nvn_slot@PAGEOFF
++    mov x17, #10416
++    add x16, x16, x17
++    mov x17, #1
++    stadd x17, [x16]
++    ldr x17, [x16, #8]
++    br x17
++    .globl _nvnth_652
++_nvnth_652:
++    adrp x16, _nvn_slot@PAGE
++    add x16, x16, _nvn_slot@PAGEOFF
++    mov x17, #10432
++    add x16, x16, x17
++    mov x17, #1
++    stadd x17, [x16]
++    ldr x17, [x16, #8]
++    br x17
++    .globl _nvnth_653
++_nvnth_653:
++    adrp x16, _nvn_slot@PAGE
++    add x16, x16, _nvn_slot@PAGEOFF
++    mov x17, #10448
++    add x16, x16, x17
++    mov x17, #1
++    stadd x17, [x16]
++    ldr x17, [x16, #8]
++    br x17
++    .globl _nvnth_654
++_nvnth_654:
++    adrp x16, _nvn_slot@PAGE
++    add x16, x16, _nvn_slot@PAGEOFF
++    mov x17, #10464
++    add x16, x16, x17
++    mov x17, #1
++    stadd x17, [x16]
++    ldr x17, [x16, #8]
++    br x17
++    .globl _nvnth_655
++_nvnth_655:
++    adrp x16, _nvn_slot@PAGE
++    add x16, x16, _nvn_slot@PAGEOFF
++    mov x17, #10480
++    add x16, x16, x17
++    mov x17, #1
++    stadd x17, [x16]
++    ldr x17, [x16, #8]
++    br x17
++    .globl _nvnth_656
++_nvnth_656:
++    adrp x16, _nvn_slot@PAGE
++    add x16, x16, _nvn_slot@PAGEOFF
++    mov x17, #10496
++    add x16, x16, x17
++    mov x17, #1
++    stadd x17, [x16]
++    ldr x17, [x16, #8]
++    br x17
++    .globl _nvnth_657
++_nvnth_657:
++    adrp x16, _nvn_slot@PAGE
++    add x16, x16, _nvn_slot@PAGEOFF
++    mov x17, #10512
++    add x16, x16, x17
++    mov x17, #1
++    stadd x17, [x16]
++    ldr x17, [x16, #8]
++    br x17
++    .globl _nvnth_658
++_nvnth_658:
++    adrp x16, _nvn_slot@PAGE
++    add x16, x16, _nvn_slot@PAGEOFF
++    mov x17, #10528
++    add x16, x16, x17
++    mov x17, #1
++    stadd x17, [x16]
++    ldr x17, [x16, #8]
++    br x17
++    .globl _nvnth_659
++_nvnth_659:
++    adrp x16, _nvn_slot@PAGE
++    add x16, x16, _nvn_slot@PAGEOFF
++    mov x17, #10544
++    add x16, x16, x17
++    mov x17, #1
++    stadd x17, [x16]
++    ldr x17, [x16, #8]
++    br x17
++    .globl _nvnth_660
++_nvnth_660:
++    adrp x16, _nvn_slot@PAGE
++    add x16, x16, _nvn_slot@PAGEOFF
++    mov x17, #10560
++    add x16, x16, x17
++    mov x17, #1
++    stadd x17, [x16]
++    ldr x17, [x16, #8]
++    br x17
++    .globl _nvnth_661
++_nvnth_661:
++    adrp x16, _nvn_slot@PAGE
++    add x16, x16, _nvn_slot@PAGEOFF
++    mov x17, #10576
++    add x16, x16, x17
++    mov x17, #1
++    stadd x17, [x16]
++    ldr x17, [x16, #8]
++    br x17
++    .globl _nvnth_662
++_nvnth_662:
++    adrp x16, _nvn_slot@PAGE
++    add x16, x16, _nvn_slot@PAGEOFF
++    mov x17, #10592
++    add x16, x16, x17
++    mov x17, #1
++    stadd x17, [x16]
++    ldr x17, [x16, #8]
++    br x17
++    .globl _nvnth_663
++_nvnth_663:
++    adrp x16, _nvn_slot@PAGE
++    add x16, x16, _nvn_slot@PAGEOFF
++    mov x17, #10608
++    add x16, x16, x17
++    mov x17, #1
++    stadd x17, [x16]
++    ldr x17, [x16, #8]
++    br x17
++    .globl _nvnth_664
++_nvnth_664:
++    adrp x16, _nvn_slot@PAGE
++    add x16, x16, _nvn_slot@PAGEOFF
++    mov x17, #10624
++    add x16, x16, x17
++    mov x17, #1
++    stadd x17, [x16]
++    ldr x17, [x16, #8]
++    br x17
++    .globl _nvnth_665
++_nvnth_665:
++    adrp x16, _nvn_slot@PAGE
++    add x16, x16, _nvn_slot@PAGEOFF
++    mov x17, #10640
++    add x16, x16, x17
++    mov x17, #1
++    stadd x17, [x16]
++    ldr x17, [x16, #8]
++    br x17
++    .globl _nvnth_666
++_nvnth_666:
++    adrp x16, _nvn_slot@PAGE
++    add x16, x16, _nvn_slot@PAGEOFF
++    mov x17, #10656
++    add x16, x16, x17
++    mov x17, #1
++    stadd x17, [x16]
++    ldr x17, [x16, #8]
++    br x17
++    .globl _nvnth_667
++_nvnth_667:
++    adrp x16, _nvn_slot@PAGE
++    add x16, x16, _nvn_slot@PAGEOFF
++    mov x17, #10672
++    add x16, x16, x17
++    mov x17, #1
++    stadd x17, [x16]
++    ldr x17, [x16, #8]
++    br x17
++    .globl _nvnth_668
++_nvnth_668:
++    adrp x16, _nvn_slot@PAGE
++    add x16, x16, _nvn_slot@PAGEOFF
++    mov x17, #10688
++    add x16, x16, x17
++    mov x17, #1
++    stadd x17, [x16]
++    ldr x17, [x16, #8]
++    br x17
++    .globl _nvnth_669
++_nvnth_669:
++    adrp x16, _nvn_slot@PAGE
++    add x16, x16, _nvn_slot@PAGEOFF
++    mov x17, #10704
++    add x16, x16, x17
++    mov x17, #1
++    stadd x17, [x16]
++    ldr x17, [x16, #8]
++    br x17
++    .globl _nvnth_670
++_nvnth_670:
++    adrp x16, _nvn_slot@PAGE
++    add x16, x16, _nvn_slot@PAGEOFF
++    mov x17, #10720
++    add x16, x16, x17
++    mov x17, #1
++    stadd x17, [x16]
++    ldr x17, [x16, #8]
++    br x17
++    .globl _nvnth_671
++_nvnth_671:
++    adrp x16, _nvn_slot@PAGE
++    add x16, x16, _nvn_slot@PAGEOFF
++    mov x17, #10736
++    add x16, x16, x17
++    mov x17, #1
++    stadd x17, [x16]
++    ldr x17, [x16, #8]
++    br x17
++    .globl _nvnth_672
++_nvnth_672:
++    adrp x16, _nvn_slot@PAGE
++    add x16, x16, _nvn_slot@PAGEOFF
++    mov x17, #10752
++    add x16, x16, x17
++    mov x17, #1
++    stadd x17, [x16]
++    ldr x17, [x16, #8]
++    br x17
++    .globl _nvnth_673
++_nvnth_673:
++    adrp x16, _nvn_slot@PAGE
++    add x16, x16, _nvn_slot@PAGEOFF
++    mov x17, #10768
++    add x16, x16, x17
++    mov x17, #1
++    stadd x17, [x16]
++    ldr x17, [x16, #8]
++    br x17
++    .globl _nvnth_674
++_nvnth_674:
++    adrp x16, _nvn_slot@PAGE
++    add x16, x16, _nvn_slot@PAGEOFF
++    mov x17, #10784
++    add x16, x16, x17
++    mov x17, #1
++    stadd x17, [x16]
++    ldr x17, [x16, #8]
++    br x17
++    .globl _nvnth_675
++_nvnth_675:
++    adrp x16, _nvn_slot@PAGE
++    add x16, x16, _nvn_slot@PAGEOFF
++    mov x17, #10800
++    add x16, x16, x17
++    mov x17, #1
++    stadd x17, [x16]
++    ldr x17, [x16, #8]
++    br x17
++    .globl _nvnth_676
++_nvnth_676:
++    adrp x16, _nvn_slot@PAGE
++    add x16, x16, _nvn_slot@PAGEOFF
++    mov x17, #10816
++    add x16, x16, x17
++    mov x17, #1
++    stadd x17, [x16]
++    ldr x17, [x16, #8]
++    br x17
++    .globl _nvnth_677
++_nvnth_677:
++    adrp x16, _nvn_slot@PAGE
++    add x16, x16, _nvn_slot@PAGEOFF
++    mov x17, #10832
++    add x16, x16, x17
++    mov x17, #1
++    stadd x17, [x16]
++    ldr x17, [x16, #8]
++    br x17
++    .globl _nvnth_678
++_nvnth_678:
++    adrp x16, _nvn_slot@PAGE
++    add x16, x16, _nvn_slot@PAGEOFF
++    mov x17, #10848
++    add x16, x16, x17
++    mov x17, #1
++    stadd x17, [x16]
++    ldr x17, [x16, #8]
++    br x17
++    .globl _nvnth_679
++_nvnth_679:
++    adrp x16, _nvn_slot@PAGE
++    add x16, x16, _nvn_slot@PAGEOFF
++    mov x17, #10864
++    add x16, x16, x17
++    mov x17, #1
++    stadd x17, [x16]
++    ldr x17, [x16, #8]
++    br x17
++    .globl _nvnth_680
++_nvnth_680:
++    adrp x16, _nvn_slot@PAGE
++    add x16, x16, _nvn_slot@PAGEOFF
++    mov x17, #10880
++    add x16, x16, x17
++    mov x17, #1
++    stadd x17, [x16]
++    ldr x17, [x16, #8]
++    br x17
++    .globl _nvnth_681
++_nvnth_681:
++    adrp x16, _nvn_slot@PAGE
++    add x16, x16, _nvn_slot@PAGEOFF
++    mov x17, #10896
++    add x16, x16, x17
++    mov x17, #1
++    stadd x17, [x16]
++    ldr x17, [x16, #8]
++    br x17
++    .globl _nvnth_682
++_nvnth_682:
++    adrp x16, _nvn_slot@PAGE
++    add x16, x16, _nvn_slot@PAGEOFF
++    mov x17, #10912
++    add x16, x16, x17
++    mov x17, #1
++    stadd x17, [x16]
++    ldr x17, [x16, #8]
++    br x17
++    .globl _nvnth_683
++_nvnth_683:
++    adrp x16, _nvn_slot@PAGE
++    add x16, x16, _nvn_slot@PAGEOFF
++    mov x17, #10928
++    add x16, x16, x17
++    mov x17, #1
++    stadd x17, [x16]
++    ldr x17, [x16, #8]
++    br x17
++    .globl _nvnth_684
++_nvnth_684:
++    adrp x16, _nvn_slot@PAGE
++    add x16, x16, _nvn_slot@PAGEOFF
++    mov x17, #10944
++    add x16, x16, x17
++    mov x17, #1
++    stadd x17, [x16]
++    ldr x17, [x16, #8]
++    br x17
++    .globl _nvnth_685
++_nvnth_685:
++    adrp x16, _nvn_slot@PAGE
++    add x16, x16, _nvn_slot@PAGEOFF
++    mov x17, #10960
++    add x16, x16, x17
++    mov x17, #1
++    stadd x17, [x16]
++    ldr x17, [x16, #8]
++    br x17
++    .globl _nvnth_686
++_nvnth_686:
++    adrp x16, _nvn_slot@PAGE
++    add x16, x16, _nvn_slot@PAGEOFF
++    mov x17, #10976
++    add x16, x16, x17
++    mov x17, #1
++    stadd x17, [x16]
++    ldr x17, [x16, #8]
++    br x17
++    .globl _nvnth_687
++_nvnth_687:
++    adrp x16, _nvn_slot@PAGE
++    add x16, x16, _nvn_slot@PAGEOFF
++    mov x17, #10992
++    add x16, x16, x17
++    mov x17, #1
++    stadd x17, [x16]
++    ldr x17, [x16, #8]
++    br x17
++    .globl _nvnth_688
++_nvnth_688:
++    adrp x16, _nvn_slot@PAGE
++    add x16, x16, _nvn_slot@PAGEOFF
++    mov x17, #11008
++    add x16, x16, x17
++    mov x17, #1
++    stadd x17, [x16]
++    ldr x17, [x16, #8]
++    br x17
++    .globl _nvnth_689
++_nvnth_689:
++    adrp x16, _nvn_slot@PAGE
++    add x16, x16, _nvn_slot@PAGEOFF
++    mov x17, #11024
++    add x16, x16, x17
++    mov x17, #1
++    stadd x17, [x16]
++    ldr x17, [x16, #8]
++    br x17
++    .globl _nvnth_690
++_nvnth_690:
++    adrp x16, _nvn_slot@PAGE
++    add x16, x16, _nvn_slot@PAGEOFF
++    mov x17, #11040
++    add x16, x16, x17
++    mov x17, #1
++    stadd x17, [x16]
++    ldr x17, [x16, #8]
++    br x17
++    .globl _nvnth_691
++_nvnth_691:
++    adrp x16, _nvn_slot@PAGE
++    add x16, x16, _nvn_slot@PAGEOFF
++    mov x17, #11056
++    add x16, x16, x17
++    mov x17, #1
++    stadd x17, [x16]
++    ldr x17, [x16, #8]
++    br x17
++    .globl _nvnth_692
++_nvnth_692:
++    adrp x16, _nvn_slot@PAGE
++    add x16, x16, _nvn_slot@PAGEOFF
++    mov x17, #11072
++    add x16, x16, x17
++    mov x17, #1
++    stadd x17, [x16]
++    ldr x17, [x16, #8]
++    br x17
++    .globl _nvnth_693
++_nvnth_693:
++    adrp x16, _nvn_slot@PAGE
++    add x16, x16, _nvn_slot@PAGEOFF
++    mov x17, #11088
++    add x16, x16, x17
++    mov x17, #1
++    stadd x17, [x16]
++    ldr x17, [x16, #8]
++    br x17
++    .globl _nvnth_694
++_nvnth_694:
++    adrp x16, _nvn_slot@PAGE
++    add x16, x16, _nvn_slot@PAGEOFF
++    mov x17, #11104
++    add x16, x16, x17
++    mov x17, #1
++    stadd x17, [x16]
++    ldr x17, [x16, #8]
++    br x17
++    .globl _nvnth_695
++_nvnth_695:
++    adrp x16, _nvn_slot@PAGE
++    add x16, x16, _nvn_slot@PAGEOFF
++    mov x17, #11120
++    add x16, x16, x17
++    mov x17, #1
++    stadd x17, [x16]
++    ldr x17, [x16, #8]
++    br x17
++    .globl _nvnth_696
++_nvnth_696:
++    adrp x16, _nvn_slot@PAGE
++    add x16, x16, _nvn_slot@PAGEOFF
++    mov x17, #11136
++    add x16, x16, x17
++    mov x17, #1
++    stadd x17, [x16]
++    ldr x17, [x16, #8]
++    br x17
++    .globl _nvnth_697
++_nvnth_697:
++    adrp x16, _nvn_slot@PAGE
++    add x16, x16, _nvn_slot@PAGEOFF
++    mov x17, #11152
++    add x16, x16, x17
++    mov x17, #1
++    stadd x17, [x16]
++    ldr x17, [x16, #8]
++    br x17
++    .globl _nvnth_698
++_nvnth_698:
++    adrp x16, _nvn_slot@PAGE
++    add x16, x16, _nvn_slot@PAGEOFF
++    mov x17, #11168
++    add x16, x16, x17
++    mov x17, #1
++    stadd x17, [x16]
++    ldr x17, [x16, #8]
++    br x17
++    .globl _nvnth_699
++_nvnth_699:
++    adrp x16, _nvn_slot@PAGE
++    add x16, x16, _nvn_slot@PAGEOFF
++    mov x17, #11184
++    add x16, x16, x17
++    mov x17, #1
++    stadd x17, [x16]
++    ldr x17, [x16, #8]
++    br x17
++    .globl _nvnth_700
++_nvnth_700:
++    adrp x16, _nvn_slot@PAGE
++    add x16, x16, _nvn_slot@PAGEOFF
++    mov x17, #11200
++    add x16, x16, x17
++    mov x17, #1
++    stadd x17, [x16]
++    ldr x17, [x16, #8]
++    br x17
++    .globl _nvnth_701
++_nvnth_701:
++    adrp x16, _nvn_slot@PAGE
++    add x16, x16, _nvn_slot@PAGEOFF
++    mov x17, #11216
++    add x16, x16, x17
++    mov x17, #1
++    stadd x17, [x16]
++    ldr x17, [x16, #8]
++    br x17
++    .globl _nvnth_702
++_nvnth_702:
++    adrp x16, _nvn_slot@PAGE
++    add x16, x16, _nvn_slot@PAGEOFF
++    mov x17, #11232
++    add x16, x16, x17
++    mov x17, #1
++    stadd x17, [x16]
++    ldr x17, [x16, #8]
++    br x17
++    .globl _nvnth_703
++_nvnth_703:
++    adrp x16, _nvn_slot@PAGE
++    add x16, x16, _nvn_slot@PAGEOFF
++    mov x17, #11248
++    add x16, x16, x17
++    mov x17, #1
++    stadd x17, [x16]
++    ldr x17, [x16, #8]
++    br x17
++    .globl _nvnth_704
++_nvnth_704:
++    adrp x16, _nvn_slot@PAGE
++    add x16, x16, _nvn_slot@PAGEOFF
++    mov x17, #11264
++    add x16, x16, x17
++    mov x17, #1
++    stadd x17, [x16]
++    ldr x17, [x16, #8]
++    br x17
++    .globl _nvnth_705
++_nvnth_705:
++    adrp x16, _nvn_slot@PAGE
++    add x16, x16, _nvn_slot@PAGEOFF
++    mov x17, #11280
++    add x16, x16, x17
++    mov x17, #1
++    stadd x17, [x16]
++    ldr x17, [x16, #8]
++    br x17
++    .globl _nvnth_706
++_nvnth_706:
++    adrp x16, _nvn_slot@PAGE
++    add x16, x16, _nvn_slot@PAGEOFF
++    mov x17, #11296
++    add x16, x16, x17
++    mov x17, #1
++    stadd x17, [x16]
++    ldr x17, [x16, #8]
++    br x17
++    .globl _nvnth_707
++_nvnth_707:
++    adrp x16, _nvn_slot@PAGE
++    add x16, x16, _nvn_slot@PAGEOFF
++    mov x17, #11312
++    add x16, x16, x17
++    mov x17, #1
++    stadd x17, [x16]
++    ldr x17, [x16, #8]
++    br x17
++    .globl _nvnth_708
++_nvnth_708:
++    adrp x16, _nvn_slot@PAGE
++    add x16, x16, _nvn_slot@PAGEOFF
++    mov x17, #11328
++    add x16, x16, x17
++    mov x17, #1
++    stadd x17, [x16]
++    ldr x17, [x16, #8]
++    br x17
++    .globl _nvnth_709
++_nvnth_709:
++    adrp x16, _nvn_slot@PAGE
++    add x16, x16, _nvn_slot@PAGEOFF
++    mov x17, #11344
++    add x16, x16, x17
++    mov x17, #1
++    stadd x17, [x16]
++    ldr x17, [x16, #8]
++    br x17
++    .globl _nvnth_710
++_nvnth_710:
++    adrp x16, _nvn_slot@PAGE
++    add x16, x16, _nvn_slot@PAGEOFF
++    mov x17, #11360
++    add x16, x16, x17
++    mov x17, #1
++    stadd x17, [x16]
++    ldr x17, [x16, #8]
++    br x17
++    .globl _nvnth_711
++_nvnth_711:
++    adrp x16, _nvn_slot@PAGE
++    add x16, x16, _nvn_slot@PAGEOFF
++    mov x17, #11376
++    add x16, x16, x17
++    mov x17, #1
++    stadd x17, [x16]
++    ldr x17, [x16, #8]
++    br x17
++    .globl _nvnth_712
++_nvnth_712:
++    adrp x16, _nvn_slot@PAGE
++    add x16, x16, _nvn_slot@PAGEOFF
++    mov x17, #11392
++    add x16, x16, x17
++    mov x17, #1
++    stadd x17, [x16]
++    ldr x17, [x16, #8]
++    br x17
++    .globl _nvnth_713
++_nvnth_713:
++    adrp x16, _nvn_slot@PAGE
++    add x16, x16, _nvn_slot@PAGEOFF
++    mov x17, #11408
++    add x16, x16, x17
++    mov x17, #1
++    stadd x17, [x16]
++    ldr x17, [x16, #8]
++    br x17
++    .globl _nvnth_714
++_nvnth_714:
++    adrp x16, _nvn_slot@PAGE
++    add x16, x16, _nvn_slot@PAGEOFF
++    mov x17, #11424
++    add x16, x16, x17
++    mov x17, #1
++    stadd x17, [x16]
++    ldr x17, [x16, #8]
++    br x17
++    .globl _nvnth_715
++_nvnth_715:
++    adrp x16, _nvn_slot@PAGE
++    add x16, x16, _nvn_slot@PAGEOFF
++    mov x17, #11440
++    add x16, x16, x17
++    mov x17, #1
++    stadd x17, [x16]
++    ldr x17, [x16, #8]
++    br x17
++    .globl _nvnth_716
++_nvnth_716:
++    adrp x16, _nvn_slot@PAGE
++    add x16, x16, _nvn_slot@PAGEOFF
++    mov x17, #11456
++    add x16, x16, x17
++    mov x17, #1
++    stadd x17, [x16]
++    ldr x17, [x16, #8]
++    br x17
++    .globl _nvnth_717
++_nvnth_717:
++    adrp x16, _nvn_slot@PAGE
++    add x16, x16, _nvn_slot@PAGEOFF
++    mov x17, #11472
++    add x16, x16, x17
++    mov x17, #1
++    stadd x17, [x16]
++    ldr x17, [x16, #8]
++    br x17
++    .globl _nvnth_718
++_nvnth_718:
++    adrp x16, _nvn_slot@PAGE
++    add x16, x16, _nvn_slot@PAGEOFF
++    mov x17, #11488
++    add x16, x16, x17
++    mov x17, #1
++    stadd x17, [x16]
++    ldr x17, [x16, #8]
++    br x17
++    .globl _nvnth_719
++_nvnth_719:
++    adrp x16, _nvn_slot@PAGE
++    add x16, x16, _nvn_slot@PAGEOFF
++    mov x17, #11504
++    add x16, x16, x17
++    mov x17, #1
++    stadd x17, [x16]
++    ldr x17, [x16, #8]
++    br x17
++    .globl _nvnth_720
++_nvnth_720:
++    adrp x16, _nvn_slot@PAGE
++    add x16, x16, _nvn_slot@PAGEOFF
++    mov x17, #11520
++    add x16, x16, x17
++    mov x17, #1
++    stadd x17, [x16]
++    ldr x17, [x16, #8]
++    br x17
++    .globl _nvnth_721
++_nvnth_721:
++    adrp x16, _nvn_slot@PAGE
++    add x16, x16, _nvn_slot@PAGEOFF
++    mov x17, #11536
++    add x16, x16, x17
++    mov x17, #1
++    stadd x17, [x16]
++    ldr x17, [x16, #8]
++    br x17
++    .globl _nvnth_722
++_nvnth_722:
++    adrp x16, _nvn_slot@PAGE
++    add x16, x16, _nvn_slot@PAGEOFF
++    mov x17, #11552
++    add x16, x16, x17
++    mov x17, #1
++    stadd x17, [x16]
++    ldr x17, [x16, #8]
++    br x17
++    .globl _nvnth_723
++_nvnth_723:
++    adrp x16, _nvn_slot@PAGE
++    add x16, x16, _nvn_slot@PAGEOFF
++    mov x17, #11568
++    add x16, x16, x17
++    mov x17, #1
++    stadd x17, [x16]
++    ldr x17, [x16, #8]
++    br x17
++    .globl _nvnth_724
++_nvnth_724:
++    adrp x16, _nvn_slot@PAGE
++    add x16, x16, _nvn_slot@PAGEOFF
++    mov x17, #11584
++    add x16, x16, x17
++    mov x17, #1
++    stadd x17, [x16]
++    ldr x17, [x16, #8]
++    br x17
++    .globl _nvnth_725
++_nvnth_725:
++    adrp x16, _nvn_slot@PAGE
++    add x16, x16, _nvn_slot@PAGEOFF
++    mov x17, #11600
++    add x16, x16, x17
++    mov x17, #1
++    stadd x17, [x16]
++    ldr x17, [x16, #8]
++    br x17
++    .globl _nvnth_726
++_nvnth_726:
++    adrp x16, _nvn_slot@PAGE
++    add x16, x16, _nvn_slot@PAGEOFF
++    mov x17, #11616
++    add x16, x16, x17
++    mov x17, #1
++    stadd x17, [x16]
++    ldr x17, [x16, #8]
++    br x17
++    .globl _nvnth_727
++_nvnth_727:
++    adrp x16, _nvn_slot@PAGE
++    add x16, x16, _nvn_slot@PAGEOFF
++    mov x17, #11632
++    add x16, x16, x17
++    mov x17, #1
++    stadd x17, [x16]
++    ldr x17, [x16, #8]
++    br x17
++    .globl _nvnth_728
++_nvnth_728:
++    adrp x16, _nvn_slot@PAGE
++    add x16, x16, _nvn_slot@PAGEOFF
++    mov x17, #11648
++    add x16, x16, x17
++    mov x17, #1
++    stadd x17, [x16]
++    ldr x17, [x16, #8]
++    br x17
++    .globl _nvnth_729
++_nvnth_729:
++    adrp x16, _nvn_slot@PAGE
++    add x16, x16, _nvn_slot@PAGEOFF
++    mov x17, #11664
++    add x16, x16, x17
++    mov x17, #1
++    stadd x17, [x16]
++    ldr x17, [x16, #8]
++    br x17
++    .globl _nvnth_730
++_nvnth_730:
++    adrp x16, _nvn_slot@PAGE
++    add x16, x16, _nvn_slot@PAGEOFF
++    mov x17, #11680
++    add x16, x16, x17
++    mov x17, #1
++    stadd x17, [x16]
++    ldr x17, [x16, #8]
++    br x17
++    .globl _nvnth_731
++_nvnth_731:
++    adrp x16, _nvn_slot@PAGE
++    add x16, x16, _nvn_slot@PAGEOFF
++    mov x17, #11696
++    add x16, x16, x17
++    mov x17, #1
++    stadd x17, [x16]
++    ldr x17, [x16, #8]
++    br x17
++    .globl _nvnth_732
++_nvnth_732:
++    adrp x16, _nvn_slot@PAGE
++    add x16, x16, _nvn_slot@PAGEOFF
++    mov x17, #11712
++    add x16, x16, x17
++    mov x17, #1
++    stadd x17, [x16]
++    ldr x17, [x16, #8]
++    br x17
++    .globl _nvnth_733
++_nvnth_733:
++    adrp x16, _nvn_slot@PAGE
++    add x16, x16, _nvn_slot@PAGEOFF
++    mov x17, #11728
++    add x16, x16, x17
++    mov x17, #1
++    stadd x17, [x16]
++    ldr x17, [x16, #8]
++    br x17
+     .data
+     .p2align 3
+     .globl _nvn_thunk
+@@ -5914,6 +7884,203 @@ _nvn_thunk:
+     .quad _nvnth_534
+     .quad _nvnth_535
+     .quad _nvnth_536
++    .quad _nvnth_537
++    .quad _nvnth_538
++    .quad _nvnth_539
++    .quad _nvnth_540
++    .quad _nvnth_541
++    .quad _nvnth_542
++    .quad _nvnth_543
++    .quad _nvnth_544
++    .quad _nvnth_545
++    .quad _nvnth_546
++    .quad _nvnth_547
++    .quad _nvnth_548
++    .quad _nvnth_549
++    .quad _nvnth_550
++    .quad _nvnth_551
++    .quad _nvnth_552
++    .quad _nvnth_553
++    .quad _nvnth_554
++    .quad _nvnth_555
++    .quad _nvnth_556
++    .quad _nvnth_557
++    .quad _nvnth_558
++    .quad _nvnth_559
++    .quad _nvnth_560
++    .quad _nvnth_561
++    .quad _nvnth_562
++    .quad _nvnth_563
++    .quad _nvnth_564
++    .quad _nvnth_565
++    .quad _nvnth_566
++    .quad _nvnth_567
++    .quad _nvnth_568
++    .quad _nvnth_569
++    .quad _nvnth_570
++    .quad _nvnth_571
++    .quad _nvnth_572
++    .quad _nvnth_573
++    .quad _nvnth_574
++    .quad _nvnth_575
++    .quad _nvnth_576
++    .quad _nvnth_577
++    .quad _nvnth_578
++    .quad _nvnth_579
++    .quad _nvnth_580
++    .quad _nvnth_581
++    .quad _nvnth_582
++    .quad _nvnth_583
++    .quad _nvnth_584
++    .quad _nvnth_585
++    .quad _nvnth_586
++    .quad _nvnth_587
++    .quad _nvnth_588
++    .quad _nvnth_589
++    .quad _nvnth_590
++    .quad _nvnth_591
++    .quad _nvnth_592
++    .quad _nvnth_593
++    .quad _nvnth_594
++    .quad _nvnth_595
++    .quad _nvnth_596
++    .quad _nvnth_597
++    .quad _nvnth_598
++    .quad _nvnth_599
++    .quad _nvnth_600
++    .quad _nvnth_601
++    .quad _nvnth_602
++    .quad _nvnth_603
++    .quad _nvnth_604
++    .quad _nvnth_605
++    .quad _nvnth_606
++    .quad _nvnth_607
++    .quad _nvnth_608
++    .quad _nvnth_609
++    .quad _nvnth_610
++    .quad _nvnth_611
++    .quad _nvnth_612
++    .quad _nvnth_613
++    .quad _nvnth_614
++    .quad _nvnth_615
++    .quad _nvnth_616
++    .quad _nvnth_617
++    .quad _nvnth_618
++    .quad _nvnth_619
++    .quad _nvnth_620
++    .quad _nvnth_621
++    .quad _nvnth_622
++    .quad _nvnth_623
++    .quad _nvnth_624
++    .quad _nvnth_625
++    .quad _nvnth_626
++    .quad _nvnth_627
++    .quad _nvnth_628
++    .quad _nvnth_629
++    .quad _nvnth_630
++    .quad _nvnth_631
++    .quad _nvnth_632
++    .quad _nvnth_633
++    .quad _nvnth_634
++    .quad _nvnth_635
++    .quad _nvnth_636
++    .quad _nvnth_637
++    .quad _nvnth_638
++    .quad _nvnth_639
++    .quad _nvnth_640
++    .quad _nvnth_641
++    .quad _nvnth_642
++    .quad _nvnth_643
++    .quad _nvnth_644
++    .quad _nvnth_645
++    .quad _nvnth_646
++    .quad _nvnth_647
++    .quad _nvnth_648
++    .quad _nvnth_649
++    .quad _nvnth_650
++    .quad _nvnth_651
++    .quad _nvnth_652
++    .quad _nvnth_653
++    .quad _nvnth_654
++    .quad _nvnth_655
++    .quad _nvnth_656
++    .quad _nvnth_657
++    .quad _nvnth_658
++    .quad _nvnth_659
++    .quad _nvnth_660
++    .quad _nvnth_661
++    .quad _nvnth_662
++    .quad _nvnth_663
++    .quad _nvnth_664
++    .quad _nvnth_665
++    .quad _nvnth_666
++    .quad _nvnth_667
++    .quad _nvnth_668
++    .quad _nvnth_669
++    .quad _nvnth_670
++    .quad _nvnth_671
++    .quad _nvnth_672
++    .quad _nvnth_673
++    .quad _nvnth_674
++    .quad _nvnth_675
++    .quad _nvnth_676
++    .quad _nvnth_677
++    .quad _nvnth_678
++    .quad _nvnth_679
++    .quad _nvnth_680
++    .quad _nvnth_681
++    .quad _nvnth_682
++    .quad _nvnth_683
++    .quad _nvnth_684
++    .quad _nvnth_685
++    .quad _nvnth_686
++    .quad _nvnth_687
++    .quad _nvnth_688
++    .quad _nvnth_689
++    .quad _nvnth_690
++    .quad _nvnth_691
++    .quad _nvnth_692
++    .quad _nvnth_693
++    .quad _nvnth_694
++    .quad _nvnth_695
++    .quad _nvnth_696
++    .quad _nvnth_697
++    .quad _nvnth_698
++    .quad _nvnth_699
++    .quad _nvnth_700
++    .quad _nvnth_701
++    .quad _nvnth_702
++    .quad _nvnth_703
++    .quad _nvnth_704
++    .quad _nvnth_705
++    .quad _nvnth_706
++    .quad _nvnth_707
++    .quad _nvnth_708
++    .quad _nvnth_709
++    .quad _nvnth_710
++    .quad _nvnth_711
++    .quad _nvnth_712
++    .quad _nvnth_713
++    .quad _nvnth_714
++    .quad _nvnth_715
++    .quad _nvnth_716
++    .quad _nvnth_717
++    .quad _nvnth_718
++    .quad _nvnth_719
++    .quad _nvnth_720
++    .quad _nvnth_721
++    .quad _nvnth_722
++    .quad _nvnth_723
++    .quad _nvnth_724
++    .quad _nvnth_725
++    .quad _nvnth_726
++    .quad _nvnth_727
++    .quad _nvnth_728
++    .quad _nvnth_729
++    .quad _nvnth_730
++    .quad _nvnth_731
++    .quad _nvnth_732
++    .quad _nvnth_733
+     .globl _nvn_names
+ _nvn_names:
+     .quad Ln0
+@@ -6453,6 +8620,203 @@ _nvn_names:
+     .quad Ln534
+     .quad Ln535
+     .quad Ln536
++    .quad Ln537
++    .quad Ln538
++    .quad Ln539
++    .quad Ln540
++    .quad Ln541
++    .quad Ln542
++    .quad Ln543
++    .quad Ln544
++    .quad Ln545
++    .quad Ln546
++    .quad Ln547
++    .quad Ln548
++    .quad Ln549
++    .quad Ln550
++    .quad Ln551
++    .quad Ln552
++    .quad Ln553
++    .quad Ln554
++    .quad Ln555
++    .quad Ln556
++    .quad Ln557
++    .quad Ln558
++    .quad Ln559
++    .quad Ln560
++    .quad Ln561
++    .quad Ln562
++    .quad Ln563
++    .quad Ln564
++    .quad Ln565
++    .quad Ln566
++    .quad Ln567
++    .quad Ln568
++    .quad Ln569
++    .quad Ln570
++    .quad Ln571
++    .quad Ln572
++    .quad Ln573
++    .quad Ln574
++    .quad Ln575
++    .quad Ln576
++    .quad Ln577
++    .quad Ln578
++    .quad Ln579
++    .quad Ln580
++    .quad Ln581
++    .quad Ln582
++    .quad Ln583
++    .quad Ln584
++    .quad Ln585
++    .quad Ln586
++    .quad Ln587
++    .quad Ln588
++    .quad Ln589
++    .quad Ln590
++    .quad Ln591
++    .quad Ln592
++    .quad Ln593
++    .quad Ln594
++    .quad Ln595
++    .quad Ln596
++    .quad Ln597
++    .quad Ln598
++    .quad Ln599
++    .quad Ln600
++    .quad Ln601
++    .quad Ln602
++    .quad Ln603
++    .quad Ln604
++    .quad Ln605
++    .quad Ln606
++    .quad Ln607
++    .quad Ln608
++    .quad Ln609
++    .quad Ln610
++    .quad Ln611
++    .quad Ln612
++    .quad Ln613
++    .quad Ln614
++    .quad Ln615
++    .quad Ln616
++    .quad Ln617
++    .quad Ln618
++    .quad Ln619
++    .quad Ln620
++    .quad Ln621
++    .quad Ln622
++    .quad Ln623
++    .quad Ln624
++    .quad Ln625
++    .quad Ln626
++    .quad Ln627
++    .quad Ln628
++    .quad Ln629
++    .quad Ln630
++    .quad Ln631
++    .quad Ln632
++    .quad Ln633
++    .quad Ln634
++    .quad Ln635
++    .quad Ln636
++    .quad Ln637
++    .quad Ln638
++    .quad Ln639
++    .quad Ln640
++    .quad Ln641
++    .quad Ln642
++    .quad Ln643
++    .quad Ln644
++    .quad Ln645
++    .quad Ln646
++    .quad Ln647
++    .quad Ln648
++    .quad Ln649
++    .quad Ln650
++    .quad Ln651
++    .quad Ln652
++    .quad Ln653
++    .quad Ln654
++    .quad Ln655
++    .quad Ln656
++    .quad Ln657
++    .quad Ln658
++    .quad Ln659
++    .quad Ln660
++    .quad Ln661
++    .quad Ln662
++    .quad Ln663
++    .quad Ln664
++    .quad Ln665
++    .quad Ln666
++    .quad Ln667
++    .quad Ln668
++    .quad Ln669
++    .quad Ln670
++    .quad Ln671
++    .quad Ln672
++    .quad Ln673
++    .quad Ln674
++    .quad Ln675
++    .quad Ln676
++    .quad Ln677
++    .quad Ln678
++    .quad Ln679
++    .quad Ln680
++    .quad Ln681
++    .quad Ln682
++    .quad Ln683
++    .quad Ln684
++    .quad Ln685
++    .quad Ln686
++    .quad Ln687
++    .quad Ln688
++    .quad Ln689
++    .quad Ln690
++    .quad Ln691
++    .quad Ln692
++    .quad Ln693
++    .quad Ln694
++    .quad Ln695
++    .quad Ln696
++    .quad Ln697
++    .quad Ln698
++    .quad Ln699
++    .quad Ln700
++    .quad Ln701
++    .quad Ln702
++    .quad Ln703
++    .quad Ln704
++    .quad Ln705
++    .quad Ln706
++    .quad Ln707
++    .quad Ln708
++    .quad Ln709
++    .quad Ln710
++    .quad Ln711
++    .quad Ln712
++    .quad Ln713
++    .quad Ln714
++    .quad Ln715
++    .quad Ln716
++    .quad Ln717
++    .quad Ln718
++    .quad Ln719
++    .quad Ln720
++    .quad Ln721
++    .quad Ln722
++    .quad Ln723
++    .quad Ln724
++    .quad Ln725
++    .quad Ln726
++    .quad Ln727
++    .quad Ln728
++    .quad Ln729
++    .quad Ln730
++    .quad Ln731
++    .quad Ln732
++    .quad Ln733
+     .cstring
+ Ln0: .asciz "nvnDeviceBuilderSetDefaults"
+ Ln1: .asciz "nvnDeviceBuilderSetFlags"
+@@ -6991,3 +9355,200 @@ Ln533: .asciz "nvnDeviceSetAutomaticCheckpointsMask"
+ Ln534: .asciz "nvnProgramGetSubtileSize"
+ Ln535: .asciz "nvnTextureBuilderGetViewOffset"
+ Ln536: .asciz "nvnSetExternalDebuggerEnabledNVX"
++Ln537: .asciz "nvnDeviceRegisterFastClearColorIndex"
++Ln538: .asciz "nvnDeviceRegisterFastClearColoriIndex"
++Ln539: .asciz "nvnDeviceRegisterFastClearColoruiIndex"
++Ln540: .asciz "nvnDeviceRegisterFastClearDepthIndex"
++Ln541: .asciz "nvnDeviceRegisterFastClearStencil"
++Ln542: .asciz "nvnDeviceRegisterFastClearStencilIndex"
++Ln543: .asciz "nvnDeviceGetFlags"
++Ln544: .asciz "nvnQueueGetTotalRayTracingMemoryUsed"
++Ln545: .asciz "nvnQueueBuilderSetRayTracingMemorySize"
++Ln546: .asciz "nvnQueueBuilderGetRayTracingMemorySize"
++Ln547: .asciz "nvnQueueBuilderSetPrimaryQueue"
++Ln548: .asciz "nvnQueueBuilderGetPrimaryQueue"
++Ln549: .asciz "nvnWindowBuilderSetColorSpace"
++Ln550: .asciz "nvnWindowBuilderSetHdrDisplayMetadata"
++Ln551: .asciz "nvnWindowBuilderSetHdrContentMetadata"
++Ln552: .asciz "nvnWindowBuilderGetColorSpace"
++Ln553: .asciz "nvnWindowBuilderGetHdrDisplayMetadata"
++Ln554: .asciz "nvnWindowBuilderGetHdrContentMetadata"
++Ln555: .asciz "nvnWindowSetHdrDisplayMetadata"
++Ln556: .asciz "nvnWindowSetHdrContentMetadata"
++Ln557: .asciz "nvnWindowGetHdrDisplayMetadata"
++Ln558: .asciz "nvnWindowGetHdrContentMetadata"
++Ln559: .asciz "nvnProgramBuilderSetDefaults"
++Ln560: .asciz "nvnProgramBuilderSetDevice"
++Ln561: .asciz "nvnProgramBuilderGetDevice"
++Ln562: .asciz "nvnProgramBuilderSetSampleShading"
++Ln563: .asciz "nvnProgramBuilderGetSampleShading"
++Ln564: .asciz "nvnProgramBuilderSetDebugDataHashes"
++Ln565: .asciz "nvnProgramBuilderGetDebugDataHashes"
++Ln566: .asciz "nvnProgramBuilderSetShaders"
++Ln567: .asciz "nvnProgramBuilderGetShaders"
++Ln568: .asciz "nvnProgramBuilderGetShaderCount"
++Ln569: .asciz "nvnProgramBuilderSetRayTracingModules"
++Ln570: .asciz "nvnProgramBuilderGetRayTracingModuleCount"
++Ln571: .asciz "nvnProgramBuilderGetRayTracingModuleData"
++Ln572: .asciz "nvnProgramBuilderSetSubroutineLinkage"
++Ln573: .asciz "nvnProgramBuilderGetSubroutineLinkage"
++Ln574: .asciz "nvnProgramBuilderGetSubroutineLinkageCount"
++Ln575: .asciz "nvnProgramInitializeFromBuilder"
++Ln576: .asciz "nvnMultisampleStateSetCoverageTruncationEnable"
++Ln577: .asciz "nvnMultisampleStateGetCoverageTruncationEnable"
++Ln578: .asciz "nvnMultisampleStateGetSampleLocations"
++Ln579: .asciz "nvnCommandBufferSetRecordingMode"
++Ln580: .asciz "nvnCommandBufferBindAccelerationStructure"
++Ln581: .asciz "nvnCommandBufferBindAccelerationStructures"
++Ln582: .asciz "nvnCommandBufferBindAccelerationStructuresDeferred"
++Ln583: .asciz "nvnCommandBufferSetGeometryProcessingMode"
++Ln584: .asciz "nvnCommandBufferDrawMeshTasks"
++Ln585: .asciz "nvnCommandBufferDrawMeshTasksIndirect"
++Ln586: .asciz "nvnCommandBufferMultiDrawMeshTasksIndirect"
++Ln587: .asciz "nvnCommandBufferMultiDrawMeshTasksIndirectCount"
++Ln588: .asciz "nvnCommandBufferDrawMeshTasks3D"
++Ln589: .asciz "nvnCommandBufferDrawMeshTasks3DIndirect"
++Ln590: .asciz "nvnCommandBufferMultiDrawMeshTasks3DIndirect"
++Ln591: .asciz "nvnCommandBufferMultiDrawMeshTasks3DIndirectCount"
++Ln592: .asciz "nvnCommandBufferSetConservativeRasterMode"
++Ln593: .asciz "nvnCommandBufferComputeDirtyTileMap"
++Ln594: .asciz "nvnCommandBufferComputeDirtyTileMapEx"
++Ln595: .asciz "nvnCommandBufferSetComputeEnable"
++Ln596: .asciz "nvnCommandBufferSetComputeEnableConditional"
++Ln597: .asciz "nvnCommandBufferSetCopyEnable"
++Ln598: .asciz "nvnCommandBufferSetCopyEnableConditional"
++Ln599: .asciz "nvnCommandBufferPushDebugGroupGraphics"
++Ln600: .asciz "nvnCommandBufferPushDebugGroupCompute"
++Ln601: .asciz "nvnCommandBufferPopDebugGroupGraphics"
++Ln602: .asciz "nvnCommandBufferPopDebugGroupCompute"
++Ln603: .asciz "nvnCommandBufferInsertDebugMarkerGraphics"
++Ln604: .asciz "nvnCommandBufferInsertDebugMarkerCompute"
++Ln605: .asciz "nvnCommandBufferShadingRateImagePalette"
++Ln606: .asciz "nvnCommandBufferBindShadingRateImage"
++Ln607: .asciz "nvnCommandBufferSetShadingRatePaletteMode"
++Ln608: .asciz "nvnCommandBufferSetExclusiveScissor"
++Ln609: .asciz "nvnCommandBufferSetExclusiveScissors"
++Ln610: .asciz "nvnCommandBufferEnableExclusiveScissor"
++Ln611: .asciz "nvnDeviceCalculateAccelerationStructureMemoryRequirements"
++Ln612: .asciz "nvnCommandBufferBuildAccelerationStructures"
++Ln613: .asciz "nvnCommandBufferCopyAccelerationStructure"
++Ln614: .asciz "nvnCommandBufferCompactAccelerationStructure"
++Ln615: .asciz "nvnCommandBufferRelocateAccelerationStructure"
++Ln616: .asciz "nvnCommandBufferDispatchRays"
++Ln617: .asciz "nvnCommandBufferDispatchRaysIndirect"
++Ln618: .asciz "nvnProgramGetShaderGroupHandle"
++Ln619: .asciz "nvnProgramGetScratchBytesPerWarp"
++Ln620: .asciz "nvnProgramBuilderGetMaxTraceRecursionDepth"
++Ln621: .asciz "nvnProgramBuilderSetMaxTraceRecursionDepth"
++Ln622: .asciz "nvnProgramBuilderGetMaxCallableRecursionDepth"
++Ln623: .asciz "nvnProgramBuilderSetMaxCallableRecursionDepth"
++Ln624: .asciz "nvnProgramBuilderGetProgramRayTracingFlags"
++Ln625: .asciz "nvnProgramBuilderSetProgramRayTracingFlags"
++Ln626: .asciz "nvnDeviceCopyAccelerationStructure"
++Ln627: .asciz "nvnDeviceCompactAccelerationStructure"
++Ln628: .asciz "nvnDeviceRelocateAccelerationStructure"
++Ln629: .asciz "nvnCommandBufferSetRepresentativeFragmentTest"
++Ln630: .asciz "nvnCommandBufferEvaluateDlss"
++Ln631: .asciz "nvnDlssNetworkInitialize"
++Ln632: .asciz "nvnDlssNetworkFinalize"
++Ln633: .asciz "nvnDlssNetworkResize"
++Ln634: .asciz "nvnDlssNetworkBuilderSetDefaults"
++Ln635: .asciz "nvnDlssNetworkBuilderSetDevice"
++Ln636: .asciz "nvnDlssNetworkBuilderGetDevice"
++Ln637: .asciz "nvnDlssNetworkBuilderSetFlags"
++Ln638: .asciz "nvnDlssNetworkBuilderGetFlags"
++Ln639: .asciz "nvnDlssNetworkBuilderSetOutputResolution"
++Ln640: .asciz "nvnDlssNetworkBuilderGetOutputResolution"
++Ln641: .asciz "nvnDlssNetworkBuilderSetMethod"
++Ln642: .asciz "nvnDlssNetworkBuilderGetMethod"
++Ln643: .asciz "nvnDlssNetworkBuilderSetPreset"
++Ln644: .asciz "nvnDlssNetworkBuilderGetPreset"
++Ln645: .asciz "nvnDlssNetworkBuilderGetOptimalSettings"
++Ln646: .asciz "nvnDlssNetworkBuilderGetStorageSize"
++Ln647: .asciz "nvnDlssNetworkBuilderSetStorage"
++Ln648: .asciz "nvnDlssNetworkBuilderGetMemory"
++Ln649: .asciz "nvnDlssNetworkBuilderGetMemorySize"
++Ln650: .asciz "nvnDlssNetworkBuilderSetTextureIDs"
++Ln651: .asciz "nvnDlssNetworkBuilderGetTexturePool"
++Ln652: .asciz "nvnDlssNetworkBuilderGetTextureIDs"
++Ln653: .asciz "nvnDlssNetworkBuilderSetMaxEvaluationEntries"
++Ln654: .asciz "nvnDlssNetworkBuilderGetMaxEvaluationEntries"
++Ln655: .asciz "nvnDlssParametersSetDefaults"
++Ln656: .asciz "nvnDlssParametersSetOverlayDebugLayer"
++Ln657: .asciz "nvnDlssParametersSetOverlayFullScreen"
++Ln658: .asciz "nvnDlssParametersSetOverlayShowNans"
++Ln659: .asciz "nvnDlssParametersSetOverlayJitterDebug"
++Ln660: .asciz "nvnDlssParametersSetInputColor"
++Ln661: .asciz "nvnDlssParametersSetOutputColor"
++Ln662: .asciz "nvnDlssParametersSetMotionVectors"
++Ln663: .asciz "nvnDlssParametersSetDepth"
++Ln664: .asciz "nvnDlssParametersSetBiasCurrentColorMask"
++Ln665: .asciz "nvnDlssParametersSetJitterOffset"
++Ln666: .asciz "nvnDlssParametersGetJitterOffset"
++Ln667: .asciz "nvnDlssParametersSetPreExposure"
++Ln668: .asciz "nvnDlssParametersGetPreExposure"
++Ln669: .asciz "nvnDlssParametersSetExposureTexture"
++Ln670: .asciz "nvnDlssParametersSetHistoryReset"
++Ln671: .asciz "nvnDlssParametersGetHistoryReset"
++Ln672: .asciz "nvnDlssParametersSetMotionVectorScale"
++Ln673: .asciz "nvnDlssParametersGetMotionVectorScale"
++Ln674: .asciz "nvnDlssParametersSetEvaluationIndex"
++Ln675: .asciz "nvnDlssParametersGetEvaluationIndex"
++Ln676: .asciz "nvnDlssParametersSetInputSubrectangleSize"
++Ln677: .asciz "nvnDlssParametersGetInputSubrectangleSize"
++Ln678: .asciz "nvnDlssParametersSetInputColorSubrectangleBase"
++Ln679: .asciz "nvnDlssParametersGetInputColorSubrectangleBase"
++Ln680: .asciz "nvnDlssParametersSetDepthSubrectangleBase"
++Ln681: .asciz "nvnDlssParametersGetDepthSubrectangleBase"
++Ln682: .asciz "nvnDlssParametersSetMotionVectorSubrectangleBase"
++Ln683: .asciz "nvnDlssParametersGetMotionVectorSubrectangleBase"
++Ln684: .asciz "nvnDlssParametersSetBiasCurrentColorSubrectangleBase"
++Ln685: .asciz "nvnDlssParametersGetBiasCurrentColorSubrectangleBase"
++Ln686: .asciz "nvnDlssParametersSetOutputSubrectangleBase"
++Ln687: .asciz "nvnDlssParametersGetOutputSubrectangleBase"
++Ln688: .asciz "nvnDeviceGetUniformBufferHandle"
++Ln689: .asciz "nvnCommandBufferPushComputeConstants"
++Ln690: .asciz "nvnCommandBufferPushComputeConstantsDeferred"
++Ln691: .asciz "nvnCommandBufferPushGraphicsConstants"
++Ln692: .asciz "nvnCommandBufferPushGraphicsConstantsDeferred"
++Ln693: .asciz "nvnCommandBufferSetComputeOverlapMode"
++Ln694: .asciz "nvnDeviceMessageBufferSetDefaults"
++Ln695: .asciz "nvnDeviceMessageBufferSetDevice"
++Ln696: .asciz "nvnDeviceMessageBufferSetStorage"
++Ln697: .asciz "nvnDeviceMessageBufferBeginMessages"
++Ln698: .asciz "nvnDeviceMessageBufferGetNextMessage"
++Ln699: .asciz "nvnDeviceMessageBufferEndMessages"
++Ln700: .asciz "nvnDeviceMessageBufferReset"
++Ln701: .asciz "nvnCommandBufferBindDeviceMessageBuffer"
++Ln702: .asciz "nvnCommandBufferBindDeviceMessageBufferDeferred"
++Ln703: .asciz "nvnCommandBufferResetDeviceMessageBuffer"
++Ln704: .asciz "nvnCommandBufferResetDeviceMessageBufferDeferred"
++Ln705: .asciz "nvnDeviceCommandBufferSetDefaults"
++Ln706: .asciz "nvnDeviceCommandBufferSetDevice"
++Ln707: .asciz "nvnDeviceCommandBufferSetStorage"
++Ln708: .asciz "nvnDeviceCommandBufferSetCommandMemorySize"
++Ln709: .asciz "nvnDeviceCommandBufferSetComputeMemorySize"
++Ln710: .asciz "nvnDeviceCommandBufferGetHandle"
++Ln711: .asciz "nvnCommandBufferBeginDeviceCommands"
++Ln712: .asciz "nvnCommandBufferEndDeviceCommands"
++Ln713: .asciz "nvnCommandBufferSubmitDeviceCommands"
++Ln714: .asciz "nvnDeviceGetCommandHandleMemorySize"
++Ln715: .asciz "nvnProgramGetDeviceComputeMemorySize"
++Ln716: .asciz "nvnCommandBufferSetGraphicsWorkloadPriority"
++Ln717: .asciz "nvnCommandBufferSetComputeWorkloadPriority"
++Ln718: .asciz "nvnCommandBufferSetResourceOccupancy"
++Ln719: .asciz "nvnDirtyTileMapParametersSetDefaults"
++Ln720: .asciz "nvnDirtyTileMapParametersSetTexture"
++Ln721: .asciz "nvnDirtyTileMapParametersSetInputs"
++Ln722: .asciz "nvnDirtyTileMapParametersSetOutputs"
++Ln723: .asciz "nvnDirtyTileMapParametersSetConstantColorTable"
++Ln724: .asciz "nvnDirtyTileMapParametersSetDepthStencilMask"
++Ln725: .asciz "nvnDirtyTileMapParametersSetExpandFootprint"
++Ln726: .asciz "nvnDirtyTileMapParametersGetTexture"
++Ln727: .asciz "nvnDirtyTileMapParametersGetInputs"
++Ln728: .asciz "nvnDirtyTileMapParametersGetOutputs"
++Ln729: .asciz "nvnDirtyTileMapParametersGetConstantColorTable"
++Ln730: .asciz "nvnDirtyTileMapParametersGetDepthStencilMask"
++Ln731: .asciz "nvnDirtyTileMapParametersGetExpandFootprint"
++Ln732: .asciz "nvnCommandBufferSetFloatBlendClamp"
++Ln733: .asciz "nvnCommandBufferGetAccelerationStructureVisualizationData"
+diff --git a/dm/gfx/tex/nvn_deswizzle.c b/dm/gfx/tex/nvn_deswizzle.c
+index 8b5aefb..d29b34e 100644
+--- a/dm/gfx/tex/nvn_deswizzle.c
++++ b/dm/gfx/tex/nvn_deswizzle.c
+@@ -6,8 +6,15 @@
+ // Level / layer start offsets and the actual block height and block depth of this level come from nvn_tex.c; here we only do intra-level addressing and copying.
+ #include "nvn_deswizzle.h"
+ #include <string.h>
++#include <stdlib.h>
++// SWITCH2 (private bring-up): the Switch 2 GPU swaps bits 5 and 6 of the in-GOB offset relative to the Tegra X1 layout
++// (Eden-NS2 video_core/textures/decoders.cpp NativeGobOffset; confirmed on the UI sprites of Pokopia by brute force):
++//   (x%64/32)*256 + (y%8/4)*128 + (x%32/16)*64 + (y%4/2)*32 + (y%2)*16 + x%16.  DM_S2_TILING=0 restores the Tegra X1 order; on by default in this build.
++int nvn_native_tiling = -1;
++int nvn_native_tiling_on(void) { if (nvn_native_tiling < 0) { const char *e = getenv("DM_S2_TILING"); nvn_native_tiling = e ? atoi(e) != 0 : 1; } return nvn_native_tiling; }
+ 
+ static uint32_t gob_off(uint32_t x, uint32_t y) {
++    if (nvn_native_tiling_on()) return (x % 64 / 32) * 256 + (y % 8 / 4) * 128 + (x % 32 / 16) * 64 + (y % 4 / 2) * 32 + (y % 2) * 16 + x % 16;   // SWITCH2
+     return (x % 64 / 32) * 256 + (y % 8 / 2) * 64 + (x % 32 / 16) * 32 + (y % 2) * 16 + x % 16;
+ }
+ 
+@@ -50,8 +57,9 @@ static int move(const nvn_texdesc *d, unsigned level, unsigned layer, uint8_t *b
+     // Hoist nvn_bl_offset's slice and row terms out of the segment loop. The block height and depth are powers of two,
+     // so their division / remainder become shifts and masks. At x = 16*j the block column is j >> 2, and the segment
+     // has one of four positions inside the GOB (x%64 = 0/16/32/48 -> 0/32/256/288); the y part depends only on y%8.
+-    static const uint16_t kox[4] = {0, 32, 256, 288};                         // x%16 is always 0 here: segments start at multiples of 16
+-    static const uint16_t koy[8] = {0, 16, 64, 80, 128, 144, 192, 208};       // (y%8/2)*64 + (y%2)*16
++    static const uint16_t kox_x1[4] = {0, 32, 256, 288}, kox_s2[4] = {0, 64, 256, 320};                         // x%16 is always 0 here: segments start at multiples of 16
++    static const uint16_t koy_x1[8] = {0, 16, 64, 80, 128, 144, 192, 208}, koy_s2[8] = {0, 16, 32, 48, 128, 144, 160, 176};   // (y%8/2)*64 + (y%2)*16; SWITCH2: (y%8/4)*128 + (y%4/2)*32 + (y%2)*16
++    const uint16_t *kox = nvn_native_tiling_on() ? kox_s2 : kox_x1, *koy = nvn_native_tiling_on() ? koy_s2 : koy_x1;
+     uint32_t bh = 1u << th, bd = 1u << td;
+     uint64_t block = 512ull * bh * bd, gobs_x = (uint64_t)(lb + 63) >> 6, blocks_y = ((uint64_t)rows + 8 * bh - 1) >> (3 + th);
+     for (uint32_t z = 0; z < slices; z++) {
+diff --git a/dm/gfx/tex/nvn_deswizzle_gpu.m b/dm/gfx/tex/nvn_deswizzle_gpu.m
+index 1443bbb..a24272c 100644
+--- a/dm/gfx/tex/nvn_deswizzle_gpu.m
++++ b/dm/gfx/tex/nvn_deswizzle_gpu.m
+@@ -1,5 +1,6 @@
+ #import "nvn_deswizzle_gpu.h"
+ #import "../nvn/host_msl.h"
++int nvn_native_tiling_on(void);   // SWITCH2 (nvn_deswizzle.c)
+ 
+ static id<MTLComputePipelineState> g_nvn_deswz_pipeline, g_nvn_deswz_direct;
+ 
+@@ -35,8 +36,9 @@ int nvn_deswz_gpu_direct_m4(id<MTL4ComputeCommandEncoder> enc, id<MTL4ArgumentTa
+     uint32_t row,rows,slices,bpb;uint64_t base;unsigned th,td;
+     if (nvn_deswizzle_geom(d,level,0,&row,&rows,&slices,&base,&th,&td,&bpb) || bpb != 8 || slices != 1 || td ||
+         layout.size > src.length || src_off > src.length-layout.size || layout.layers != view.arrayLength) return -1;
+-    struct {uint64_t src_off,base,layer_stride;uint32_t width,height,layers,level,th,gobs_x;} p = {
+-        src_off,base,layout.layer_size,MAX(d->width>>level,1u),MAX(d->height>>level,1u),layout.layers,level,th,MAX(nvn_tex_level_gobs(d,level),(row+63u)/64u)};
++    int nvn_native_tiling_on(void);
++    struct {uint64_t src_off,base,layer_stride;uint32_t width,height,layers,level,th,gobs_x,native;} p = {
++        src_off,base,layout.layer_size,MAX(d->width>>level,1u),MAX(d->height>>level,1u),layout.layers,level,th,MAX(nvn_tex_level_gobs(d,level),(row+63u)/64u),(uint32_t)nvn_native_tiling_on()};
+     memcpy((uint8_t*)params.contents+params_off,&p,sizeof p);
+     [enc setArgumentTable:table];[enc setComputePipelineState:g_nvn_deswz_direct];
+     [table setAddress:src.gpuAddress atIndex:0];[table setAddress:params.gpuAddress+params_off atIndex:2];[table setTexture:view.gpuResourceID atIndex:0];
+@@ -52,9 +54,9 @@ int nvn_deswz_gpu_encode(id<MTLComputeCommandEncoder> enc, id<MTLBuffer> src, ui
+     uint64_t base;
+     unsigned th, td;
+     if (nvn_deswizzle_geom(d, level, layer, &row_bytes, &rows, &slices, &base, &th, &td, &bpb) || dst_pitch < row_bytes) return -1;
+-    struct { uint64_t src_off, dst_off, base, pitch; uint32_t row_bytes, rows, slices, th, td, gobs_x; } p = {
++    struct { uint64_t src_off, dst_off, base, pitch; uint32_t row_bytes, rows, slices, th, td, gobs_x, native; } p = {
+         src_off, dst_off, base, dst_pitch, row_bytes, rows, slices, th, td, MAX(nvn_tex_level_gobs(d, level), (row_bytes + 63u) >> 6)   // GOB columns as laid out (nvn_tex_level_gobs)
+-    };
++    , (uint32_t)nvn_native_tiling_on()};
+     [enc setComputePipelineState:g_nvn_deswz_pipeline];
+     [enc setBuffer:src offset:0 atIndex:0];
+     [enc setBuffer:dst offset:0 atIndex:1];
+@@ -74,9 +76,9 @@ int nvn_deswz_gpu_encode_m4(id<MTL4ComputeCommandEncoder> enc, id<MTL4ArgumentTa
+     uint64_t base;
+     unsigned th, td;
+     if (nvn_deswizzle_geom(d, level, layer, &row_bytes, &rows, &slices, &base, &th, &td, &bpb) || dst_pitch < row_bytes) return -1;
+-    struct { uint64_t src_off, dst_off, base, pitch; uint32_t row_bytes, rows, slices, th, td, gobs_x; } p = {
++    struct { uint64_t src_off, dst_off, base, pitch; uint32_t row_bytes, rows, slices, th, td, gobs_x, native; } p = {
+         src_off, dst_off, base, dst_pitch, row_bytes, rows, slices, th, td, MAX(nvn_tex_level_gobs(d, level), (row_bytes + 63u) >> 6)   // GOB columns as laid out (nvn_tex_level_gobs)
+-    };
++    , (uint32_t)nvn_native_tiling_on()};
+     memcpy((uint8_t *)params.contents + params_off, &p, sizeof p);
+     [enc setArgumentTable:table];
+     [enc setComputePipelineState:g_nvn_deswz_pipeline];
+diff --git a/dm/gfx/tools/dmsh_build.py b/dm/gfx/tools/dmsh_build.py
+index 3b843c9..bf34594 100644
+--- a/dm/gfx/tools/dmsh_build.py
++++ b/dm/gfx/tools/dmsh_build.py
+@@ -119,6 +119,9 @@ def mac_compile(msl, air, lib):   # same interface as ios_metal.compile
+ #   c2 C2_SAMP + 8 r: separate samplers (nvnCommandBufferBindSeparateSampler), slot r < C2_SEP_SLOTS
+ #   c0 base + 0x10 r: storage buffer r (64-bit address, 32-bit size), base C0_SSBO_<stage> (the hull / domain stages' bases were never seen)
+ TEX_BASE, IMG_BASE, IMG_SLOTS, SEPTEX_BASE, SEPTEX_SLOT0, SAMP_BASE = abi.C2_TEX, abi.C2_IMG, abi.C2_IMG_SLOTS, abi.C2_SEPTEX, abi.SEPTEX_SLOT0, abi.C2_SAMP
++S2_CS = os.environ.get('DMSH_S2_CS') == '1'; S2_TLS = threading.local()   # SWITCH2 (private bring-up): NVN2 compute driver bank, packed per program; reflect() fills S2_TLS.layout (s2_compute_layout_patch.py)
++S2_CS_SSBO = int(os.environ['DMSH_S2_CS_SSBO'], 0) if os.environ.get('DMSH_S2_CS_SSBO') else None
++S2_CENSUS = os.environ.get('DMSH_S2_CENSUS') == '1'
+ SSBO = {'vs': abi.C0_SSBO_VS, 'cs': abi.C0_SSBO_CS, 'gs': abi.C0_SSBO_GS, 'ps': abi.C0_SSBO_PS}
+ 
+ def records(d):
+@@ -576,6 +579,14 @@ def decode_tex(name):
+     m = re.match(r'[a-z]+_[ti]\w*?_(?:cb(\d+)|tcb)_([0-9A-F]+)', name)
+     if not m: return None
+     slots = int(m.group(1)) if m.group(1) else -1; h = int(m.group(2), 16)
++    if S2_CS and name.startswith('cp_'):   # SWITCH2: NVN2 compute driver bank, packed per program: [0x10][uniform 16 B x n][storage 16 B x n][texture 8 B x n][image 8 B x n] (s2_compute_layout_patch.py)
++        o0, o1, ty = h & 0x3fff, (h >> 14) & 0x3fff, h >> 28
++        tb = (slots & 0xffff) if slots >= 0 else 2; L = getattr(S2_TLS, 'layout', None)
++        if tb != 2 or L is None or o0 * 4 < L['tex_base'] or (o0 * 4 - L['tex_base']) % abi.C2_ROW: return None, None, ty   # undecoded (reported), not unknown
++        idx = (o0 * 4 - L['tex_base']) // abi.C2_ROW
++        if re.match(r'[a-z]+_i', name): idx -= L['n_tex']   # images follow the texture table
++        if idx < 0 or idx >= 64: return None, None, ty
++        return idx, None, ty
+     tb = (slots & 0xffff) if slots >= 0 else 2; sb = ((slots >> 16) - 1) if slots >= 0 and (slots >> 16) else tb
+     o0, o1, ty = h & 0x3fff, (h >> 14) & 0x3fff, h >> 28
+     def slot(word, base, cb): return (word * 4 - base) // abi.C2_ROW if cb == 2 and word * 4 >= base and (word * 4 - base) % abi.C2_ROW == 0 else None
+@@ -674,6 +685,18 @@ def reflect(key, stage, msl, res):
+     # (Mario Party Superstars' light_primitive_point_cluster.bnsh, a storage buffer and two images); a member the pattern skipped left the host's argument buffer longer than the reflection
+     members = list(re.finditer(r'^\s*(.+?)\s+(\w+)\s*\[\[id\((\d+)\)(?:\s*,\s*\w+\(\d+\))*\]\];', body.group(1) if body else '', re.M))
+     if body and len(members) != body.group(1).count('[[id('): raise ValueError(f'{key}: an argument buffer member the reflection cannot read')
++    S2_TLS.layout = None   # per thread: reflect() runs on a ThreadPoolExecutor
++    if S2_CS and stage == 'cs':   # SWITCH2: this program's packed NVN2 compute bank, from what its code reads (s2_compute_layout_patch.py)
++        names = [m.group(2) for m in members]
++        max_u = max([int(n[n.rindex('_c') + 2:]) - 3 for n in names if re.fullmatch(r'[a-z]+_c(\d+)', n) and int(n[n.rindex('_c') + 2:]) >= 3], default=-1)
++        ssbo_base = 0x10 + abi.C0_ROW * (max_u + 1)
++        soffs = [b['cb_offset'] * 4 for b in res['sbufs'] if b['cb_slot'] == 0]
++        max_s = max([(o - ssbo_base) // abi.C0_ROW for o in soffs if o >= ssbo_base], default=-1)
++        tex_base = ssbo_base + abi.C0_ROW * (max_s + 1)
++        toffs = [(int(m.group(2), 16) & 0x3fff) * 4 for m in (re.match(r'[a-z]+_([ti])\w*?_tcb_([0-9A-F]+)', n) for n in names) if m and m.group(1) == 't']
++        max_t = max([(o - tex_base) // abi.C2_ROW for o in toffs if o >= tex_base], default=-1)
++        S2_TLS.layout = {'ssbo_base': ssbo_base, 'tex_base': tex_base, 'n_tex': max_t + 1}
++        if S2_CENSUS: print(f'[s2layout] {key} max_ubo={max_u} ssbo_base={ssbo_base:#x} tex_base={tex_base:#x} n_tex={max_t + 1}', flush=True)
+     for m in members:
+         ty, nm, aid = m.group(1).strip(), m.group(2), int(m.group(3))
+         e = {'msl_name': nm, 'msl_type': ty, 'arg_id': aid}
+@@ -712,12 +735,15 @@ def reflect(key, stage, msl, res):
+         binds.append(e)
+     # Storage buffers: SPIR-V binding number → c0 offset → NVN storage buffer slot (c0 base SSBO[stage], C0_ROW bytes per slot)
+     base = SSBO.get(stage)   # storage buffer base for the hull / domain stages has not been measured: a storage buffer there is reported with no slot
++    if stage == 'cs' and getattr(S2_TLS, 'layout', None) is not None: base = S2_TLS.layout['ssbo_base']   # SWITCH2: the NVN2 compute storage table follows the uniform table (s2_compute_layout_patch.py)
++    if S2_CENSUS and stage == 'cs':
++        for b in res['sbufs']: print(f'[s2census] {key} sbuf binding={b["binding"]} slot={b["slot"]} cb_slot={b["cb_slot"]} cb_offset={b["cb_offset"] * 4:#x} flags={b["flags"]}', flush=True)
+     sb_sorted = sorted(res['sbufs'], key=lambda b: b['binding'])
+     for e in binds:
+         if e['kind'] == abi.KIND_SBUF:
+             b = sb_sorted[e['index']] if e['index'] < len(sb_sorted) else None
+             off = b['cb_offset'] * 4 if b and b['cb_slot'] == 0 else None
+-            if stage == 'cs' and off is not None and abi.C0_CS_UBO <= off < abi.C0_CS_UBO + abi.C0_ROW * abi.C0_CS_UBO_SLOTS and (off - abi.C0_CS_UBO) % abi.C0_ROW == 0:
++            if stage == 'cs' and getattr(S2_TLS, 'layout', None) is None and off is not None and abi.C0_CS_UBO <= off < abi.C0_CS_UBO + abi.C0_ROW * abi.C0_CS_UBO_SLOTS and (off - abi.C0_CS_UBO) % abi.C0_ROW == 0:
+                 e.update(kind=abi.KIND_UBO_PTR, reg=(off - abi.C0_CS_UBO) // abi.C0_ROW)   # compute-stage uniform slot r: address at c0[C0_CS_UBO + 0x10 r], read through global memory (checked against cs_lut_combine_c reading cb10[66])
+             elif b and b['cb_slot'] >= 3:   # the address is in the game's own uniform buffer c[n] = uniform slot n - 3 (Monster Hunter Rise's compute shaders: c3 + 0x38); the replay reads it there
+                 e.update(kind=abi.KIND_SBUF_UBO, reg=b['cb_slot'] - 3, off=b['cb_offset'] * 4)
+@@ -762,7 +788,7 @@ RULES = []   # MSL rewrite rules attached by shader name (function, applicabilit
+ # The first-stage code fingerprint does not include dmsh_fetch.py; readable-tile variants get a separate second-stage cache keyed on the generated MSL.
+ CODE_FP = hashlib.sha256(source_without_rule_bodies() + b''.join(b'\0' + dmsh_chain.code_form(open(m.__file__, 'r').read()) for m in (dmsh_chain, dmsh_geometry, dmsh_atomic, abi) + ((ios_metal,) if IOSOUT else ()))
+                          + b'\0abi\0' + repr(sorted(abi.VALUES.items())).encode()).hexdigest()
+-TOOL_FP = tool_fingerprint().encode()
++TOOL_FP = (tool_fingerprint() + '\0chain\0' + dmsh_chain.version()).encode()   # SWITCH2: the translator sources are in the chain version, not in tool_fingerprint() (s2_cache_key_patch.py)
+ 
+ _CAST = ('as_type<int>(', 'as_type<uint>(')
+ def int_inputs(src):
+diff --git a/dm/gfx/tools/dmsh_chain.lock b/dm/gfx/tools/dmsh_chain.lock
+index bcabb6b..a323d71 100644
+--- a/dm/gfx/tools/dmsh_chain.lock
++++ b/dm/gfx/tools/dmsh_chain.lock
+@@ -1,8 +1,8 @@
+ # Translation chain tool fingerprints (written by tool_lock.py --update-lock; regenerate after changing tools and commit it)
+-dmsh_xlate.dll	3a91580c9bf158bd
+-Ryujinx.Graphics.Shader.dll	5f9f4d2fff8e44ca
+-Ryujinx.Common.dll	f2e497f3f181a8ce
+-xlate_source	29e80b8c166d2f81
++dmsh_xlate.dll	e87f7385cd969c2a
++Ryujinx.Graphics.Shader.dll	98205560e98ebf79
++Ryujinx.Common.dll	d4dd48335c52c5a3
++xlate_source	f53384ba156e8afd
+ spirv-cross	e37945d8e441d34d
+-metal_macosx	Apple metal version 32023.922 (metalfe-32023.922.4)
+-metal_iphoneos	Apple metal version 32023.922 (metalfe-32023.922.4)
++metal_macosx	Apple metal version 32023.921 (metalfe-32023.921.6)
++metal_iphoneos	Apple metal version 32023.921 (metalfe-32023.921.6)
+diff --git a/dm/gfx/tools/dmsh_xlate/Program.cs b/dm/gfx/tools/dmsh_xlate/Program.cs
+index 51f2706..32e5148 100644
+--- a/dm/gfx/tools/dmsh_xlate/Program.cs
++++ b/dm/gfx/tools/dmsh_xlate/Program.cs
+@@ -82,7 +82,10 @@ static class SwshXlate
+         public SamplerType QuerySamplerType(int handle, int cbufSlot = -1)
+         {
+             int slot = Slot(handle, cbufSlot, false), islot = Slot(handle, cbufSlot, true);
+-            string t = (slot >= 0 ? Get("tex", slot) : null) ?? (islot >= 0 ? Get("img", islot) : null);
++            // SWITCH2 (private bring-up): NVN2 compute kernels keep a packed per-program handle table, so their answers are keyed by handle ("texh" / "imgh", tools/s2_facts.py)
++            string t = (_job["texh"] is JsonObject th && th[handle.ToString("X")] is JsonNode hn ? (string)hn : null)
++                ?? (_job["imgh"] is JsonObject ih && ih[handle.ToString("X")] is JsonObject io ? (string)io["type"] : null)
++                ?? (slot >= 0 ? Get("tex", slot) : null) ?? (islot >= 0 ? Get("img", islot) : null);
+             if (t == null && islot >= 0 && cbufSlot < 0)
+             {
+                 if (_imageTypes != null && _imageTypes.TryGetValue(handle, out SamplerType it)) { Notes.Add($"texture handle {handle:X} is image slot {islot}: type {it} from the shader's image instructions"); return it; }
+@@ -105,7 +108,8 @@ static class SwshXlate
+         public TextureFormat QueryTextureFormat(int handle, int cbufSlot = -1)
+         {
+             int slot = Slot(handle, cbufSlot, true);
+-            string f = _job["img"] is JsonObject t && slot >= 0 && t[slot.ToString()] is JsonObject o ? (string)o["fmt"] : null;
++            string f = (_job["imgh"] is JsonObject ih && ih[handle.ToString("X")] is JsonObject io ? (string)io["fmt"] : null)   // SWITCH2: handle-keyed (tools/s2_facts.py)
++                ?? (_job["img"] is JsonObject t && slot >= 0 && t[slot.ToString()] is JsonObject o ? (string)o["fmt"] : null);
+             if (f == null) { Notes.Add($"image handle {handle:X} slot {slot} has no format in the answer table, using R8G8B8A8Unorm"); return TextureFormat.R8G8B8A8Unorm; }
+             return Enum.TryParse(f, true, out TextureFormat tf) ? tf : TextureFormat.R8G8B8A8Unorm;
+         }
+diff --git a/dm/host/Makefile b/dm/host/Makefile
+index 54afe1a..21162d4 100644
+--- a/dm/host/Makefile
++++ b/dm/host/Makefile
+@@ -64,7 +64,7 @@ endif
+ .PHONY: FORCE
+ FORCE:
+ dmhost: $(SRC) $(GFX) ../third_party/stb_vorbis/stb_vorbis.c dm.h hle.h romfs_image.h save_sync.h dm_input.h pad_slots.h hle_haptics.h haptics_apple.h motion_fusion.h motion_apple.h motion_pro.h motion_pro_mac.h pad_apple.h pad_hid.h pad_hid_mac.h front.h $(GFX_H) $(GAME_H) $(GAME_STAMP) $(VPX_LIB) $(MSL_H)
+-	clang $(CFLAGS) -I../gfx/nvn/include -I$(dir $(MSL_H)) -I../third_party/vulkan-headers/include -I$(dir $(GAME_H)) -I$(VPX) -I../third_party/stb_vorbis -fobjc-arc -o $@ $(SRC) $(GFX) $(VPX_LIB) -framework Cocoa -framework QuartzCore -framework Metal -framework MetalFX -framework GameController -framework CoreHaptics -framework IOKit -framework AudioToolbox -framework VideoToolbox -framework CoreMedia -framework CoreVideo -framework ImageIO -framework UniformTypeIdentifiers
++	clang $(CFLAGS) -I../gfx/nvn/include -I$(dir $(MSL_H)) -I../third_party/vulkan-headers/include -I$(dir $(GAME_H)) -I$(VPX) -I../third_party/stb_vorbis -fobjc-arc -o $@ $(SRC) $(GFX) $(VPX_LIB) -framework Cocoa -framework QuartzCore -framework Metal -framework MetalFX -framework GameController -framework CoreHaptics -framework IOKit -framework AudioToolbox -framework AVFAudio -framework VideoToolbox -framework CoreMedia -framework CoreVideo -framework ImageIO -framework UniformTypeIdentifiers
+ clean:   # the host and everything make generates for it (gen/: the profile headers, the game stamp and the libvpx build; dmhost_* and *.dSYM beside them, as in .gitignore)
+ 	rm -rf gen dmhost dmhost_* *.dSYM
+ .PHONY: clean
+diff --git a/dm/host/hle.c b/dm/host/hle.c
+index de79bc9..e09a927 100644
+--- a/dm/host/hle.c
++++ b/dm/host/hle.c
+@@ -115,7 +115,7 @@ uint64_t gate_dispatch(uint64_t ret_addr, uint64_t *regs) {
+         if (g->ret == ret_addr) switch (g->kind) {
+             case G_CNTPCT: case G_CNTVCT: {
+                 guest_clock_read_wait();
+-                uint64_t t = guest_ns() * 12 / 625;    // 19.2 MHz system counter; original instruction mrs xN, cntpct_el0, arg = N
++                uint64_t guest_ticks(void); uint64_t t = guest_ticks();    // the guest system counter (hle_os.c: 31.25 MHz on the Switch 2); original instruction mrs xN, cntpct_el0, arg = N
+                 regs[g->arg] = t;
+                 return t;
+             }
+diff --git a/dm/host/hle_oe.c b/dm/host/hle_oe.c
+index 71a90bc..29862f0 100644
+--- a/dm/host/hle_oe.c
++++ b/dm/host/hle_oe.c
+@@ -264,3 +264,9 @@ HLE_FORCE("_ZN2nn2oe17GetPseudoDeviceIdEPNS_4util4UuidE", "pseudo device ID; a f
+     static const uint8_t k[16] = {0x78, 0x62, 0x6c, 0x00, 0x53, 0x57, 0x4e, 0x41, 0x54, 0x49, 0x56, 0x45, 0x31, 0x30, 0x30, 0x31};
+     memcpy(uuid, k, 16);
+ }
++
++// ---------- SWITCH2 (private bring-up, Pokopia SDK 20.5.25): oe queries that go to the Switch 2 am service tables, which the host does not build ----------
++// nn::oe::SetGraphicsScaleChangedNotificationEnabled called nn::am::GetGraphicsScalingParametersFunctions(), which returned a null table (null read at sdk+0x517b48).
++HLE_FORCE("_ZN2nn2oe42SetGraphicsScaleChangedNotificationEnabledEb", "SWITCH2: graphics scale change notification switch (the host never sends one)", void, h_oe_SetGfxScaleNtf, unsigned on) { (void)on; }
++HLE_FORCE("_ZN2nn2oe23GetCurrentGraphicsScaleEv", "SWITCH2: current graphics scale enum; 0 until the am scaling table is modelled", int, h_oe_GetCurGfxScale, void) { return 0; }
++HLE_FORCE("_ZN2nn2oe24GetServerEnvironmentTypeEv", "SWITCH2: server environment type; 0 = production", int, h_oe_GetServerEnvType, void) { return 0; }
+diff --git a/dm/host/hle_offline.c b/dm/host/hle_offline.c
+index 3270ea1..bfd5f69 100644
+--- a/dm/host/hle_offline.c
++++ b/dm/host/hle_offline.c
+@@ -200,3 +200,65 @@ HLE_FORCE("_ZN2nn5album21GetSharePostedLastUrlEPcmRKNS0_7ShareIdE", "URL of the
+ HLE_FORCE("_ZN2nn5album14ShowAlbumFilesEv", "album applet: not shown", Result, h_album_Show, void) { return RES_FAIL; }
+ // Pokémon Legends: Z-A (SDK 19): a screenshot of the current frame, taken by the capture service
+ HLE_FORCE("_ZN2nn5album21SaveCurrentScreenshotENS0_17AlbumReportOptionE", "screenshot of the current frame (capsrv): no album, fails", Result, h_album_SaveCur, int report) { (void)report; LOG("album::SaveCurrentScreenshot (no album)"); return RES_FAIL; }
++
++// ---------- SWITCH2 (private bring-up, Pokopia SDK 20.5.25): nn::streamplay (GameShare streaming to other consoles) ----------
++// The SDK connects to the stpl:u service in GetRequiredMemorySize, which the host does not serve (sm 0xe15), and the SDK aborts. The host answers at the SDK boundary:
++// no session, no guests, nothing streams; the game keeps its GameShare feature offline.
++HLE_FORCE("_ZN2nn10streamplay21GetRequiredMemorySizeENS0_14StreamPlayTypeENS0_13StreamingModeEi", "SWITCH2 streamplay: work memory size the game allocates for it; 1 MB", uint64_t, h_stpl_ReqMem, int type, int mode, int n) { (void)type; (void)mode; (void)n; return 0x100000; }
++HLE_FORCE("_ZN2nn10streamplay10InitializeENS0_14StreamPlayTypeENS0_13StreamingModeEPvm", "SWITCH2 streamplay: init; no service, reports success", Result, h_stpl_Init, int type, int mode, void *mem, uint64_t size) { (void)type; (void)mode; (void)mem; (void)size; return RES_OK; }
++HLE_FORCE("_ZN2nn10streamplay8FinalizeEv", "SWITCH2 streamplay: finalize; no-op", void, h_stpl_Fin, void) {}
++HLE_FORCE("_ZN2nn10streamplay12CloseSessionEv", "SWITCH2 streamplay: close session; none open", Result, h_stpl_Close, void) { return RES_OK; }
++HLE_FORCE("_ZN2nn10streamplay14StartStreamingEv", "SWITCH2 streamplay: start streaming; reports success, nothing streams", Result, h_stpl_Start, void) { return RES_OK; }
++HLE_FORCE("_ZN2nn10streamplay18GetConnectionStateEPNS0_15ConnectionStateE", "SWITCH2 streamplay: connection state 0 (no session)", Result, h_stpl_ConnState, uint32_t *out) { if (out) *out = 0; return RES_OK; }
++HLE_FORCE("_ZN2nn10streamplay24CreateIndividualDisplaysEi", "SWITCH2 streamplay: per-guest displays; none made, reports success", Result, h_stpl_Displays, int n) { (void)n; return RES_OK; }
++HLE_FORCE("_ZN2nn10streamplay29SetSupportedGuestNpadStyleSetENS_4util10BitFlagSetILi32ENS_3hid12NpadStyleTagEEE", "SWITCH2 streamplay: guest pad styles; recorded nowhere", void, h_stpl_StyleSet, uint32_t s) { (void)s; }
++HLE_FORCE("_ZN2nn10streamplay23SetGuestNpadJoyHoldTypeENS_3hid15NpadJoyHoldTypeE", "SWITCH2 streamplay: guest joy hold type; recorded nowhere", void, h_stpl_HoldType, int t) { (void)t; }
++HLE_FORCE("_ZN2nn10streamplay19GetGuestPadStyleSetERKNS0_10GuestPadIdE", "SWITCH2 streamplay: guest pad style set; none", uint32_t, h_stpl_GuestStyle, const void *id) { (void)id; return 0; }
++HLE_FORCE("_ZN2nn10streamplay17GetGuestPadStatesEPNS0_13GuestPadStateINS_3hid16NpadFullKeyStateEEEiRKNS0_10GuestPadIdE", "SWITCH2 streamplay: guest pad states (full key); 0 states", int, h_stpl_PadFull, void *out, int n, const void *id) { (void)out; (void)n; (void)id; return 0; }
++HLE_FORCE("_ZN2nn10streamplay17GetGuestPadStatesEPNS0_13GuestPadStateINS_3hid17NpadHandheldStateEEEiRKNS0_10GuestPadIdE", "SWITCH2 streamplay: guest pad states (handheld); 0 states", int, h_stpl_PadHh, void *out, int n, const void *id) { (void)out; (void)n; (void)id; return 0; }
++HLE_FORCE("_ZN2nn10streamplay21GetNativeWindowHandleENS0_7GuestIdE", "SWITCH2 streamplay: guest native window; none", void *, h_stpl_GuestWin, int guest) { (void)guest; return NULL; }
++HLE_FORCE("_ZN2nn10streamplay21WriteGuestAudioStreamENS0_7GuestIdEPKvi", "SWITCH2 streamplay: guest audio; dropped", Result, h_stpl_GuestAudio, int guest, const void *p, int n) { (void)guest; (void)p; (void)n; return RES_OK; }
++HLE_FORCE("_ZN2nn10streamplay13GetGuestNsaIdEPNS_7account23NetworkServiceAccountIdENS0_7GuestIdE", "SWITCH2 streamplay: guest network account id; zero", Result, h_stpl_GuestNsa, uint64_t *out, int guest) { (void)guest; if (out) *out = 0; return RES_OK; }
++HLE_FORCE("_ZN2nn10streamplay16GetGuestNicknameEPNS_7account8NicknameENS0_7GuestIdE", "SWITCH2 streamplay: guest nickname; empty", Result, h_stpl_GuestNick, char *out, int guest) { (void)guest; if (out) *out = 0; return RES_OK; }
++HLE_FORCE("_ZN2nn10streamplay31OpenSessionWithMatchmakeSupportEPNS0_11SessionInfoERKNS0_15MatchmakeConfigE", "SWITCH2 streamplay: open a session; zeroed info, reports success", Result, h_stpl_OpenSess, uint8_t *info, const void *cfg) { (void)cfg; if (info) memset(info, 0, 0x40); return RES_OK; }
++static _Alignas(16) uint8_t g_stpl_ev[0x100];   // connection-state event that never fires (bound on the guest thread on first use, as hle_friends.c does)
++HLE_FORCE("_ZN2nn10streamplay30GetConnectionStateChangedEventEv", "SWITCH2 streamplay: connection state event; never fires", void *, h_stpl_ConnEv, void) { hle_bind_system_event(g_stpl_ev, 0); return g_stpl_ev; }
++
++// ---------- SWITCH2 (private bring-up, Pokopia SDK 20.5.25): Switch 2 hid additions the host has no device for ----------
++// Nmouse is the Joy-Con 2 mouse mode, Jcms its sensor; the SDK connects to the hid service in InitializeNmouse (sm 0xe15 → abort). The host reports no mouse and no sensor.
++HLE_FORCE("_ZN2nn3hid16InitializeNmouseEPvmii", "SWITCH2 hid: Joy-Con 2 mouse init; no device, reports success", Result, h_hid_NmInit, void *mem, uint64_t size, int a, int b) { (void)mem; (void)size; (void)a; (void)b; return RES_OK; }
++HLE_FORCE("_ZN2nn3hid14FinalizeNmouseEv", "SWITCH2 hid: Joy-Con 2 mouse finalize; no-op", void, h_hid_NmFin, void) {}
++HLE_FORCE("_ZN2nn3hid16GetNmouseHandlesEPNS0_12NmouseHandleEij", "SWITCH2 hid: mouse handles of an Npad; none", int, h_hid_NmHandles, void *out, int n, uint32_t npad) { (void)out; (void)n; (void)npad; return 0; }
++HLE_FORCE("_ZN2nn3hid21GetMergedNmouseHandleEPNS0_12NmouseHandleE", "SWITCH2 hid: merged mouse handle; 0", Result, h_hid_NmMerged, uint64_t *out) { if (out) *out = 0; return RES_OK; }
++HLE_FORCE("_ZN2nn3hid15GetNmouseStatesEPiPNS0_11NmouseStateEiNS0_12NmouseHandleE", "SWITCH2 hid: mouse states; 0 states", Result, h_hid_NmStates, int *count, void *states, int n, uint64_t h) { (void)states; (void)n; (void)h; if (count) *count = 0; return RES_OK; }
++HLE_FORCE("_ZN2nn3hid16GetNmouseTypeSetEPNS_4util10BitFlagSetILi32ENS0_10NmouseTypeEEENS0_12NmouseHandleE", "SWITCH2 hid: mouse type set; empty", Result, h_hid_NmTypes, uint32_t *out, uint64_t h) { (void)h; if (out) *out = 0; return RES_OK; }
++HLE_FORCE("_ZN2nn3hid26SetMergedNmouseSourceTypesENS_4util10BitFlagSetILi32ENS0_10NmouseTypeEEE", "SWITCH2 hid: merged mouse source types; ignored", void, h_hid_NmSrc, uint32_t s) { (void)s; }
++HLE_FORCE("_ZN2nn3hid32SetNmouseButtonConfigJoyLeftJcmsERKNS0_29NmouseButtonConfigJoyLeftJcmsE", "SWITCH2 hid: mouse button config (left); ignored", void, h_hid_NmCfgL, const void *c) { (void)c; }
++HLE_FORCE("_ZN2nn3hid33SetNmouseButtonConfigJoyRightJcmsERKNS0_30NmouseButtonConfigJoyRightJcmsE", "SWITCH2 hid: mouse button config (right); ignored", void, h_hid_NmCfgR, const void *c) { (void)c; }
++HLE_FORCE("_ZN2nn3hid14InitializeJcmsEPvm", "SWITCH2 hid: Joy-Con mouse sensor init; no device, reports success", Result, h_hid_JcmsInit, void *mem, uint64_t size) { (void)mem; (void)size; return RES_OK; }
++HLE_FORCE("_ZN2nn3hid12FinalizeJcmsEv", "SWITCH2 hid: Joy-Con mouse sensor finalize; no-op", void, h_hid_JcmsFin, void) {}
++HLE_FORCE("_ZN2nn3hid13GetJcmsHandleERKjRKNS0_8JcmsTypeE", "SWITCH2 hid: sensor handle; 0", uint64_t, h_hid_JcmsHandle, const uint32_t *npad, const void *type) { (void)npad; (void)type; return 0; }
++HLE_FORCE("_ZN2nn3hid9StartJcmsERKNS0_10JcmsHandleE", "SWITCH2 hid: start sensor; reports success", Result, h_hid_JcmsStart, const void *h) { (void)h; return RES_OK; }
++HLE_FORCE("_ZN2nn3hid12GetJcmsStateEPNS0_9JcmsStateERKNS0_10JcmsHandleE", "SWITCH2 hid: sensor state; left untouched, reports success", Result, h_hid_JcmsState, void *state, const void *h) { (void)state; (void)h; return RES_OK; }
++// The Switch 2 vibration graph (nodes, players, converters): the host plays no HD rumble 2 waveforms; every object is inert
++HLE_FORCE("_ZN2nn3hid13VibrationNode6UpdateEv", "SWITCH2 hid: vibration node update; inert", void, h_hid_VnUpdate, void *self) { (void)self; }
++HLE_FORCE("_ZN2nn3hid13VibrationNode15SetModulationToEPKS1_RKNS0_19VibrationModulationE", "SWITCH2 hid: vibration modulation; inert", void, h_hid_VnMod, void *self, const void *to, const void *m) { (void)self; (void)to; (void)m; }
++HLE_FORCE("_ZN2nn3hid23VibrationNodeConnectionC1Ev", "SWITCH2 hid: vibration connection ctor; inert", void, h_hid_VcCtor, void *self) { (void)self; }
++HLE_FORCE("_ZN2nn3hid23VibrationNodeConnectionD1Ev", "SWITCH2 hid: vibration connection dtor; inert", void, h_hid_VcDtor, void *self) { (void)self; }
++HLE_FORCE("_ZN2nn3hid23VibrationNodeConnection7ConnectEPNS0_13VibrationNodeES3_", "SWITCH2 hid: connect vibration nodes; reports success", Result, h_hid_VcConnect, void *self, void *a, void *b) { (void)self; (void)a; (void)b; return RES_OK; }
++HLE_FORCE("_ZN2nn3hid23VibrationNodeConnection10DisconnectEv", "SWITCH2 hid: disconnect vibration nodes; inert", void, h_hid_VcDisc, void *self) { (void)self; }
++HLE_FORCE("_ZN2nn3hid15VibrationPlayerC1Ev", "SWITCH2 hid: vibration player ctor; inert", void, h_hid_VpCtor, void *self) { (void)self; }
++HLE_FORCE("_ZN2nn3hid15VibrationPlayerD1Ev", "SWITCH2 hid: vibration player dtor; inert", void, h_hid_VpDtor, void *self) { (void)self; }
++HLE_FORCE("_ZN2nn3hid15VibrationPlayer4LoadEPKvm", "SWITCH2 hid: vibration player load; reports success", Result, h_hid_VpLoad, void *self, const void *p, uint64_t n) { (void)self; (void)p; (void)n; return RES_OK; }
++HLE_FORCE("_ZN2nn3hid15VibrationPlayer4PlayEv", "SWITCH2 hid: vibration player play; inert", void, h_hid_VpPlay, void *self) { (void)self; }
++HLE_FORCE("_ZN2nn3hid15VibrationPlayer4StopEv", "SWITCH2 hid: vibration player stop; inert", void, h_hid_VpStop, void *self) { (void)self; }
++HLE_FORCE("_ZN2nn3hid15VibrationPlayer7SetLoopEb", "SWITCH2 hid: vibration player loop; inert", void, h_hid_VpLoop, void *self, unsigned on) { (void)self; (void)on; }
++HLE_FORCE("_ZN2nn3hid15VibrationPlayer15SetLoopIntervalEi", "SWITCH2 hid: vibration player loop interval; inert", void, h_hid_VpLoopIv, void *self, int n) { (void)self; (void)n; }
++HLE_FORCE("_ZN2nn3hid15VibrationPlayer18SetCurrentPositionEi", "SWITCH2 hid: vibration player position; inert", void, h_hid_VpPos, void *self, int n) { (void)self; (void)n; }
++HLE_FORCE("_ZN2nn3hid15VibrationTargetC1Ev", "SWITCH2 hid: vibration target ctor; inert", void, h_hid_VtCtor, void *self) { (void)self; }
++HLE_FORCE("_ZN2nn3hid15VibrationTargetD1Ev", "SWITCH2 hid: vibration target dtor; inert", void, h_hid_VtDtor, void *self) { (void)self; }
++HLE_FORCE("_ZN2nn3hid15VibrationTarget24GetVibrationDeviceHandleEv", "SWITCH2 hid: vibration target device handle; 0", uint64_t, h_hid_VtGet, void *self) { (void)self; return 0; }
++HLE_FORCE("_ZN2nn3hid15VibrationTarget24SetVibrationDeviceHandleERKNS0_21VibrationDeviceHandleE", "SWITCH2 hid: vibration target device handle; ignored", void, h_hid_VtSet, void *self, const void *h) { (void)self; (void)h; }
++HLE_FORCE("_ZN2nn3hid18VibrationConverterC1Ei", "SWITCH2 hid: vibration converter ctor; inert", void, h_hid_VcvCtor, void *self, int rate) { (void)self; (void)rate; }
++HLE_FORCE("_ZN2nn3hid18VibrationConverterD1Ev", "SWITCH2 hid: vibration converter dtor; inert", void, h_hid_VcvDtor, void *self) { (void)self; }
++HLE_FORCE("_ZN2nn3hid18VibrationConverter12ProcessChunkEPNS0_14VibrationValueEPKsi", "SWITCH2 hid: vibration converter; 0 values", int, h_hid_VcvChunk, void *self, void *out, const short *pcm, int n) { (void)self; (void)out; (void)pcm; (void)n; return 0; }
+diff --git a/dm/host/hle_os.c b/dm/host/hle_os.c
+index 2d1afec..175a67a 100644
+--- a/dm/host/hle_os.c
++++ b/dm/host/hle_os.c
+@@ -54,6 +54,15 @@ static int detclock_cfg(void) {
+ }
+ static uint64_t wall_guest_ns(void) { return atomic_load(&g_gfz) ? atomic_load(&g_gfrozen) : now_ns() - atomic_load(&g_glag); }
+ uint64_t guest_ns(void) { return atomic_load(&g_gdet_on) ? atomic_load(&g_gdet) : wall_guest_ns(); }
++// SWITCH2 (private bring-up): the Switch 2 system counter runs at 31.25 MHz (Eden-NS2 guest_clock.h GetGuestCounterFrequency), the Tegra X1's at 19.2 MHz.
++// The SDK converts ticks with its constant, so the 19.2 MHz counter ran Pokopia's clock at 61.4 %: a 27.1 ms frame from its 60 fps limiter, animations 1.63x slow.
++// Every guest-visible counter (the cntpct / cntvct gate, svc GetSystemTick) comes from here. DM_TICK_HZ overrides (19200000 = the Tegra X1 counter).
++uint64_t guest_ticks(void) {
++    static uint64_t hz;
++    if (!hz) { const char *e = getenv("DM_TICK_HZ"); uint64_t v = e ? strtoull(e, 0, 0) : 31250000ull; if (!v) v = 31250000ull; hz = v;
++               LOG("guest system counter %llu Hz (%s)", (unsigned long long)hz, e ? "DM_TICK_HZ" : "Switch 2 default"); }
++    return (uint64_t)(((__uint128_t)guest_ns() * hz) / 1000000000ull);
++}
+ int dm_detclock_enabled(void) { return detclock_cfg() && atomic_load(&g_gdet_on); }
+ void dm_guest_frame_tick(void) {
+     crash_watch_frame();
+diff --git a/dm/host/hle_svc.c b/dm/host/hle_svc.c
+index 4f440a0..32498e1 100644
+--- a/dm/host/hle_svc.c
++++ b/dm/host/hle_svc.c
+@@ -654,7 +654,7 @@ uint64_t svc_dispatch(int num, uint64_t *regs, uint64_t orig_addr) {
+         if (regs[0] & 0x80000000ull) return 0;   // notification only, can continue
+         _exit(42);
+     }
+-    case 0x1E: guest_clock_read_wait(); regs[0] = 0; regs[1] = guest_ns() * 12 / 625; return 0;   // GetSystemTick
++    case 0x1E: { uint64_t guest_ticks(void); guest_clock_read_wait(); regs[0] = 0; regs[1] = guest_ticks(); return 0; }   // GetSystemTick (hle_os.c: the guest system counter)
+     case 0x27: {  // OutputDebugString(str, len)
+         if (g_flag.dbg) fprintf(stderr, "[guest] %.*s\n", (int)regs[1], (char *)regs[0]);
+         regs[0] = 0; return 0;
+@@ -686,6 +686,10 @@ uint64_t svc_dispatch(int num, uint64_t *regs, uint64_t orig_addr) {
+         // left its main thread waiting at boot for a thread it never created (main+0x3e1ac4)
+         case I_FreeThreadCount: { int thr_limit_used(void); int u = thr_limit_used(); v = u < 96 ? 96 - u : 0; break; }
+         case I_UserExcAddr: { static _Alignas(0x1000) uint8_t ctx[0x1000]; v = (uint64_t)ctx; break; }   // user exception context area: newer SDKs' SetDyingMessageRegion writes to +0x1c0 (0 would write through a null pointer)
++        // SWITCH2 (private fork): the extended SDK's RemoteRegionManager / VAMM queries (ids 29..33). Eden-NS2 answers 0 for
++        // the remote region/memory ids (no remote mappings) and the page granule for 33; the host maps in 16 KB pages.
++        case 29: case 30: case 31: case 32: v = 0; break;
++        case 33: v = 0x4000; break;
+         default: v = 0; break;
+         }
+         regs[0] = 0; regs[1] = v; return 0;
+diff --git a/dm/ios/Sources/DmGamepad.m b/dm/ios/Sources/DmGamepad.m
+index a079d7f..8f89a60 100644
+--- a/dm/ios/Sources/DmGamepad.m
++++ b/dm/ios/Sources/DmGamepad.m
+@@ -138,6 +138,7 @@ @implementation DmGamepad {
+     NSMapTable<UITouch *, NSNumber *> *_owner;     // touch → control (with the key for C_BTN or the stick for C_STICK, << 8)
+     UITouch *_stick[2]; CGPoint _stickNow[2];      // the touch holding each stick and where it is now (0 left, 1 right)
+     CGPoint _rCentre;                              // the right stick's centre: where its touch landed, dragged along past K_RSTICK_R
++    float _autorun;                                // DM_TOUCH_AUTORUN: left-stick tilt (fraction of full) beyond which B is held as well; 0 = off
+     uint64_t _faceBits, _dpadBits, _btnBits;
+     NSMapTable<UITouch *, NSNumber *> *_faceOf;    // which keys each touch on the diamond currently holds
+     CAShapeLayer *_key[B_N]; CATextLayer *_label[B_N];   // one layer per key
+@@ -170,6 +171,8 @@ - (instancetype)initWithFrame:(CGRect)f {
+     if ((self = [super initWithFrame:f])) {
+         self.multipleTouchEnabled = YES; self.opaque = NO; self.backgroundColor = UIColor.clearColor;
+         const char *feedback = getenv("DM_TOUCH_HAPTICS");
++        const char *autorun = getenv("DM_TOUCH_AUTORUN");   // "1" = the default 0.9; any other number is the fraction itself
++        _autorun = autorun && atof(autorun) > 0 ? (atof(autorun) >= 1 ? 0.9f : (float)atof(autorun)) : 0;
+         if (!feedback || atoi(feedback)) {
+             _touchFeedback = [[UIImpactFeedbackGenerator alloc] initWithStyle:UIImpactFeedbackStyleLight];
+             [_touchFeedback prepare];
+@@ -298,6 +301,7 @@ - (void)recompute {
+         CGFloat m = fmin((d - dz) / (R * K_FULL - dz), 1) / d;   // outside the dead zone: 0 rising to full at the full-tilt radius
+         ax[i * 2] = (int32_t)lrint(o.x * m * 32767); ax[i * 2 + 1] = (int32_t)lrint(-o.y * m * 32767);   // host: up is positive; rounded so full tilt is exactly 32767
+     }
++    if (_autorun > 0 && hypot((double)ax[0], (double)ax[1]) >= _autorun * 32767) btn |= 1ull << B_B;   // DM_TOUCH_AUTORUN: full tilt on the left stick also holds B (Pokopia: run)
+     BOOL changed = face != _faceBits || dpad != _dpadBits || btn != _btnBits || swap != _swapHeld;
+     uint64_t pressed = (face | dpad | btn) & ~(_faceBits | _dpadBits | _btnBits);
+     unsigned gripping = (_stick[0] ? 1u : 0) | (_stick[1] ? 2u : 0);
+diff --git a/dm/third_party/ryujinx/src/Ryujinx.Graphics.Shader/Decoders/Decoder.cs b/dm/third_party/ryujinx/src/Ryujinx.Graphics.Shader/Decoders/Decoder.cs
+index 45250a4..8bc9d08 100644
+--- a/dm/third_party/ryujinx/src/Ryujinx.Graphics.Shader/Decoders/Decoder.cs
++++ b/dm/third_party/ryujinx/src/Ryujinx.Graphics.Shader/Decoders/Decoder.cs
+@@ -24,6 +24,8 @@ namespace Ryujinx.Graphics.Shader.Decoders
+                 AttributeUsage = new(gpuAccessor);
+             }
+ 
++            public void Log(string message) { _gpuAccessor.Log(message); }   // SWITCH2: the table scan notes what it read
++
+             public uint ConstantBuffer1Read(int offset)
+             {
+                 if (Cb1DataSize < offset + 4)
+@@ -535,11 +537,44 @@ namespace Ryujinx.Graphics.Shader.Decoders
+                     // try to get the possible target offsets from the constant buffer.
+                     (int cbBaseOffset, int cbOffsetsCount) = FindBrxTargetRange(block, opBrx.SrcA);
+ 
++                    // SWITCH2 (nxnative private bring-up): Eden-lowered code may write the BRX register with an LDC c[1] that the pattern above does not reach
++                    // (the LDC indexes with its own destination register, or sits in an earlier block): take that LDC's offset as the table base and scan the table
++                    if (cbOffsetsCount == 0)
++                    {
++                        Block b = block; int hops = 0;
++                        while (b != null && hops++ < 8 && cbOffsetsCount == 0)
++                        {
++                            for (int oi = b.OpCodes.Count - 1; oi >= 0; oi--)
++                            {
++                                InstOp o = b.OpCodes[oi];
++                                if (o.Name != InstName.Ldc) continue;
++                                InstLdc l = new(o.RawOpCode);
++                                if (l.Dest == opBrx.SrcA && l.CbufSlot == 1 && l.AddressMode == 0) { cbBaseOffset = l.CbufOffset; cbOffsetsCount = -1; }
++                                break;
++                            }
++                            b = b.Predecessors.Count == 1 ? b.Predecessors[0] : null;
++                        }
++                    }
++
+                     if (cbOffsetsCount != 0)
+                     {
+                         hasNewTarget = true;
+                     }
+ 
++                    // SWITCH2 (nxnative private bring-up): an Eden-lowered BRX has no SHL/IMNMX prologue; its table (already relocated to lowered addresses
++                    // by the packaging) is read while the entries look like code addresses
++                    if (cbOffsetsCount < 0)
++                    {
++                        cbOffsetsCount = 0;
++                        for (int i = 0; i < 1024; i++)
++                        {
++                            uint e = context.ConstantBuffer1Read(cbBaseOffset + i * 4);
++                            if (e < 0x50 || (e & 7) != 0 || (e & 31) == 0 || e >= 0x200000) break;
++                            cbOffsetsCount++;
++                        }
++                        if (cbOffsetsCount != 0) hasNewTarget = true;
++                    }
++
+                     for (int i = 0; i < cbOffsetsCount; i++)
+                     {
+                         uint targetOffset = context.ConstantBuffer1Read(cbBaseOffset + i * 4);
+@@ -590,7 +625,7 @@ namespace Ryujinx.Graphics.Shader.Decoders
+             BlockLocation shlLocation = FindFirstRegWrite(visited, ldcLocation, opLdc.SrcA);
+             if (shlLocation.Block == null || !shlLocation.IsImmInst(InstName.Shl))
+             {
+-                return (0, 0);
++                return (opLdc.CbufOffset, -1);   // SWITCH2: the table's base is known, its length is not (Eden-lowered prologue): scanned by the caller
+             }
+ 
+             GetOp<InstShlI>(shlLocation, out InstShlI opShl);
+diff --git a/dm/third_party/ryujinx/src/Ryujinx.Graphics.Shader/Instructions/InstEmitMemory.cs b/dm/third_party/ryujinx/src/Ryujinx.Graphics.Shader/Instructions/InstEmitMemory.cs
+index 154ed24..f7f6712 100644
+--- a/dm/third_party/ryujinx/src/Ryujinx.Graphics.Shader/Instructions/InstEmitMemory.cs
++++ b/dm/third_party/ryujinx/src/Ryujinx.Graphics.Shader/Instructions/InstEmitMemory.cs
+@@ -82,6 +82,11 @@ namespace Ryujinx.Graphics.Shader.Instructions
+             Operand addr = context.IAdd(srcA, Const(Imm16ToSInt(op.CbufOffset)));
+             Operand wordOffset = context.ShiftRightU32(addr, Const(2));
+ 
++            // SWITCH2 (nxnative private bring-up): a plain LDC with a zero register base reads a fixed constant-buffer word, exactly as an inline
++            // c[slot][imm] operand does; giving it the same ConstantBuffer operands lets GlobalToStorage trace storage buffer descriptors loaded this
++            // way (Eden's Ampere lowering emits ULDC as LDC). Indexed modes and sub-word sizes keep the generic load.
++            bool inlineCbuf = op.SrcA == 255 && !isSmallInt && op.AddressMode is not (AddressMode.Is or AddressMode.Isl) && (Imm16ToSInt(op.CbufOffset) & 3) == 0 && Imm16ToSInt(op.CbufOffset) >= 0;
++
+             for (int index = 0; index < count; index++)
+             {
+                 Register dest = new(op.Dest + index, RegisterType.Gpr);
+@@ -91,6 +96,12 @@ namespace Ryujinx.Graphics.Shader.Instructions
+                     break;
+                 }
+ 
++                if (inlineCbuf)
++                {
++                    context.Copy(Register(dest), Cbuf(op.CbufSlot, (Imm16ToSInt(op.CbufOffset) >> 2) + index));
++                    continue;
++                }
++
+                 Operand offset = context.IAdd(wordOffset, Const(index));
+                 Operand value = EmitLoadConstant(context, slot, offset);
+ 

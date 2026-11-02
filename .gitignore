@@ -1,0 +1,5 @@
+nxnative/
+__pycache__/
+*.log
+ampere-lower/ampere-lower
+ampere-lower/ampere-lower.exe

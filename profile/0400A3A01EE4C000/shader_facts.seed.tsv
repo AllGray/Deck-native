@@ -1,0 +1,12 @@
+# Hand-made answers for the shader translation (merged over the generated shader_facts.tsv by key): texture slot kinds of NVN2 compute kernels, keyed by handle (texh), from the kernels' reflection.
+# key <TAB> fact JSON
+2cb5df5cb96b324e	{"local":[64,1,1],"shared":32768,"texh":{"C":"buffer","E":"buffer"}}
+4064727d1526fae0	{"local":[1,1,1],"shared":32768,"texh":{"10":"buffer"}}
+560a0262fe47818a	{"local":[64,1,1],"shared":32768,"texh":{"10":"buffer","12":"buffer"}}
+634565ab77c61463	{"local":[32,32,1],"shared":32768,"texh":{"10":"buffer","12":"buffer","14":"buffer"}}
+8035d56a60b52cb0	{"local":[64,1,1],"shared":32768,"texh":{"46":"buffer","C":"buffer"}}
+86d2b81086a1f461	{"local":[64,1,1],"shared":32768,"texh":{"18":"buffer","1A":"buffer","1C":"buffer"}}
+ca70f82b8388705a	{"local":[64,1,1],"shared":32768,"texh":{"10":"buffer","4A":"buffer","4C":"buffer"}}
+d1743be8565cd7c7	{"local":[64,1,1],"shared":32768,"texh":{"C":"buffer"}}
+d192af8c4fa25be1	{"local":[64,1,1],"shared":32768,"texh":{"10":"buffer","12":"buffer","4A":"buffer","4C":"buffer"}}
+d2c50cca6e386abc	{"local":[64,1,1],"shared":32768,"texh":{"18":"buffer","52":"buffer","54":"buffer","56":"buffer"}}

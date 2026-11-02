@@ -1,0 +1,45 @@
+# Game profile for Pokemon Pokopia (Nintendo Switch 2, title 0400A3A01EE4C000, update v327680): identity, modules, memory layout and shader groups.
+# Started from the provisional profile nxnative's scripts/build_ipa_from_nsp.py derives from a survey (dm/games/profile_guess.py); the SWITCH2 lines were set by hand during the port.
+
+# ---- Identity ----
+title_id	0400A3A01EE4C000
+program_id	0400A3A01EE4C000
+
+# ---- App ----
+name	Pokemon Pokopia
+ipa	PokemonPokopia.ipa
+app_category	public.app-category.games
+
+# ---- Versions ----
+build	v327680	?	main=816c5358e8178d802fcec4a7ce5a741a	subsdk0=9646a69cb1024ba919fddaa4265e6bc5	sdk=cc7da00d672399efe7958790d17fae39
+package	v327680
+shader_versions	v327680
+
+# ---- Files ----
+# every module main imports from
+modules	main subsdk0 sdk
+romfs_marker	motor_asset_re/KIDS_PLATFORM_OUNCE/0x38f972af.fdata
+zip_store	.bin:.fdata:.file:.rdb:.webm:.metallib
+
+# ---- Memory ----
+# main sets a heap of at most the pool − 64 MB: a 3328 MB heap region
+# SWITCH2: Pokopia asks for total minus ~2.1 GiB and panics below ~7.9 GiB (Eden-NS2 memory experiment, PHASE-B.md)
+mem_reserve	0x2C0000000
+mem_alias	0x10000000
+mem_stack	0x10000000
+# SWITCH2: Pokopia asks for total minus ~2.1 GiB and panics below ~7.9 GiB (Eden-NS2 memory experiment, PHASE-B.md)
+app_pool	0x280000000
+# the NPDM declares 0 MB of system resource: IsVirtualAddressMemoryEnabled is false, as on Horizon (Big Brain Academy: Brain vs. Brain sets a heap only then)
+sys_resource	0x0
+
+# ---- Shader split ----
+shader_groups	/motor_asset_re/=motorassetre /movie_asset/=movieasset
+shader_note	Pokemon Pokopia shaders (provisional profile)
+
+# ---- After the rewrite ----
+# used memory for the current rewritten modules, at least the default 64 MB
+mem_used	0x5600000
+
+# ---- Pipelines ----
+# SWITCH2: the Mac bring-up ran the Metal 4 path (bases, pipeline archive), the Mac default; iOS turns it on only with this key
+pso_mtl4	on

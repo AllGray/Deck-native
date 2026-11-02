@@ -1,0 +1,201 @@
+# Pokémon Pokopia, running natively on your Mac and iPhone
+
+I got Pokémon Pokopia (the Switch 2 game) running natively on my Mac and on my iPhone. Not through an emulator: the
+game's own code runs on the Apple chip, and the graphics go through Metal. After a lot of work on the shaders it looks
+exactly like my Switch 2. I lined up screenshots from my console against the phone, scene for scene, and could not tell
+them apart. Shadows, clouds, time of day, the lot.
+
+This repository is the tool that lets you do the same with **your own copy of the game**. It takes your dump, and on
+your Mac it builds a Mac app and an iPhone app. Everything that comes from the game is created on your machine and stays
+in your build folder. Nothing from the game is in here.
+
+Before anything else:
+
+> **Please Please Please Please do not share game files, this is for your own games files only and that is the intention it was built with.**
+
+That means: do not upload your dump, do not upload the build folder, do not upload the app or the IPA this makes (they
+contain the game), do not upload shader caches or recorded shaders (they are pieces of the game too). If you want to
+help someone, point them here. They need their own Switch 2, their own copy, their own dump. The tool checks the dump
+is the right version and refuses anything else, and it needs no keys of any kind. Keep it that way, and this stays up.
+
+---
+
+## What you get
+
+- **A Mac app.** Double-click, press Play, it runs. Saves live in your Library folder like any Mac game.
+- **An iPhone app.** The game runs natively on the phone, full quality, 30 fps (the Switch 2 runs this game at 30 in
+  handheld too). There is a catch about Apple developer accounts, explained below. Read it before you get excited.
+
+Both are built from your dump by one script, `nxs2.py`. The first build takes about an hour, nearly all of it the
+Mac compiling 3,800 shaders. After that, rebuilds take a couple of minutes.
+
+## What you need
+
+- A **Mac with Apple silicon** (M1 or newer) and roughly 20 GB of free disk. The game's code is arm64, so an Intel Mac
+  cannot run it. The Mac does the building for the iPhone too; there is no way around having one.
+- **Xcode 27** installed, with its command line tools and the Metal toolchain (Xcode → Settings → Components). For the
+  iPhone build you also need the iOS platform from that same screen, and `xcodegen` (`brew install xcodegen`).
+- **Python 3.12 or newer**: `brew install python@3.12`, then `python3.12 -m pip install "capstone>=5,<6" lz4 fonttools`.
+- The **.NET 10 runtime** (the shader translator is .NET): `brew install --cask dotnet-sdk`.
+- **Your dump.** The game's files as your dumping tool wrote them, with the update:
+  ```
+  <your folder>/updates/327680/exefs/   main  main.npdm  rtld  sdk  subsdk0
+  <your folder>/updates/327680/romfs/   LD_C0_R.BIN  LI_C0_R.IDX  motor_asset_re/  movie_asset/
+  ```
+  A folder that holds `exefs/` and `romfs/` directly works too. The base game alone is not enough: the tool is made for
+  update **v327680** of Pokémon Pokopia (title `0400A3A01EE4C000`) and checks the build IDs. Another version will not
+  build, because the patch recipe and the shader tables are for this one.
+- For the **iPhone**: see the next section.
+
+`python3.12 nxs2.py doctor` checks all of this and tells you how to get whatever is missing.
+
+## The Apple developer thing (iPhone only, read this)
+
+Pokopia is a big game. It reserves 11 GB of memory address space and actually uses several GB of it. To let an iPhone
+app do that, the app has to carry two Apple entitlements: **Increased Memory Limit** and **Extended Virtual
+Addressing**. Apple only grants the second one when the app is signed by a **paid Apple Developer Program** team (the
+99 a year one). An app signed with a free Apple ID, through AltStore, Sideloadly and the like, installs fine and then
+stops at start-up when the game cannot reserve its memory.
+
+I happen to have an Apple developer account, so I sign my build with my own team and never needed anything else. **I have
+not tested any workaround.** If you know one, something that signs with a profile that carries that entitlement, you are
+free to try it and I would like to hear whether it worked, in the issues. But I am not going to tell you it works when I
+have not done it myself.
+
+With a paid team, the flow is: `nxs2.py build ... --xcode --team-id <your team>` then `nxs2.py sign`, and the signed
+IPA installs over USB. Your Apple ID has to be signed into Xcode once and your phone registered on the team (Xcode does
+that itself when the phone is plugged in). The details are in [docs/IPHONE.md](docs/IPHONE.md).
+
+Memory on the phone itself matters too. The game uses a lot of it. I run it on an iPhone19,4 on iOS 27.2. If your
+phone has less memory than the recent Pro models, expect trouble.
+
+## How to build
+
+```bash
+git clone https://github.com/xFractals/pokopia-native.git
+cd pokopia-native
+python3.12 nxs2.py setup
+python3.12 nxs2.py build "/path/to/your/dump folder" --mac-app --ipa
+```
+
+`setup` fetches nxnative (the host this runs on, more below) at the exact commit this is made for, applies my Switch 2
+patch to it, and builds the shader lowering tool. About a minute.
+
+`build` does everything else. It creates a build folder **beside** your dump (`<dump folder>_native`; `--out` names
+another place), and goes through these stages. If it stops or you stop it, run it again and it continues where it was.
+
+| Stage | What happens | Time on my M4 |
+|---|---|---|
+| extract | your ExeFS copied, the 22 RomFS files packed into one 6.1 GB image | seconds |
+| rewrite | the game's three code modules rewritten so Apple's kernel can run them (nxnative's `patch_nso.py`) | 20 s |
+| host | the Mac host compiled with this game's profile | 15 s |
+| corpus, lower, package | 4,012 shader programs found in the game files, lowered, packaged with their tables | 25 s |
+| chain | the Metal compile of every shader for the Mac and the phone | 30 to 45 min |
+| outputs | the Mac app, the IPA, or the Xcode project | 1 to 3 min |
+
+Outputs land in `<build folder>/out/`:
+
+- `Pokemon Pokopia.app`: the Mac app. Double-click it, nxnative's settings window comes up (handheld or docked mode,
+  frame rate, upscaling), press Play. macOS asks once whether to open it (right-click → Open), because it cannot be
+  notarized: it maps the game's code as executable, which Apple's hardened runtime does not allow. Saves and logs go to
+  `~/Library/Application Support/nxnative/0400A3A01EE4C000/` and `~/Library/Logs/nxnative/`. The game files inside the
+  app are APFS clones of the image, so the app does not cost you another 6 GB on the same disk.
+- `PokemonPokopia-unsigned.ipa`: the iPhone app without the game files (they go to the phone separately, once; it takes
+  three minutes over USB). Or, with `--xcode --team-id`, an Xcode project to sign with your team. Again,
+  [docs/IPHONE.md](docs/IPHONE.md).
+
+Use `--no-ios` if you only want the Mac: it halves the compile. `python3.12 nxs2.py run "<build folder>"` plays straight
+from the build folder in a window, which is handy while you are fiddling with things.
+
+## The shaders, and what "refresh" is for (read this too)
+
+Here is the one thing about this port that is not just "build and play", and I want to explain it properly so nobody
+thinks their build is broken.
+
+A Switch 2 game ships its shaders compiled for the Switch 2's GPU. They have to be translated for Metal, and that
+translation cannot happen on the fly on a Mac or a phone with this chain; it is done ahead of time, on the Mac, during
+the build. That is the 30 to 45 minute stage. The build finds **every shader in the game's files**, 4,012 programs,
+and translates all of them. So far so good.
+
+But Pokopia also **builds some shaders itself while it runs**. They are not in the game files anywhere; the game makes
+them on the fly, apparently as it needs them. I know of **140** of these so far, from the opening, the character creator
+and the first area. A fresh build cannot contain them, because there is nothing to take them from until the game has
+run. When the game asks for one that your build does not have, that draw is skipped: the game keeps running, but that
+one effect or object is not drawn. Nothing crashes.
+
+What the build does about it: the apps **record** every such shader the moment the game makes it (they have
+`DM_NVN_SHDUMP` on by default). Then you run
+
+```bash
+python3.12 nxs2.py refresh "<build folder>"
+```
+
+which finds the recordings, translates the new shaders (a couple of minutes, not another hour), and rebuilds whatever
+outputs your build folder has: the app, the IPA, the Xcode project. The Mac app's recordings are found by itself. The
+iPhone's have to be pulled off the phone first with `tools/phone_pull.py` (two commands, in the iPhone doc). Then
+reinstall and carry on. Repeat when you reach new places and notice something missing. In my experience, after the
+opening and the first area you have the lot.
+
+The build tells you where you stand: `shaders: 3813 from the game files; 0 of the 140 known run-time shaders` right
+after the first build, and after a refresh with a full set of recordings `140 of the 140`. The known list is
+`profile/0400A3A01EE4C000/runtime_keys.tsv`; it holds hashes only, so you can see how far you are, and no code.
+
+If you find run-time shaders beyond the 140, your refresh handles them exactly the same way. Tell me about them in the
+issues, with the count the build prints, so the list can grow. Do not attach the recordings; they are game code.
+
+## Phone settings and heat
+
+The app reads `Documents/env.txt` on the phone at start, one `KEY=VALUE` per line, and the build writes sensible defaults.
+The ones worth knowing:
+
+| Switch | What it does |
+|---|---|
+| `DM_FPS=30` | frame-rate cap. 30 is the build's default and what the Switch 2 does in handheld for this game. 60 runs hotter. |
+| `DM_OPMODE=0` | handheld mode (default). `1` is docked: the game picks its higher resolution. |
+| `DM_RENDER_SCALE=0.8` | render at a fraction of the game's resolution, 0.5 to 1.0. Cooler phone, softer picture. |
+| `DM_TOUCH_AUTORUN=1` | the touch stick makes you run when pushed to its edge. My addition; I like it. |
+| `DM_SHOW_FPS=1` | frame counter on screen. |
+
+The phone gets hot. At 30 fps mine reaches iOS's "serious" thermal state after about six minutes of play and stays
+warm. `DM_RENDER_SCALE=0.8` is the first thing to try if that bothers you.
+
+## How this works, for the curious
+
+- The host is [nxnative](https://github.com/seedds/nxnative), a project that runs Switch games natively on Apple
+  systems: it rewrites the game's executable so the Apple kernel accepts it, provides the Switch OS services the game
+  calls, and maps NVN (the Switch's graphics API) onto Metal. It did not know the Switch 2 at all. My changes teach it
+  the Switch 2 side of things: the newer SDK's system calls and services, the NVN2 entry points and texture layouts, the
+  Switch 2 shader format, and a translator fix or two. They are one patch against a pinned nxnative commit
+  ([host/UPSTREAM.md](host/UPSTREAM.md)).
+- Switch 2 shaders are a newer GPU instruction set than nxnative's shader chain understands. The
+  [Eden-NS2](https://github.com/0x2593/Eden-NS2) emulator has a decoder for them that lowers them to the older
+  instruction set, and `ampere-lower/` here is a standalone build of exactly that piece, so the rest of nxnative's chain
+  (the Ryujinx translator, SPIRV-Cross, Apple's Metal compiler) can take over. While getting the picture to match the
+  console I found four bugs in that decoder (wrong colours, missing sun and cloud shadows, a crash); they are in a pull
+  request to Eden-NS2, and this tool carries the fixed code.
+- `profile/0400A3A01EE4C000/` is the game's recipe: identity and build IDs, the memory layout the game needs (it wants
+  11 GB), where in the files the shaders are, a handful of hand-made translation answers, the known run-time shader
+  keys, and the entitlements. Numbers and hashes; no game content.
+
+## Problems
+
+- Every stage writes its full output to `<build folder>/logs/<stage>.log`. `nxs2.py -v` shows it live.
+- `nxs2.py status "<build folder>"` says what the folder has and what it still lacks.
+- A different Xcode than the one nxnative's lock names (27.2) is reported, not refused: the build uses your Metal
+  compiler and keeps its libraries apart. Mine is 27.0 and it is fine.
+- `[RED] shader <key> is not in the shader map` in a run log is a run-time shader, see above, not a fault.
+- Open an issue with the stage, the last lines of its log and your Mac/Xcode versions. Never attach game files, build
+  folders or recordings.
+
+## Licences and credits
+
+Everything here is MIT except `ampere-lower/`, which is Eden-NS2 code and stays GPL-3.0-or-later (its own `LICENSE` and
+`NOTICE.md` are in that folder). [LEGAL.md](LEGAL.md) is the full statement of what this repository contains and never
+will.
+
+Thanks to the people behind [nxnative](https://github.com/seedds/nxnative) and everything it is built from (d2r-mobile,
+Ryujinx, SPIRV-Cross, glslang, Capstone, lz4, fontTools, XcodeGen), and to [Eden-NS2](https://github.com/0x2593/Eden-NS2)
+for the Switch 2 shader work. I did this port with a lot of help from an AI assistant (Claude), over a couple of very
+long weeks, with my own Switch 2 as the reference for every picture.
+
+And once more, because it matters: your own copy, your own dump, your own build. Please do not share game files.
