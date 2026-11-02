@@ -2,7 +2,7 @@
 
 I got Pokémon Pokopia (the Switch 2 game) running natively on my Mac and on my iPhone. Not through an emulator: the
 game's own code runs on the Apple chip, and the graphics go through Metal. After a lot of work on the shaders it looks
-exactly like my Switch 2. I lined up screenshots from my console against the phone, scene for scene, and could not tell
+exactly like my Switch 2. I lined up screenshots from the Switch 2 against the phone, scene for scene, and could not tell
 them apart. Shadows, clouds, time of day, the lot.
 
 This repository is the tool that lets you do the same with **your own copy of the game**. It takes your dump, and on
