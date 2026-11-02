@@ -26,17 +26,21 @@ Hey guys, I really hope you enjoy this. I just have to give a massive shout-out 
 
 Also, if you find any bugs, please feel free to let me know or submit a PR. More than happy to take a look. I've played up to after the first wake-up and encountered zero issues.
 
-## Comparison Test Gameplay    (Switch 2 Left, IPhone Right)
+## Gameplay on the iPhone
+
+Captures from my phone, straight from the build this tool makes. I checked every one of these scene for scene against
+Switch 2 footage of the game. The Switch side-by-sides are not posted here because that footage is not mine to repost;
+when I have captures from my own console they will go up next to these.
 
 https://github.com/user-attachments/assets/1fde210a-48bf-44a9-a100-3989711f7366
 
-<img width="1749" height="516" alt="05d-night-switch-vs-phone" src="https://github.com/user-attachments/assets/01ee60a1-737f-4f84-a644-ac3abb1342be" />
+![Night, campfire with Professor Tangrowth](docs/images/iphone-night.png)
 
-<img width="1759" height="516" alt="05a-day-switch-vs-phone" src="https://github.com/user-attachments/assets/b71fc457-4e04-4753-9489-2b2b5a1bb917" />
+![Day, the first area](docs/images/iphone-day.png)
 
-<img width="1930" height="570" alt="pair12" src="https://github.com/user-attachments/assets/41fbee7c-c78e-4cda-b563-1f5f45760569" />
+![Opening, meeting Professor Tangrowth](docs/images/iphone-intro-12.png)
 
-<img width="1930" height="570" alt="pair18" src="https://github.com/user-attachments/assets/b4a12e5f-a7db-4a40-99c2-23dfa85e27d8" />
+![Opening, the workbench at night](docs/images/iphone-intro-18.png)
 
 ## What you get
 
@@ -208,12 +212,15 @@ warm. `DM_RENDER_SCALE=0.8` is the first thing to try if that bothers you.
 ## Licences and credits
 
 Everything here is MIT except `ampere-lower/`, which is Eden-NS2 code and stays GPL-3.0-or-later (its own `LICENSE` and
-`NOTICE.md` are in that folder). [LEGAL.md](LEGAL.md) is the full statement of what this repository contains and never
-will.
+`NOTICE.md` are in that folder). The nxnative and Ryujinx code that `host/` modifies and builds keeps their MIT notices,
+reproduced in [host/NOTICE.md](host/NOTICE.md). [LEGAL.md](LEGAL.md) is the full statement of what this repository
+contains and never will, what the tool does not do (no decryption, no keys), and the trademark note: Pokémon and
+Pokémon Pokopia belong to their owners, this is an independent fan project with no affiliation to Nintendo, The Pokémon
+Company or Koei Tecmo, and the screenshots above are my own captures from my phone.
 
 Thanks to the people behind [nxnative](https://github.com/seedds/nxnative) and everything it is built from (d2r-mobile,
 Ryujinx, SPIRV-Cross, glslang, Capstone, lz4, fontTools, XcodeGen), and to [Eden-NS2](https://github.com/0x2593/Eden-NS2)
 for the Switch 2 shader work. I did this port with a lot of help from an AI assistant (Claude), over a couple of very
-long weeks, with my own Switch 2 as the reference for every picture.
+long weeks, with Switch 2 footage of the game as the reference for every picture.
 
 And once more, because it matters: your own copy, your own dump, your own build. Please do not share game files.

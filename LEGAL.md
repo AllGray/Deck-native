@@ -26,9 +26,26 @@ the recipe is for, and refuses any other. Never share a build folder: it holds t
   shader (hashes, slot kinds, formats). They contain no game code.
 - Documentation.
 
+## What the tool does not do
+
+It decrypts nothing and bypasses nothing. It takes a dump that is already plain files, made by you from your own
+console with your own tools, and needs no keys, tickets or certificates. If your dump is encrypted or packaged, this
+tool cannot read it and will not try.
+
 ## Licences
 
-- `ampere-lower/`: GPL-3.0-or-later (Eden-NS2 code).
-- Everything else here: MIT, the same licence as nxnative.
+- `ampere-lower/`: GPL-3.0-or-later (Eden-NS2 code; its `LICENSE` and `NOTICE.md` are in that folder).
+- `host/`: the changes are MIT; the nxnative and Ryujinx code they modify or build is MIT under their own notices,
+  reproduced in `host/NOTICE.md`.
+- Everything else here: MIT (`LICENSE`), the same licence as nxnative.
+
+## Trademarks and affiliation
+
+Pokémon and Pokémon Pokopia are trademarks of Nintendo, Creatures Inc. and GAME FREAK inc. / The Pokémon Company;
+Nintendo Switch is a trademark of Nintendo; the game is published by Nintendo and developed by Koei Tecmo. This
+project is an independent, non-commercial fan project. It is not affiliated with, endorsed by or supported by any of
+them, and the names are used only to say which game it is for.
+
+The screenshots in the README show the game only to document the result. They are not game assets for reuse.
 
 If you fork this project, keep these rules: they are what makes it publishable.
