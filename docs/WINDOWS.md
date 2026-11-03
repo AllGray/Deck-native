@@ -5,6 +5,10 @@ game's arm64 code natively, which needs an Apple chip. Everything else of the bu
 [nxnative's Windows port](https://github.com/zenvyzenshiro/NXNativeWindows) maps Apple's tools onto: the shaders go
 through Apple's own Metal compiler for Windows, the app is compiled with LLVM against the iPhone SDK.
 
+**Status (2026-11-03): not working yet.** On an iPhone the Windows-built app installs, starts and runs the game (sound,
+input, 30 fps), but the picture stays black apart from some text. The Metal source of the shaders is byte-identical to the
+Mac build's, so the difference is in the Windows compile (Apple's Metal compiler for Windows, or the LLVM-built app).
+
 ## What to install (once)
 
 `Pokopia Native Builder.cmd` → **Check tools** (or `python nxs2.py doctor`) lists these and says what is missing:

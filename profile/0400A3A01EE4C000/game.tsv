@@ -48,3 +48,6 @@ pso_mtl4	on
 # pointer look (hle_hid.c): the camera turns at 110 deg/s times the right stick's tilt above a round deadzone of 0.51, frame-time based (measured from the view matrix)
 look_rate	110
 look_dead	0.52
+# direct look (hle_hid.c look_cam): main build 816c5358..., main+0x34513d0 holds player 1's camera; pitch +0xb0 / yaw +0xb4, pitch limits +0xe4 / +0xe8,
+# stick lock bytes +0x121 / +0x122 (bit 6 of +0x122 ignored). Found from memory diffs around known stick turns, confirmed on 6 fresh runs
+look_cam	816c5358e8178d80 34513d0 b0 b4 e4 e8 121/bfff

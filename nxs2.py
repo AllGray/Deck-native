@@ -158,6 +158,7 @@ class Build:
         self.maxwell = self.shader / 'maxwell'; self.pkg = self.shader / 'pkg'; self.tables = self.shader / 'tables'
         self.cache = self.shader / 'cache'; self.ios = self.shader / 'ios'
         self.outputs = self.out / 'out'; self.rundir = self.out / 'run'; self.phone = self.out / 'phone'
+        self.icon = self.out / 'icon.png'   # the apps' icon, made by nxs2.py icon from your own game; none = the blank default
         self.game = read_game_tsv(PROFILE_SRC / 'game.tsv')
         self.modules = self.game['modules'][0].split()
         self.build_ids = dict(kv.split('=') for kv in self.game['build'][0].split('\t')[2:] if '=' in kv)
@@ -596,6 +597,7 @@ def st_mac_app(b):
     cmd = [PY, NX / 'dm/mac/pack_app.py', app, '--host', b.host, '--patched', b.patched, '--romfs', b.romfs_img, '--msl', b.lib(), '--tables', b.profile,
            '--font', b.font, '--title-id', TITLE, '--name', NAME, '--bundle-id', f'org.nxnative.{TITLE.lower()}', '--lang', 'en-US', '--sign', '-',
            '--version', '1.0.5', '--category', b.game['app_category'][0], '--marker', b.game['romfs_marker'][0], '--env-file', envf, '--settings', settings]
+    if b.icon.is_file(): cmd += ['--icon', b.icon]
     say('packing the Mac app')
     run(cmd, b.logs / 'pack_app.log', env=b.env(), show=r'^step:|^app:')
     if not (app / 'Contents/MacOS/dmhost').is_file(): raise Fail(f'no app at {app}')
@@ -608,6 +610,7 @@ def st_mac_app(b):
 def ipa_env(b):
     return b.env(W=str(b.out / 'ipa'), PATCHED=str(b.patched), ROMFS=str(b.romfs_img), MSL_IOS=str(b.ios), AOC='', DM_COPY_ROMFS='NO',
                  DM_ENTITLEMENTS=str(b.profile / 'pokopia.entitlements'), FONT_PY=PY, DM_SHOW_FPS='1', DM_PSO_GPUS='none', DM_ENV_FILE=str(b.out / 'phone_env.txt'),
+                 DM_ICON=str(b.icon if b.icon.is_file() else b.out / 'no-icon'),   # build_ipa.sh otherwise looks for an icon.jpg beside the RomFS image
                  PATH=os.path.expanduser('~/.local/bin') + ':' + b.env().get('PATH', os.environ.get('PATH', '')))
 
 
@@ -808,6 +811,98 @@ def run_mac(args):
     say(f'host exited ({rc}); {n} shaders recorded in {rd / "shdump"}' + (f'  ->  nxs2.py refresh "{b.out}"' if n else ''))
 
 
+ICON_LOGO = (1205, 140, 1890, 610)   # the title screen's logo badge, in a 1920x1080 picture
+ICON_AREA = (1196, 80, 1896, 780)    # the square around it: below the version number, above "Press A"
+
+
+def pillow():
+    try: from PIL import Image; return Image
+    except ImportError: raise Fail('the icon needs Pillow: python3 -m pip install pillow')
+
+
+def is_title(pic):
+    """The title screen: its logo badge is lime green where every other screen (logos, language question, the opening) has none (measured: 21 % against 0)."""
+    im = pillow().open(pic).convert('RGB').resize((1920, 1080)).crop(ICON_LOGO)
+    return sum(1 for r, g, b in pixels(im) if g > 190 and 120 <= r <= 235 and b < 150 and g >= r) / (im.width * im.height) > 0.08
+
+
+def pixels(im): return im.get_flattened_data() if hasattr(im, 'get_flattened_data') else im.getdata()   # Pillow 13 renamed getdata
+
+
+def make_icon(pic, out):
+    """The apps' icon from a picture of the title screen: the logo badge cut out along its white edge, on a soft blur of the screen around it, 1024x1024.
+    A square picture (an icon your dumping tool saved, say) is taken as it is."""
+    Image = pillow(); from PIL import ImageChops, ImageDraw, ImageEnhance, ImageFilter
+    im = Image.open(pic).convert('RGB')
+    if abs(im.width / im.height - 1) < 0.05: im.resize((1024, 1024), Image.LANCZOS).save(out); return
+    if abs(im.width / im.height - 16 / 9) > 0.05: raise Fail(f'{pic} is {im.width}x{im.height}: give a 16:9 picture of the title screen, or a square icon')
+    if not is_title(pic): raise Fail(f'{pic} does not show the title screen (no logo where the title screen has it)')
+    im = im.resize((1920, 1080), Image.LANCZOS)
+    crop = im.crop(ICON_LOGO); r, g, b = crop.split()
+    edge = ImageChops.darker(ImageChops.darker(r, g), b).point(lambda v: 255 if v > 215 else 0)   # the badge's white outline
+    for c in ((0, 0), (crop.width - 1, 0), (0, crop.height - 1), (crop.width - 1, crop.height - 1)):   # everything reachable from a corner without crossing it is outside
+        if edge.getpixel(c) == 0: ImageDraw.floodfill(edge, c, 128, thresh=0)
+    mask = edge.point(lambda v: 0 if v == 128 else 255).filter(ImageFilter.MaxFilter(3)).filter(ImageFilter.GaussianBlur(1.2))
+    if not 0.35 < sum(v > 128 for v in pixels(mask)) / (crop.width * crop.height) < 0.75: raise Fail(f'no logo found where the title screen has it in {pic}')
+    bg = im.crop(ICON_AREA).filter(ImageFilter.GaussianBlur(50)).resize((1024, 1024), Image.LANCZOS)
+    bg = ImageEnhance.Color(ImageEnhance.Brightness(bg).enhance(1.18)).enhance(1.3)
+    w = 880; logo = crop.resize((w, round(crop.height * w / crop.width)), Image.LANCZOS); m = mask.resize(logo.size, Image.LANCZOS)
+    x, y = (1024 - logo.width) // 2, (1024 - logo.height) // 2
+    bg.paste((40, 60, 40), (x + 8, y + 14), m.filter(ImageFilter.GaussianBlur(14)).point(lambda v: v * 0.45))   # a soft shadow
+    bg.paste(logo, (x, y), m); bg.save(out)
+
+
+def played_save(b, given):
+    """A save past the game's opening: a new one asks for the language, then goes straight into the opening and never shows the title screen.
+    The given folder, else the build folder's (nxs2.py run), else the Mac app's; it is copied, never used itself."""
+    cands = [pathlib.Path(given).expanduser()] if given else [b.rundir / 'save', pathlib.Path.home() / 'Library/Application Support/nxnative' / TITLE / 'save']
+    for d in cands:
+        if (d / 'G00').is_dir(): return d
+    if given: raise Fail(f'{given} holds no game save (no G00 folder)')
+    raise Fail('the title screen only shows once a game has been started: play past the opening once (nxs2.py run, or the Mac app), '
+               'or give a picture of the title screen (nxs2.py icon <build> <picture>)')
+
+
+def capture_title(b, png, save):
+    """A picture of the title screen from the game itself (Mac): the host on a copy of a played save, until the screen shows the title's logo."""
+    for p in (b.host, b.romfs_img, b.patched / 'main.patched.bin'):
+        if not p.exists(): raise Fail(f'{p} is missing: run nxs2.py build first')
+    rd = b.rundir / 'icon'; shutil.rmtree(rd, ignore_errors=True); rd.mkdir(parents=True)
+    shutil.copytree(save, rd / 'save'); (rd / 'temp').mkdir()
+    ctl = rd / 'ctl.txt'; ctl.write_text('')
+    env = dict(os.environ, DM_ROOT=str(b.out), DM_ROMFS=str(b.romfs_img), DM_SAVE=str(rd / 'save'), DM_TEMP=str(rd / 'temp'), DM_MSL_DIR=str(b.cache),
+               DM_FONT_DIR=str(b.font), DM_NVN_SHMAP=str(b.profile / 'shader_map.tsv'), DM_LANG='en-US', DM_AUDIO='0', DM_CTL=str(ctl))
+    say('starting the game to take a picture of its title screen (up to 3 minutes)')
+    with open(rd / 'host.log', 'w') as log:
+        p = subprocess.Popen([str(b.host), str(b.patched)], env=env, cwd=rd, stdout=log, stderr=subprocess.STDOUT)
+    try:
+        t0, n, seen = time.time(), 0, None
+        while time.time() - t0 < 180 and p.poll() is None:
+            n += 1; shot = rd / f'shot{n}.png'
+            with open(ctl, 'a') as f: f.write(f'shot {shot}\n')
+            for _ in range(20):
+                if shot.is_file() and shot.stat().st_size: break
+                time.sleep(0.25)
+            if shot.is_file() and shot.stat().st_size > 150_000 and is_title(shot):   # the boot's frames are blank and compress to a few dozen KB
+                if seen: shutil.copy(shot, png); return
+                seen = time.time()
+            time.sleep(3 if seen else 2)   # once it shows, one more picture a moment later: the logo has finished coming in
+        raise Fail(f'the title screen did not show within 3 minutes; see {rd / "host.log"} and the pictures beside it')
+    finally:
+        p.terminate()
+        try: p.wait(10)
+        except subprocess.TimeoutExpired: p.kill()
+
+
+def icon(args):
+    b = Build(args.build)
+    if args.picture: pic = pathlib.Path(args.picture).expanduser()
+    elif WIN: raise Fail('on Windows give a picture: a screenshot of the title screen taken on your Switch 2 (Capture button), or a square icon')
+    else: pic = b.rundir / 'title.png'; capture_title(b, pic, played_save(b, args.save))
+    make_icon(pic, b.icon)
+    say(f'icon: {b.icon}; build again (same command) to put it into the apps')
+
+
 def main():
     global VERBOSE
     ap = argparse.ArgumentParser(description=__doc__.split('\n\n')[0], formatter_class=argparse.RawDescriptionHelpFormatter, epilog=__doc__)
@@ -828,6 +923,9 @@ def main():
     s = sub.add_parser('run'); s.add_argument('build'); s.add_argument('--lang', default='en-US'); s.add_argument('env', nargs='*', help='extra DM_* switches, KEY=VALUE'); s.set_defaults(f=run_mac)
     s = sub.add_parser('sign'); s.add_argument('build'); s.add_argument('--team-id', required=True); s.add_argument('--method', default='debugging', help='export method: debugging (default), ad-hoc, release-testing'); s.set_defaults(f=sign)
     s = sub.add_parser('status'); s.add_argument('build'); s.set_defaults(f=status)
+    s = sub.add_parser('icon', help='the apps\' icon from the title screen: your own game on a Mac, or a picture of it')
+    s.add_argument('build'); s.add_argument('picture', nargs='?', help='a 16:9 screenshot of the title screen (your Switch 2\'s Capture button), or a square icon')
+    s.add_argument('--save', help='a save past the game\'s opening to boot from (copied; default: the build folder\'s, then the Mac app\'s)'); s.set_defaults(f=icon)
     a = ap.parse_args(); VERBOSE = a.verbose
     if a.cmd == 'build' and not (a.dump or (a.exefs and a.romfs)): ap.error('build needs the dump folder, or --exefs and --romfs')
     global JOBS

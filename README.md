@@ -57,7 +57,8 @@ Mac compiling 3,800 shaders. After that, rebuilds take a couple of minutes.
   cannot run it. The Mac does the building for the iPhone too; there is no way around having one.
 - **Xcode 27** installed, with its command line tools and the Metal toolchain (Xcode → Settings → Components). For the
   iPhone build you also need the iOS platform from that same screen, and `xcodegen` (`brew install xcodegen`).
-- **Python 3.12 or newer**: `brew install python@3.12`, then `python3.12 -m pip install "capstone>=5,<6" lz4 fonttools`.
+- **Python 3.12 or newer**: `brew install python@3.12`, then `python3.12 -m pip install "capstone>=5,<6" lz4 fonttools pillow`
+  (Pillow only for the app icon).
 - The **.NET 10 runtime** (the shader translator is .NET): `brew install --cask dotnet-sdk`.
 - **Your dump.** The game's files as your dumping tool wrote them, with the update:
   ```
@@ -68,7 +69,8 @@ Mac compiling 3,800 shaders. After that, rebuilds take a couple of minutes.
   update **v327680** of Pokémon Pokopia (title `0400A3A01EE4C000`) and checks the build IDs. Another version will not
   build, because the patch recipe and the shader tables are for this one.
 - For the **iPhone**: see the next section.
-- **No Mac?** A Windows PC builds the iPhone app alone: [docs/WINDOWS.md](docs/WINDOWS.md).
+- **No Mac?** A Windows PC builds the iPhone app alone: [docs/WINDOWS.md](docs/WINDOWS.md). Not working yet: the app
+  runs but draws almost nothing (see "No Mac?" below).
 
 `python3.12 nxs2.py doctor` (or the window's **Check tools** button) checks all of this and tells you how to get whatever
 is missing.
@@ -141,6 +143,13 @@ Outputs land in `<build folder>/out/`:
 Use `--no-ios` if you only want the Mac: it halves the compile. `python3.12 nxs2.py run "<build folder>"` plays straight
 from the build folder in a window, which is handy while you are fiddling with things.
 
+**The app icon.** Out of the box the apps get the blank default icon, because the game's own icon isn't part of a dump.
+`python3.12 nxs2.py icon "<build folder>"` makes one from your game: on a Mac it starts the game on a copy of your save,
+takes a picture of the title screen and cuts the Pokopia logo out of it. It needs a save that is past the game's opening
+(play a little with `nxs2.py run` or the Mac app first, or point it at one with `--save <folder>`). If you prefer, give
+it a screenshot of the title screen from your Switch 2 (Capture button):
+`nxs2.py icon "<build folder>" title.jpg`. Then build again with the same command; it only repacks the apps.
+
 ## No Mac? Windows builds the iPhone app
 
 A Windows PC can build the iPhone IPA (not the Mac app, and it cannot run the game: the game's code needs an Apple chip).
@@ -148,6 +157,11 @@ It uses the tools nxnative's Windows port put together: Apple's own Metal compil
 the iPhone SDK for the app. The same window and the same commands, `--ipa` only. What to install and how to get the SDK
 is in [docs/WINDOWS.md](docs/WINDOWS.md). Signing still needs a paid team, and on Windows a signing tool that keeps the
 entitlements; I sign on a Mac and have not tested one, so that part is yours to report.
+
+**Not working yet:** I tested the whole Windows route on my iPhone. It builds, signs, installs and starts the game (the
+music plays and the menus respond), but almost nothing is drawn: the picture stays black apart from some text. The
+shaders come out of the translation identical to the Mac's, so the problem is somewhere in the Windows compile. I'm on
+it; until then, build on a Mac.
 
 ## The shaders, and what "refresh" is for (read this too)
 
@@ -198,12 +212,13 @@ and that feels like a console. I wanted it to feel like a PC or a phone game, so
 **Sensitivity and invert** are in the app's launcher under Controls ("Look sensitivity", "Invert look up and down"),
 or in `env.txt` as `DM_LOOK_SCALE` (1.0 = default) and `DM_LOOK_INVERT_Y=1`.
 
-How it works, because it's not just "mouse = stick": I measured exactly how Pokopia's camera answers the stick by
-reading its camera angle every frame. It turns at 110° per second at full tilt, ignores the stick below about half
-tilt, and has no acceleration or smoothing. Every frame, the app works out the exact stick tilt that turns the camera by
-however far you moved since the last frame. Moving the mouse a given amount turns the camera by that amount, within
-about a degree. The one limit is the game's own top speed: a flick faster than 110° per second still lands where you
-aimed, a moment later. Keep the game's own camera speed setting at its default; the conversion is tuned to it.
+How it works, because it's not just "mouse = stick": faking the stick felt laggy, since Pokopia's stick tops out at
+110° per second and ignores anything below about half tilt. So the app found where the game keeps its camera's angle in
+memory and sets it directly, every frame, right before the game draws. Moving the mouse or your finger a given amount
+turns the camera by exactly that amount (measured to a hundredth of a degree), with no speed limit, no smoothing and no
+drift after you stop. Touches and mouse moves are time-stamped, so every frame gets an even share of the movement and a
+steady pan stays steady. If the game ever takes the camera over, the app falls back to steering the stick for that
+moment.
 
 ## Phone settings and heat
 
