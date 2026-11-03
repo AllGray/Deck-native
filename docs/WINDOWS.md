@@ -5,7 +5,7 @@ game's arm64 code natively, which needs an Apple chip. Everything else of the bu
 [nxnative's Windows port](https://github.com/zenvyzenshiro/NXNativeWindows) maps Apple's tools onto: the shaders go
 through Apple's own Metal compiler for Windows, the app is compiled with LLVM against the iPhone SDK.
 
-**Status (2026-11-03): works.** Built and signed on a PC, the app plays on my iPhone like the Mac-built one. One thing is
+**Status (2026-11-03): works,** for 1.0.5 and 2.0.1. Built and signed on a PC, the app plays on my iPhone like the Mac-built one. One thing is
 different from a Mac: the PC cannot run the game, so it cannot record the shaders the game makes while it runs (see the
 README's shader section). Until your phone has recorded them once, the title screen is black apart from its text; the
 steps for that are at the end of this page.

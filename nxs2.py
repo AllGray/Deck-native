@@ -827,8 +827,10 @@ def sign(args):
 
 # ---------------------------------------------------------------- report
 def coverage(b):
-    """(file shaders in the map, runtime shaders known, runtime shaders present)"""
-    known = {l.split('\t')[0] for l in (PROFILE_SRC / 'runtime_keys.tsv').read_text().splitlines() if l.strip() and not l.startswith('#')}
+    """(file shaders in the map, runtime shaders known for this build's version, runtime shaders present)"""
+    rows = [l.split('\t') for l in (PROFILE_SRC / 'runtime_keys.tsv').read_text().splitlines() if l.strip() and not l.startswith('#')]
+    every = {f[0] for f in rows}
+    known = {f[0] for f in rows if len(f) < 3 or b.version in f[2].split(',')}   # a third column names the only versions that make the shader
     keys = set()
     smap = b.profile / 'shader_map.tsv'
     if smap.is_file():
@@ -836,7 +838,7 @@ def coverage(b):
             if l.startswith('#') or l.startswith('package\t') or not l.strip(): continue
             f = l.split('\t')
             if len(f) > 3: keys.add(f[3])
-    return len(keys - known), len(known), len(keys & known)
+    return len(keys - every), len(known), len(keys & known)
 
 
 def report(b):
@@ -916,8 +918,9 @@ def refresh(args):
     if b.outputs.is_dir() and any(b.outputs.glob('*-unsigned.ipa')): st_ipa_windows(b) if WIN else st_ipa(b)
     if not WIN and (b.out / 'xcode' / 'DmIOS.xcodeproj').is_dir():
         team = args.team_id
-        if not team and (b.out / 'xcode' / 'project.yml').is_file():
-            m = re.search(r'DEVELOPMENT_TEAM\s*[:=]\s*"?([A-Z0-9]{10})', (b.out / 'xcode' / 'project.yml').read_text()); team = m.group(1) if m else None
+        pbx = b.out / 'xcode' / 'DmIOS.xcodeproj' / 'project.pbxproj'   # project.yml keeps only ${DM_TEAM_ID}; the generated project has the team itself
+        if not team and pbx.is_file():
+            m = re.search(r'DEVELOPMENT_TEAM\s*=\s*"?([A-Z0-9]{10})', pbx.read_text()); team = m.group(1) if m else None
         if team: st_xcode(b, team); say(f'the Xcode project is refreshed: nxs2.py sign "{b.out}" --team-id {team} makes the new signed IPA')
         else: say('the Xcode project is not refreshed (give --team-id)')
     after = coverage(b)

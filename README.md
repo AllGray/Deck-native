@@ -178,8 +178,8 @@ the build. That is the 30 to 45 minute stage. The build finds **every shader in 
 and translates all of them. So far so good.
 
 But Pokopia also **builds some shaders itself while it runs**. They are not in the game files anywhere; the game makes
-them on the fly, apparently as it needs them. I know of **140** of these so far, from the opening, the character creator
-and the first area. A fresh build cannot contain them, because there is nothing to take them from until the game has
+them on the fly, apparently as it needs them. I know of **140** of these so far on 1.0.5, from the opening, the character
+creator and the first area, and 2.0.1 makes **14 more** of its own (154 in all). A fresh build cannot contain them, because there is nothing to take them from until the game has
 run. When the game asks for one that your build does not have, that draw is skipped: the game keeps running, but that
 one effect or object is not drawn. Nothing crashes. Be warned though: the title screen itself uses about 20 of them, so
 on the very first launch it is **black apart from the version number and "Settings"**. The music plays and A still
@@ -199,10 +199,11 @@ reinstall and carry on. Repeat when you reach new places and notice something mi
 opening and the first area you have the lot.
 
 The build tells you where you stand: `shaders: 3813 from the game files; 0 of the 140 known run-time shaders` right
-after the first build, and after a refresh with a full set of recordings `140 of the 140`. The known list is
-`profile/0400A3A01EE4C000/runtime_keys.tsv`; it holds hashes only, so you can see how far you are, and no code.
+after the first build, and after a refresh with a full set of recordings `140 of the 140` (on 2.0.1: `154 of the 154`).
+The known list is `profile/0400A3A01EE4C000/runtime_keys.tsv`; it holds hashes only, so you can see how far you are,
+and no code. The ones only 2.0.1 makes are marked there, so a 1.0.5 build is not counted short for them.
 
-If you find run-time shaders beyond the 140, your refresh handles them exactly the same way. Tell me about them in the
+If you find run-time shaders beyond these, your refresh handles them exactly the same way. Tell me about them in the
 issues, with the count the build prints, so the list can grow. Do not attach the recordings; they are game code.
 
 ## Controls: mouse look on the Mac, drag to look on the iPhone

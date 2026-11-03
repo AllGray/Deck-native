@@ -1,6 +1,7 @@
-# Shaders Pokemon Pokopia v327680 builds while it runs (not in the game files): the host key (sha256 of the shader's control block and code, as the host's shader map names it) and its stage.
-# No code here: the player's own device records these shaders (DM_NVN_SHDUMP) and `nxs2.py refresh` adds them. Seen so far in the opening, the character creator and the first area.
-# hostkey	stage
+# Shaders Pokemon Pokopia builds while it runs (not in the game files): the host key (sha256 of the shader's control block and code, as the host's shader map names it), its stage,
+# and for a shader only some versions make, those versions. No code here: the player's own device records these shaders (DM_NVN_SHDUMP) and `nxs2.py refresh` adds them.
+# Seen so far in the opening, the character creator and the first area (1.0.5), and in later play on 2.0.1, which makes the ones marked 2.0.1 besides the others.
+# hostkey	stage	only in
 01342d97649a04bb	fragment
 034911e30dd2ff0e	fragment
 049d4dedd369aeeb	fragment
@@ -14,6 +15,7 @@
 133114bb3cffc671	fragment
 153fe3174baade17	fragment
 1619ecc4df4c2e67	fragment
+16de295265cb2f67	vertex	2.0.1
 1c666485794d3026	vertex
 219d8b07e6ce6ecd	vertex
 2202dbc75242e74e	fragment
@@ -37,6 +39,7 @@
 456ac390ef00c7bf	vertex
 47bb0d7d4c4825eb	fragment
 4872caf97fddedb3	vertex
+494f225744f8bcdb	fragment	2.0.1
 4b4707a3684a7eda	fragment
 50cac6a6be1d4f6a	vertex
 523396cb3c864847	vertex
@@ -45,16 +48,20 @@
 560a0262fe47818a	compute
 587811fde33d7658	vertex
 59ab6a23f1977287	vertex
+5b3e98ce6a9a0fca	fragment	2.0.1
 5b4f6dd4c08ab1d0	fragment
 61cb9ad8aae7b738	fragment
 6317971edbe169b1	vertex
 634565ab77c61463	compute
 6529a8472c91d2e9	compute
 66e7103ccf3063c7	vertex
+6b30367d2760dc0d	vertex	2.0.1
 6cc10a0beca242ed	vertex
 6e582a8105e0c915	fragment
 71885b7a9a9816ae	vertex
 73207326f53b9679	fragment
+7404d999ffc82f01	fragment	2.0.1
+747d3b49019c3d80	fragment	2.0.1
 75dc962ea198fd58	fragment
 76acbfa8ce671c27	vertex
 782070efab621c61	vertex
@@ -82,6 +89,7 @@
 99e6c4350f5afd03	vertex
 9cb1a4f5743c73cb	vertex
 9cbfb9b6570b68f5	vertex
+9e220c61a878efc8	vertex	2.0.1
 9ef6a30711ccf9f4	vertex
 9fe037006f7afb30	fragment
 a0008f6bddc2b234	fragment
@@ -97,15 +105,20 @@ a983fd96ee8d0796	fragment
 adc2d929b8a582a2	fragment
 aef1230bae916041	fragment
 b1f4b2d7c3863ab0	fragment
+b3003964aa7150e6	fragment	2.0.1
 b53e8b40916f67bf	vertex
 b734c131aa1b51e4	vertex
 b7645dc9a0823d77	vertex
 b91951afc13477e9	fragment
+b932e57118443e4a	fragment	2.0.1
 ba90a84cd085efd7	fragment
+bb8384592894239f	fragment	2.0.1
 bc6fc39a03a46bef	fragment
 bcded1bafb90c501	fragment
 bd6bdde2a5de2bb2	fragment
+bdf486a2ff631912	vertex	2.0.1
 c081bd4cd0f33bb4	vertex
+c0cab4737fb4c7d9	fragment	2.0.1
 c8305a60b952f683	fragment
 c8a9a57cbc1bea45	vertex
 ccd2a481e8026fcf	vertex
@@ -117,6 +130,7 @@ cfd04a475ab88795	fragment
 d390364fe4207baa	vertex
 d40e8d9a1805e28d	vertex
 d57be29d61aa7a24	vertex
+d58d498fe9ae162b	fragment	2.0.1
 d6850a1434643cbf	fragment
 d9a95c8db1f30e63	vertex
 df4241f5c7a0b702	vertex
@@ -139,5 +153,6 @@ f47c4e1e723d4ecf	vertex
 f8de4a2d5e1c8295	vertex
 f937ce8c31e57144	vertex
 f9bc90a3d5110936	fragment
+fe7eb25358962466	fragment	2.0.1
 ff7888edc2c93dc3	fragment
 ffe844f3bd696388	fragment
