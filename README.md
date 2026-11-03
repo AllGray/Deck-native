@@ -9,6 +9,10 @@ This repository is the tool that lets you do the same with **your own copy of th
 your Mac it builds a Mac app and an iPhone app. Everything that comes from the game is created on your machine and stays
 in your build folder. Nothing from the game is in here.
 
+This works for both versions 2.0.0 (v327680) and 2.0.1 (v655360) as of 11/3/2026
+
+Also, if you do not have a Mac to build the app with, no worries; there is a Windows Builder as well. It will create the IPA the same way a Mac would.
+
 Before anything else:
 
 > **Please Please Please Please do not share game files, this is for your own games files only and that is the intention it was built with.**
