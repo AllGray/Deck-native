@@ -5,9 +5,10 @@ game's arm64 code natively, which needs an Apple chip. Everything else of the bu
 [nxnative's Windows port](https://github.com/zenvyzenshiro/NXNativeWindows) maps Apple's tools onto: the shaders go
 through Apple's own Metal compiler for Windows, the app is compiled with LLVM against the iPhone SDK.
 
-**Status (2026-11-03): not working yet.** On an iPhone the Windows-built app installs, starts and runs the game (sound,
-input, 30 fps), but the picture stays black apart from some text. The Metal source of the shaders is byte-identical to the
-Mac build's, so the difference is in the Windows compile (Apple's Metal compiler for Windows, or the LLVM-built app).
+**Status (2026-11-03): works.** Built and signed on a PC, the app plays on my iPhone like the Mac-built one. One thing is
+different from a Mac: the PC cannot run the game, so it cannot record the shaders the game makes while it runs (see the
+README's shader section). Until your phone has recorded them once, the title screen is black apart from its text; the
+steps for that are at the end of this page.
 
 ## What to install (once)
 
@@ -58,6 +59,9 @@ update with Intel's 2024 microcode fix (0x12B or newer) for that; **Check tools*
 The output is `<build folder>\out\PokemonPokopia-unsigned.ipa`: the app without the game files, its executable carrying
 the two kernel entitlements in an ad-hoc signature, plus `romfs.id`, the identity of your game image.
 
+For the home-screen icon, take a screenshot of the game's title screen on your Switch 2 (Capture button), copy it to the
+PC and run `python nxs2.py icon "<build folder>" title.jpg` before the build (or build again afterwards).
+
 ## Sign and install
 
 The IPA has to be signed with a **paid Apple Developer Program** team (see the README: the game's memory needs the
@@ -81,8 +85,21 @@ python nxs2.py sign "<build folder>" --p12 my-cert.p12 --profile Pokopia.mobilep
 ```
 
 The result is `<build folder>\out\PokemonPokopia-signed.ipa`. The tool checks that the profile matches the app and
-grants both memory capabilities, and warns when it doesn't.
+grants both memory capabilities, and after signing it reads the signature back and stops if an entitlement is missing.
 
 Then, as on the Mac ([IPHONE.md](IPHONE.md)): `pymobiledevice3 apps install <ipa>`, and `tools\phone_setup.py --romfs
-<build folder>\extract\RomFS.img` for the game files. The shaders the game makes while running come back with
-`tools\phone_pull.py` and go in with `python nxs2.py refresh "<build folder>"`, which rebuilds the IPA.
+<build folder>\extract\RomFS.img` for the game files.
+
+**The first run (once).** Start the game on the phone and let it reach the title screen: it is black apart from the
+version number and "Settings", the music plays. Press A and play into the game for a few minutes (the opening, the first
+area), then close it. The phone has now recorded the shaders the game made. Bring them over and build them in:
+
+```
+python tools\phone_pull.py "<build folder>\phone\first-run"
+python nxs2.py refresh "<build folder>"
+```
+
+(`refresh` finds what is under `<build folder>\phone\` by itself.)
+
+Sign the new IPA again and install it over the old one (your save stays). From then on the title screen and everything
+you played through are drawn. Anything new the game makes later is recorded the same way; refresh again whenever you like.

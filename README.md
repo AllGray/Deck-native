@@ -54,7 +54,7 @@ Mac compiling 3,800 shaders. After that, rebuilds take a couple of minutes.
 ## What you need
 
 - A **Mac with Apple silicon** (M1 or newer) and roughly 20 GB of free disk. The game's code is arm64, so an Intel Mac
-  cannot run it. The Mac does the building for the iPhone too; there is no way around having one.
+  cannot run it. The Mac does the building for the iPhone too, or a Windows PC can (the last item here).
 - **Xcode 27** installed, with its command line tools and the Metal toolchain (Xcode → Settings → Components). For the
   iPhone build you also need the iOS platform from that same screen, and `xcodegen` (`brew install xcodegen`).
 - **Python 3.12 or newer**: `brew install python@3.12`, then `python3.12 -m pip install "capstone>=5,<6" lz4 fonttools pillow`
@@ -73,8 +73,8 @@ Mac compiling 3,800 shaders. After that, rebuilds take a couple of minutes.
   (FileZilla: Transfer → Transfer type → Binary). The default "auto" mode treats files without an extension as text and
   quietly drops bytes from `main`, `sdk` and `subsdk0`; I lost an evening to that. The tool checks for it and tells you.
 - For the **iPhone**: see the next section.
-- **No Mac?** A Windows PC builds the iPhone app alone: [docs/WINDOWS.md](docs/WINDOWS.md). Not working yet: the app
-  runs but draws almost nothing (see "No Mac?" below).
+- **No Mac?** A Windows PC builds and signs the iPhone app alone: [docs/WINDOWS.md](docs/WINDOWS.md) (one play session
+  on the phone before the title screen draws, see "No Mac?" below).
 
 `python3.12 nxs2.py doctor` (or the window's **Check tools** button) checks all of this and tells you how to get whatever
 is missing.
@@ -159,13 +159,13 @@ it a screenshot of the title screen from your Switch 2 (Capture button):
 A Windows PC can build the iPhone IPA (not the Mac app, and it cannot run the game: the game's code needs an Apple chip).
 It uses the tools nxnative's Windows port put together: Apple's own Metal compiler for Windows for the shaders, LLVM with
 the iPhone SDK for the app. The same window and the same commands, `--ipa` only. What to install and how to get the SDK
-is in [docs/WINDOWS.md](docs/WINDOWS.md). Signing still needs a paid team, and on Windows a signing tool that keeps the
-entitlements; I sign on a Mac and have not tested one, so that part is yours to report.
+is in [docs/WINDOWS.md](docs/WINDOWS.md). Signing still needs a paid team; the window signs on Windows too, with your
+certificate (.p12) and development profile (**Sign IPA**, see docs/WINDOWS.md).
 
-**Not working yet:** I tested the whole Windows route on my iPhone. It builds, signs, installs and starts the game (the
-music plays and the menus respond), but almost nothing is drawn: the picture stays black apart from some text. The
-shaders come out of the translation identical to the Mac's, so the problem is somewhere in the Windows compile. I'm on
-it; until then, build on a Mac.
+I tested the whole Windows route on my iPhone: built and signed on my PC, it plays like the Mac-built app. The one
+difference is that a PC cannot run the game, so it cannot record the shaders the game makes while it runs (next
+section). Your first run on the phone does that: the title screen is black apart from its text until you have played a
+few minutes, pulled the recordings over and refreshed once. docs/WINDOWS.md has the exact steps.
 
 ## The shaders, and what "refresh" is for (read this too)
 

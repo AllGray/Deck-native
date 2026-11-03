@@ -663,7 +663,8 @@ def st_ipa_windows(b):
     b.outputs.mkdir(parents=True, exist_ok=True)
     out = b.outputs / f'{NAME.replace(" ", "")}-unsigned.ipa'
     env = b.env(W=str(b.out / 'ipa'), PATCHED=str(b.patched), ROMFS=str(b.romfs_img), MSL_IOS=str(b.ios), AOC='', DM_ENV_FILE=str(b.out / 'phone_env.txt'), DM_SHOW_FPS='1',
-                DM_PSO_GPUS='none', DM_LANG='en-US', DM_BUNDLE_ID=f'org.nxnative.{TITLE.lower()}', NXW_EXTENDED_VA='1', NXW_ROMFS_SEPARATE='1', NXW_ENTITLEMENTS='1')
+                DM_PSO_GPUS='none', DM_LANG='en-US', DM_BUNDLE_ID=f'org.nxnative.{TITLE.lower()}', NXW_EXTENDED_VA='1', NXW_ROMFS_SEPARATE='1', NXW_ENTITLEMENTS='1',
+                DM_ICON=str(b.icon if b.icon.is_file() else b.out / 'no-icon'))
     (b.out / 'ipa').mkdir(parents=True, exist_ok=True)
     for old in (out, out.with_name(out.name + '.idx')):   # pack_ipa.py reuses an existing IPA through its .idx with os.pread, which Windows lacks: pack it whole instead
         if old.exists(): old.unlink()
@@ -754,9 +755,15 @@ def sign_with_certificate(b, p12, profile, password_stdin=False):
         pwf = work / 'p12.pw'; pwf.write_text(pw, encoding='utf-8'); pw = None
         say('signing (rcodesign)')
         try:
-            run([rc, 'sign', '--p12-file', p12, '--p12-password-file', pwf, '--entitlements-xml-file', work / 'entitlements.plist', app], b.logs / 'sign.log')
+            # scoped to the executable: rcodesign reads the text before the first colon as the scope (C:\ would make the drive letter one), and with the
+            # scope "main" or none it keeps the entitlements of the executable's ad-hoc signature (the two kernel ones) instead of the profile's
+            run([rc, 'sign', '--p12-file', p12, '--p12-password-file', pwf, '--entitlements-xml-file', f'{info.get("CFBundleExecutable", "DmIOS")}:{work / "entitlements.plist"}', app],
+                b.logs / 'sign.log')
         finally:
             pwf.unlink(missing_ok=True)
+        sig = subprocess.run([rc, 'print-signature-info', app / info.get('CFBundleExecutable', 'DmIOS')], capture_output=True, text=True, encoding='utf-8', errors='replace').stdout
+        lost = [k for k in ('application-identifier', 'com.apple.developer.kernel.extended-virtual-addressing', 'com.apple.developer.kernel.increased-memory-limit') if k not in sig]
+        if lost: raise Fail(f'the signed app lacks the entitlements {", ".join(lost)} (iOS would refuse it); see {b.logs / "sign.log"}')
         out = b.outputs / f'{NAME.replace(" ", "")}-signed.ipa'
         say('packing the signed IPA')
         tmp = out.with_name(out.name + '.part')
