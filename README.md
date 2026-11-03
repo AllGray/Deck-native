@@ -111,7 +111,9 @@ There is a window and there is a command line; they do the same thing.
 (**Pokopia Native Builder.cmd** on Windows). Press **Setup** once, choose your dump folder, tick what you want, press
 **Build**. The stages scroll by in the window with the elapsed time; **Refresh shaders** is the refresh step explained
 further down, **Open build folder** shows the outputs. If the app will not open, it tells you what to install (Python
-3.12 with Tk: `brew install python@3.12 python-tk@3.12`).
+3.12 with Tk: `brew install python@3.12 python-tk@3.12`). A clone opens directly. A copy downloaded with a browser is
+blocked the first time, because the app is not signed by a registered developer: try to open it, then System Settings →
+Privacy & Security → **Open Anyway** (or once in Terminal: `xattr -dr com.apple.quarantine "Pokopia Native Builder.app"`).
 
 **The command line.**
 
