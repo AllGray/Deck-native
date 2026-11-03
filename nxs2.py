@@ -867,12 +867,19 @@ def status(args):
 
 
 # ---------------------------------------------------------------- commands
+def need_setup():
+    """Setup's tools live in this copy of the repository: a fresh download or a copy in another folder has none until setup runs there."""
+    if not (NX / 'dm/host/Makefile').is_file() or not AMPERE.is_file() or (WIN and not (NX / 'win/build_app.py').is_file()):
+        raise Fail(f'this copy of {HERE.name} is not set up yet (nxnative at {NX}, ampere-lower at {AMPERE}): run nxs2.py setup here once '
+                   '(or Setup in the window). A new download or a copy in another folder needs it too; your build folders keep working.')
+
+
 def build(args):
     need_ios = True if WIN else not args.no_ios
     if WIN and (args.mac_app or args.xcode): raise Fail('the Mac app and the Xcode project need a Mac; on Windows the output is the iPhone IPA (--ipa)')
     bad = doctor(need_ios=need_ios, quiet=True)
     if bad: doctor(need_ios=need_ios); raise Fail('install the missing tools above (nxs2.py doctor), then build again')
-    if not (NX / 'dm/host/Makefile').is_file() or not AMPERE.is_file() or (WIN and not (NX / 'win/build_app.py').is_file()): raise Fail(f'run nxs2.py setup first (nxnative at {NX}, ampere-lower at {AMPERE})')
+    need_setup()
     exefs, romfs, ver, disp = find_dump(args)
     if args.out: out = pathlib.Path(args.out).expanduser()
     elif args.dump: d = pathlib.Path(args.dump).expanduser().resolve(); out = d.parent / f'{d.name}_native'   # beside the dump, never inside it
@@ -908,6 +915,7 @@ def default_dump_dirs(b):
 def refresh(args):
     b = Build(args.build)
     if not (b.ctl / 'hostkeys.tsv').is_file(): raise Fail(f'{b.out} holds no finished build')
+    need_setup()
     dirs = [pathlib.Path(d).expanduser() for d in args.dumps] or default_dump_dirs(b)
     if not dirs: raise Fail('no shader dumps found: give the folder(s) (DM_NVN_SHDUMP output: <key>.ctl + <key>.code files)')
     before = coverage(b)
