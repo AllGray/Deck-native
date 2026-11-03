@@ -1,5 +1,5 @@
 diff --git a/dm/games/game.py b/dm/games/game.py
-index 6089fe9..b466113 100644
+index 6089fe9..fab9403 100644
 --- a/dm/games/game.py
 +++ b/dm/games/game.py
 @@ -119,7 +119,12 @@ def header(g):
@@ -11,8 +11,8 @@ index 6089fe9..b466113 100644
 +    lr = float(g.get('look_rate', '0'))   # pointer look (hle_hid.c dm_look_add): the camera's turn rate at full right-stick tilt, degrees per second; 0 = off (the pointer is not a look control)
 +    ld = float(g.get('look_dead', '0.2'))   # pointer look: the right stick's deadzone for the camera, a fraction of full tilt (round)
 +    if lr < 0 or not 0 <= ld < 1: sys.exit(f'{g.id}: look_rate must be >= 0 and look_dead in [0, 1): {lr} {ld}')
-+    lc = g.get('look_cam', '')   # pointer look written into the camera (hle_hid.c look_cam): "<main build id> <slot> <pitch> <yaw> <pitch max> <pitch min> <lock>/<mask>", hex
-+    if lc and not re.fullmatch(r'[0-9a-f]{8,32}( [0-9a-f]+){6}/[0-9a-f]+', lc): sys.exit(f'{g.id}: look_cam takes <main build id> <slot> <pitch> <yaw> <pitch max> <pitch min> <lock>/<mask> in hex: {lc}')   # touch = Tap (no control: every touch goes to the game's touch screen)
++    lc = g.get('look_cam', '')   # pointer look written into the camera (hle_hid.c look_cam): "<main build id> <slot> <pitch> <yaw> <pitch max> <pitch min> <lock>/<mask>", hex; one per build, ';' between
++    if lc and not re.fullmatch(r'[0-9a-f]{8,32}( [0-9a-f]+){6}/[0-9a-f]+(;[0-9a-f]{8,32}( [0-9a-f]+){6}/[0-9a-f]+)*', lc): sys.exit(f'{g.id}: look_cam takes <main build id> <slot> <pitch> <yaw> <pitch max> <pitch min> <lock>/<mask> in hex: {lc}')   # touch = Tap (no control: every touch goes to the game's touch screen)
      sks = g.get('shader_key_skip', '')   # control-section bytes the shader keys hash as zeros, <offset>+<length> (hle_nvn.c keys_hash, shader_split.py key_ctl; Batman: Arkham Knight: GLSLC's compile information, 0x770+0x78)
      m = re.fullmatch(r'(0x[0-9a-fA-F]+|\d+)\+(0x[0-9a-fA-F]+|\d+)', sks) if sks else None
      if sks and (not m or not 0x30 <= int(m[1], 0) or not 0 < int(m[2], 0) or int(m[1], 0) + int(m[2], 0) > 0x880 or (int(m[1], 0) < 0x760 and int(m[1], 0) + int(m[2], 0) > 0x700)):   # not over +0x700..+0x75f, the code area and compute fields the tools read
@@ -3567,10 +3567,10 @@ index de79bc9..e09a927 100644
                  return t;
              }
 diff --git a/dm/host/hle_hid.c b/dm/host/hle_hid.c
-index 768a357..c10aa9f 100644
+index 768a357..2d5f702 100644
 --- a/dm/host/hle_hid.c
 +++ b/dm/host/hle_hid.c
-@@ -58,6 +58,148 @@ void dm_pad_set_player(int p, uint64_t buttons, int32_t lx, int32_t ly, int32_t
+@@ -58,6 +58,151 @@ void dm_pad_set_player(int p, uint64_t buttons, int32_t lx, int32_t ly, int32_t
      if (!p) shake_note();
  }
  void dm_pad_set(uint64_t buttons, int32_t lx, int32_t ly, int32_t rx, int32_t ry) { dm_pad_set_player(0, buttons, lx, ly, rx, ry); }
@@ -3585,16 +3585,19 @@ index 768a357..c10aa9f 100644
 +// Direct look (game profile look_cam): when the profile says where the game keeps its camera's angles, the pointer's degrees are written into them at player 1's
 +// input read, before that frame's camera update: no stick, no deadzone, no turn rate. look_cam = main build id (a prefix), main+<slot> holding the camera's address, and
 +// the camera's offsets of pitch, yaw (f32 radians; yaw in [0, 2pi) growing to the left, pitch growing downward), the pitch limits (clamped as the stick path does) and
-+// a 16-bit lock word (no turning while lock & mask: the game's own stick turning is off then). Pokopia: the game applies a write in the same frame, with no smoothing.
++// a 16-bit lock word (no turning while lock & mask: the game's own stick turning is off then); one such entry per game build, ';' between them, the matching
++// one taken. Pokopia: the game applies a write in the same frame, with no smoothing.
 +// The stick path stays for another build, before the camera exists and while it is locked. DM_LOOK_DIRECT=0 turns direct look off.
 +static struct { int state; uint8_t *slot; unsigned pitch, yaw, pmax, pmin, lock, mask, span; uint64_t seen; } g_lc;   // state 0 = not resolved yet, 1 = on, -1 = off
 +static int g_look_direct;   // the last frame wrote the camera (dm_look_add then gathers without the stick path's LOOK_LAG limit)
 +static uint8_t *look_cam(void) {
 +    if (!g_lc.state) {
-+        char b[33]; unsigned long long s = 0; const char *e = getenv("DM_LOOK_DIRECT"); g_lc.state = -1;
-+        if (DM_GAME_LOOK_CAM[0] && !(e && *e && !atoi(e))
-+            && sscanf(DM_GAME_LOOK_CAM, "%32s %llx %x %x %x %x %x/%x", b, &s, &g_lc.pitch, &g_lc.yaw, &g_lc.pmax, &g_lc.pmin, &g_lc.lock, &g_lc.mask) == 8)
++        const char *e = getenv("DM_LOOK_DIRECT"); g_lc.state = -1;
++        for (const char *c = DM_GAME_LOOK_CAM; *c && !(e && *e && !atoi(e)) && g_lc.state < 0; c = strchr(c, ';') ? strchr(c, ';') + 1 : "") {
++            char b[33]; unsigned long long s = 0;
++            if (sscanf(c, "%32s %llx %x %x %x %x %x/%x", b, &s, &g_lc.pitch, &g_lc.yaw, &g_lc.pmax, &g_lc.pmin, &g_lc.lock, &g_lc.mask) != 8) break;
 +            for (int i = 0; i < g_nmod; i++) if (!strcmp(g_mod[i].name, "main") && !strncmp(g_mod[i].build_id, b, strlen(b))) { g_lc.slot = (uint8_t *)g_mod[i].base + s; g_lc.state = 1; }
++        }
 +        unsigned o[] = { g_lc.pitch, g_lc.yaw, g_lc.pmax, g_lc.pmin, g_lc.lock }; for (int i = 0; i < 5; i++) if (o[i] + 4 > g_lc.span) g_lc.span = o[i] + 4;
 +        LOG("look: %s", g_lc.state > 0 ? "direct (written into the camera, game profile look_cam)" : "through the right stick");
 +    }
@@ -3719,7 +3722,7 @@ index 768a357..c10aa9f 100644
  static void script_set(uint64_t buttons, int32_t lx, int32_t ly, int32_t rx, int32_t ry) {
      uint64_t old = atomic_exchange(&g_sc_btn, buttons); atomic_fetch_or(&g_sc_latch, buttons & ~old); atomic_store(&g_sc_axes, pack(lx, ly, rx, ry));
      shake_note();
-@@ -229,6 +371,13 @@ static void *ctl_main(void *arg) {
+@@ -229,6 +374,13 @@ static void *ctl_main(void *arg) {
                  if (!strncmp(line, "env ", 4)) { char *eq = strchr(line + 4, '='); if (eq) { *eq = 0; setenv(line + 4, eq + 1, 1); LOG("DM_CTL: env %s=%s", line + 4, eq + 1); } continue; }
                  if (!strncmp(line, "texdump ", 8)) { void dm_gfx_texdump_next(const char *path); dm_gfx_texdump_next(line + 8); LOG("DM_CTL: colour targets of the next frame → %s (as DM_NVN_TEXDUMP)", line + 8); continue; }
                  if (!strncmp(line, "passdump ", 9)) { void dm_gfx_passdump_next(long n); dm_gfx_passdump_next(atol(line + 9)); LOG("DM_CTL: passes of the next %ld frames (as DM_NVN_PASSDUMP)", atol(line + 9)); continue; }
@@ -3733,7 +3736,7 @@ index 768a357..c10aa9f 100644
                  if (!strncmp(line, "drag ", 5)) {   // one finger, a step every 8 ms
                      float x0, y0, x1, y1, s = 0.3f; if (sscanf(line + 5, "%f %f %f %f %f", &x0, &y0, &x1, &y1, &s) < 4) { LOG("[RED] DM_CTL drag wants x0 y0 x1 y1 [seconds]"); continue; }
                      int n = (int)(s / 0.008f); if (n < 2) n = 2;
-@@ -427,6 +576,7 @@ static void fill(NpadState *s, uint32_t id, uint32_t style) {
+@@ -427,6 +579,7 @@ static void fill(NpadState *s, uint32_t id, uint32_t style) {
          if (atomic_load_explicit(&g_rec_on, memory_order_relaxed)) rec_read((b & 0xffffull) | ((atomic_load(&g_btn) | atomic_load(&g_pad_btn[0])) & DM_BTN_SHAKE), a);
          b |= atomic_load(&g_sc_btn) | atomic_exchange(&g_sc_latch, 0);
          uint64_t c = atomic_load(&g_sc_axes); for (int i = 0; i < 4; i++) a[i] = pick(a[i], ax(c, i));

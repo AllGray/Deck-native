@@ -23,10 +23,9 @@ Needs: a Mac with Apple silicon, Xcode (27.x) with its command line tools (an iP
 platform), Python 3.12 or newer with capstone (5.x), lz4 and fontTools, the .NET 10 runtime (the shader
 translator), xcodegen for the iPhone build. `nxs2.py doctor` lists what is missing and how to get it.
 """
-import argparse, concurrent.futures as cf, hashlib, json, os, pathlib, platform, re, shutil, subprocess, sys, time
+import argparse, concurrent.futures as cf, hashlib, json, os, pathlib, platform, re, shutil, struct, subprocess, sys, time
 
 TITLE = '0400A3A01EE4C000'
-VERSION = 327680
 NAME = 'Pokemon Pokopia'
 UPSTREAM = 'https://github.com/seedds/nxnative'
 UPSTREAM_COMMIT = 'c1df4dd'   # the nxnative commit host/nxnative-switch2.patch is made against
@@ -159,10 +158,15 @@ class Build:
         self.cache = self.shader / 'cache'; self.ios = self.shader / 'ios'
         self.outputs = self.out / 'out'; self.rundir = self.out / 'run'; self.phone = self.out / 'phone'
         self.icon = self.out / 'icon.png'   # the apps' icon, made by nxs2.py icon from your own game; none = the blank default
+        vf = self.out / 'version.txt'   # the game version the apps carry, from the dump's build line (build writes it, refresh reads it)
+        self.version = vf.read_text().strip() if vf.is_file() else '1.0.5'
         self.game = read_game_tsv(PROFILE_SRC / 'game.tsv')
         self.modules = self.game['modules'][0].split()
-        self.build_ids = dict(kv.split('=') for kv in self.game['build'][0].split('\t')[2:] if '=' in kv)
         for d in (self.logs, self.stamps): d.mkdir(parents=True, exist_ok=True)
+
+    def set_version(self, disp):
+        self.version = disp if disp and disp != '?' else '1.0.5'   # v327680's line has no display version: the apps have called it 1.0.5 since the first builds
+        self.out.mkdir(parents=True, exist_ok=True); (self.out / 'version.txt').write_text(self.version + '\n')
 
     # ---- stamps: a stage is skipped when its inputs are as at the last run
     def fresh(self, name, key):
@@ -408,27 +412,45 @@ def find_dump(args):
     if args.exefs and args.romfs: cands = [(pathlib.Path(args.exefs), pathlib.Path(args.romfs))]
     else:
         d = pathlib.Path(args.dump).expanduser().resolve()
-        roots = [d / 'updates' / str(VERSION), d]
+        roots = [d]
         if (d / 'updates').is_dir(): roots += sorted((p for p in (d / 'updates').iterdir() if p.is_dir()), reverse=True)
         if (d / 'base').is_dir(): roots.append(d / 'base')
         cands = []
         for r in roots:
             for ex, ro in (('exefs', 'romfs'), ('ExeFS', 'RomFS'), ('exefs', 'RomFS'), ('ExeFS', 'romfs')):
                 if (r / ex / 'main').is_file() and (r / ro).is_dir() and (r / ex, r / ro) not in cands: cands.append((r / ex, r / ro))
-    if not cands: raise Fail(f'no dump under {args.dump}: expected <folder>/updates/{VERSION}/exefs/main and .../romfs/, or exefs/ and romfs/ in the folder itself')
-    g = read_game_tsv(PROFILE_SRC / 'game.tsv')
-    want = dict(kv.split('=') for kv in g['build'][0].split('\t')[2:] if '=' in kv)
+    if not cands: raise Fail(f'no dump under {args.dump}: expected <folder>/updates/<version>/exefs/main and .../romfs/, or exefs/ and romfs/ in the folder itself')
     seen = []
     for ex, ro in cands:
         bid = build_id(ex / 'main'); seen.append(f'{ex}: main build {bid}')
-        if bid == want['main']:
+        for ver, disp, want in builds():
+            if bid != want['main']: continue
             for m, b in want.items():
-                if (ex / m).is_file() and build_id(ex / m) != b: raise Fail(f'{ex / m} has build {build_id(ex / m)}, the recipe expects {b}')
                 if not (ex / m).is_file(): raise Fail(f'{ex / m} is missing from the dump')
+                if build_id(ex / m) != b: raise Fail(f'{ex / m} has build {build_id(ex / m)}, the recipe for {ver} expects {b}')
+                short = nso_short(ex / m)
+                if short: raise Fail(f'{ex / m} is {short} bytes shorter than its own header says: it was copied in text mode, which drops a byte from every '
+                                     'CR LF pair in files without an extension. Copy the exefs folder again in binary mode (FileZilla: Transfer > Transfer type > Binary)')
             if not any(ro.rglob('*')): raise Fail(f'{ro} is empty')
-            return ex, ro
-    raise Fail(f'this recipe is for {NAME} v{VERSION} (main build {want["main"]}); the dump holds:\n  ' + '\n  '.join(seen) +
-               '\n(a base-game folder is not enough: the game\'s update is needed)')
+            return ex, ro, f'{ver} ({disp})' if disp != '?' else ver, disp
+    raise Fail(f'this recipe is for {NAME} ' + ', '.join(f'{v} (main build {w["main"]})' for v, _, w in builds()) + '; the dump holds:\n  ' +
+               '\n  '.join(seen) + '\n(a base-game folder is not enough: the game\'s update is needed)')
+
+
+def nso_short(p):
+    """How many bytes an NSO lacks against the segments its header lists (0 = complete)."""
+    h = p.read_bytes()[:0x70]; flags = struct.unpack_from('<I', h, 0xC)[0]
+    end = max(struct.unpack_from('<I', h, 0x10 + 0x10 * i)[0] + struct.unpack_from('<I', h, 0x60 + 4 * i if flags & (1 << i) else 0x18 + 0x10 * i)[0] for i in range(3))
+    return max(0, end - p.stat().st_size)
+
+
+def builds():
+    """The game versions the profile knows: (version, display version, {module: build ID}) per build line."""
+    out = []
+    for line in read_game_tsv(PROFILE_SRC / 'game.tsv')['build']:
+        ver, disp, *mods = line.split('\t')
+        out.append((ver, disp, dict(m.split('=', 1) for m in mods if '=' in m)))
+    return out
 
 
 # ---------------------------------------------------------------- stages
@@ -448,7 +470,8 @@ def st_extract(b, exefs, romfs):
     for f in sorted(exefs.iterdir()):
         if f.is_file() and (not (b.exefs / f.name).is_file() or (b.exefs / f.name).stat().st_size != f.stat().st_size): shutil.copy2(f, b.exefs / f.name)
     nacp = b.extract / 'control.nacp'
-    if not nacp.is_file(): nacp.write_bytes(make_nacp(NAME, int(TITLE, 16), '1.0.5'))
+    data = make_nacp(NAME, int(TITLE, 16), b.version)
+    if not nacp.is_file() or nacp.read_bytes() != data: nacp.write_bytes(data)
     say(f'RomFS image from {romfs} ({sum(1 for _ in romfs.rglob("*") if _.is_file())} files)')
     run([PY, NX / 'dm/tools/romfs_image.py', '--reuse', romfs, b.romfs_img], b.logs / 'romfs_image.log', env=b.env())
     if not b.romfs_img.is_file(): raise Fail('no RomFS image was written')
@@ -596,7 +619,7 @@ def st_mac_app(b):
         env=b.env(GFXAPI='nvn', SETTINGS_PLATFORM='mac', DM_LANG='en-US'))
     cmd = [PY, NX / 'dm/mac/pack_app.py', app, '--host', b.host, '--patched', b.patched, '--romfs', b.romfs_img, '--msl', b.lib(), '--tables', b.profile,
            '--font', b.font, '--title-id', TITLE, '--name', NAME, '--bundle-id', f'org.nxnative.{TITLE.lower()}', '--lang', 'en-US', '--sign', '-',
-           '--version', '1.0.5', '--category', b.game['app_category'][0], '--marker', b.game['romfs_marker'][0], '--env-file', envf, '--settings', settings]
+           '--version', b.version, '--category', b.game['app_category'][0], '--marker', b.game['romfs_marker'][0], '--env-file', envf, '--settings', settings]
     if b.icon.is_file(): cmd += ['--icon', b.icon]
     say('packing the Mac app')
     run(cmd, b.logs / 'pack_app.log', env=b.env(), show=r'^step:|^app:')
@@ -739,12 +762,13 @@ def build(args):
     bad = doctor(need_ios=need_ios, quiet=True)
     if bad: doctor(need_ios=need_ios); raise Fail('install the missing tools above (nxs2.py doctor), then build again')
     if not (NX / 'dm/host/Makefile').is_file() or not AMPERE.is_file() or (WIN and not (NX / 'win/build_app.py').is_file()): raise Fail(f'run nxs2.py setup first (nxnative at {NX}, ampere-lower at {AMPERE})')
-    exefs, romfs = find_dump(args)
+    exefs, romfs, ver, disp = find_dump(args)
     if args.out: out = pathlib.Path(args.out).expanduser()
     elif args.dump: d = pathlib.Path(args.dump).expanduser().resolve(); out = d.parent / f'{d.name}_native'   # beside the dump, never inside it
     else: raise Fail('--exefs/--romfs need --out <build folder>')
     b = Build(out); jobs = JOBS
-    say(f'{NAME} v{VERSION}: dump {exefs.parent}, build folder {b.out}')
+    b.set_version(disp)
+    say(f'{NAME} {ver}: dump {exefs.parent}, build folder {b.out}')
     say(f'load: {jobs} worker(s) of {os.cpu_count()} CPU threads, low priority' + ('' if args.full_speed or args.jobs else ' (gentle default; --full-speed uses them all)'))
     st_profile(b)
     st_extract(b, exefs, romfs)

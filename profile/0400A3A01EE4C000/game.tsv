@@ -12,8 +12,9 @@ app_category	public.app-category.games
 
 # ---- Versions ----
 build	v327680	?	main=816c5358e8178d802fcec4a7ce5a741a	subsdk0=9646a69cb1024ba919fddaa4265e6bc5	sdk=cc7da00d672399efe7958790d17fae39
+build	v655360	2.0.1	main=76a489f3bd3642fa5e18bd83d32c98ba	subsdk0=9646a69cb1024ba919fddaa4265e6bc5	sdk=cc7da00d672399efe7958790d17fae39
 package	v327680
-shader_versions	v327680
+shader_versions	v327680 v655360
 
 # ---- Files ----
 # every module main imports from
@@ -49,5 +50,6 @@ pso_mtl4	on
 look_rate	110
 look_dead	0.52
 # direct look (hle_hid.c look_cam): main build 816c5358..., main+0x34513d0 holds player 1's camera; pitch +0xb0 / yaw +0xb4, pitch limits +0xe4 / +0xe8,
-# stick lock bytes +0x121 / +0x122 (bit 6 of +0x122 ignored). Found from memory diffs around known stick turns, confirmed on 6 fresh runs
-look_cam	816c5358e8178d80 34513d0 b0 b4 e4 e8 121/bfff
+# stick lock bytes +0x121 / +0x122 (bit 6 of +0x122 ignored). Found from memory diffs around known stick turns, confirmed on 6 fresh runs.
+# 2.0.1 (main 76a489f3...): the same object, its slot at main+0x3561948 (found by its fingerprint: turn rates +0xdc/+0xe0, pitch limits +0xe4/+0xe8)
+look_cam	816c5358e8178d80 34513d0 b0 b4 e4 e8 121/bfff;76a489f3bd3642fa 3561948 b0 b4 e4 e8 121/bfff

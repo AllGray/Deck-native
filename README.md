@@ -62,12 +62,16 @@ Mac compiling 3,800 shaders. After that, rebuilds take a couple of minutes.
 - The **.NET 10 runtime** (the shader translator is .NET): `brew install --cask dotnet-sdk`.
 - **Your dump.** The game's files as your dumping tool wrote them, with the update:
   ```
-  <your folder>/updates/327680/exefs/   main  main.npdm  rtld  sdk  subsdk0
-  <your folder>/updates/327680/romfs/   LD_C0_R.BIN  LI_C0_R.IDX  motor_asset_re/  movie_asset/
+  <your folder>/updates/<version>/exefs/   main  main.npdm  rtld  sdk  subsdk0
+  <your folder>/updates/<version>/romfs/   LD_C0_R.BIN  LI_C0_R.IDX  motor_asset_re/  movie_asset/
   ```
-  A folder that holds `exefs/` and `romfs/` directly works too. The base game alone is not enough: the tool is made for
-  update **v327680** of Pokémon Pokopia (title `0400A3A01EE4C000`) and checks the build IDs. Another version will not
-  build, because the patch recipe and the shader tables are for this one.
+  A folder that holds `exefs/` and `romfs/` directly works too. Two updates of Pokémon Pokopia (title
+  `0400A3A01EE4C000`) are supported, and the tool tells which one you have from the build IDs: **v327680** and
+  **2.0.1 (v655360)**. Both get everything, including the mouse and drag look. The base game alone is not enough, and
+  another version will not build until it is added, because the patch recipe and the camera address are per version.
+- **Copy the dump in binary mode.** If you move it off the console with FTP, set the transfer type to **Binary**
+  (FileZilla: Transfer → Transfer type → Binary). The default "auto" mode treats files without an extension as text and
+  quietly drops bytes from `main`, `sdk` and `subsdk0`; I lost an evening to that. The tool checks for it and tells you.
 - For the **iPhone**: see the next section.
 - **No Mac?** A Windows PC builds the iPhone app alone: [docs/WINDOWS.md](docs/WINDOWS.md). Not working yet: the app
   runs but draws almost nothing (see "No Mac?" below).
@@ -122,7 +126,7 @@ another place), and goes through these stages. If it stops or you stop it, run i
 
 | Stage | What happens | Time on my M4 |
 |---|---|---|
-| extract | your ExeFS copied, the 22 RomFS files packed into one 6.1 GB image | seconds |
+| extract | your ExeFS copied, the RomFS files packed into one image (6 to 7 GB) | seconds |
 | rewrite | the game's three code modules rewritten so Apple's kernel can run them (nxnative's `patch_nso.py`) | 20 s |
 | host | the Mac host compiled with this game's profile | 15 s |
 | corpus, lower, package | 4,012 shader programs found in the game files, lowered, packaged with their tables | 25 s |
@@ -177,7 +181,9 @@ But Pokopia also **builds some shaders itself while it runs**. They are not in t
 them on the fly, apparently as it needs them. I know of **140** of these so far, from the opening, the character creator
 and the first area. A fresh build cannot contain them, because there is nothing to take them from until the game has
 run. When the game asks for one that your build does not have, that draw is skipped: the game keeps running, but that
-one effect or object is not drawn. Nothing crashes.
+one effect or object is not drawn. Nothing crashes. Be warned though: the title screen itself uses about 20 of them, so
+on the very first launch it is **black apart from the version number and "Settings"**. The music plays and A still
+works. That is this, not a broken build, and it is gone after the first refresh.
 
 What the build does about it: the apps **record** every such shader the moment the game makes it (they have
 `DM_NVN_SHDUMP` on by default). Then you run
