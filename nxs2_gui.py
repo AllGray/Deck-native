@@ -297,7 +297,7 @@ class App(tk.Tk):
 
     def win_launcher(self):
         b = self.build_dir(); out = b / 'out' if b else None
-        hits = sorted(p for p in out.glob('Play Pokopia *.cmd') if ' - ' not in p.name) if out and out.is_dir() else []   # not the Link Play ones
+        hits = sorted(out.glob('Play Pokopia *.cmd')) if out and out.is_dir() else []
         return hits[-1] if hits else None
 
     def do_play(self):   # the launcher in its own console window: this window stays free

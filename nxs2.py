@@ -1003,19 +1003,12 @@ def st_win_play(b, t):
     cmd.write_text(f'''@echo off
 rem Pokemon Pokopia {b.version} on Windows, built from your own dump by pokopia-native {TOOL_VERSION} (nxs2.py build --windows). Double-click to play.
 rem The save is in {cfg["save"]} (windows\\play.json names it; nxs2.py import-save brings one from Eden, the phone or a Mac).
-rem play.ps1's switches can follow: -Fullscreen, -Window 1600x900, -Silent, -PadCheck; -Save and -Work with other folders for a second player
-rem on this PC; -LinkPlay, -Join, -Internet and -Room for Link Play with other devices (docs/WINDOWS.md, and the Link Play launchers beside this one).
+rem A window asks how to play first: alone, Link Play on this network, or hosting / visiting over the internet ("Don't ask again" in it;
+rem Shift held while starting shows it again). play.ps1's switches can follow: -Fullscreen, -Window 1600x900, -Silent, -PadCheck; -Save and
+rem -Work with other folders for a second player on this PC; -LinkPlay, -Join, -Internet, -Room and -Relay instead of the window (docs/WINDOWS.md).
 {play} %*
 ''' + end, encoding='ascii')
-    for name, switches, what in (('Link Play', '-LinkPlay', 'Link Play with players on this network: host, or visit a town found here'),
-                                 ('Host online', '-Internet', 'Link Play over the internet, this PC hosting: it shows the room code; '
-                                  'your router forwards port 47600 (TCP and UDP) to this PC'),
-                                 ('Visit online', '-Internet -Join ask -Room ask', "Link Play over the internet, visiting: it asks for the host's address and room code")):
-        (b.outputs / f'Play Pokopia {b.version} - {name}.cmd').write_text(f'''@echo off
-rem Pokemon Pokopia {b.version} on Windows, with {what} (docs/WINDOWS.md, Link Play).
-{play} {switches} %*
-''' + end, encoding='ascii')
-    say(f'Windows game: {cmd}  (save: {win_save_dir(b)}); for Link Play: the "- Link Play", "- Host online" and "- Visit online" launchers beside it')
+    say(f'Windows game: {cmd}  (save: {win_save_dir(b)})')
     return cmd
 
 

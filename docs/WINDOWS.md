@@ -93,18 +93,23 @@ folder: Windows saves load on the Mac and the iPhone.
 Link Play → **Local connection** in the game works with the Mac and iPhone apps and other Windows PCs (the README's
 [Playing together](../README.md#playing-together-link-play) has the whole picture). Every device needs **the same
 pokopia-native version**, and **each player needs their own save** (the game refuses a second copy of the host's save, so
-a save copied from one device to another cannot join itself). The build makes three more launchers beside the usual one
-in `<build folder>\out`:
+a save copied from one device to another cannot join itself).
 
-| Launcher | What it does |
-|---|---|
-| `Play Pokopia <version> - Link Play.cmd` | Hosts, or finds hosts, on your home network |
-| `Play Pokopia <version> - Host online.cmd` | Hosts over the internet: the window shows this session's **room code**. Your router forwards port **47600, TCP and UDP**, to this PC |
-| `Play Pokopia <version> - Visit online.cmd` | Visits a host over the internet: asks for its address and room code |
+**Before the game starts, a small window asks how you want to play:**
 
-The same as switches after the usual launcher's name: `-LinkPlay`; `-Join <address>[:<port>]` visits one host by address;
-`-Internet` with `-Room <code>` (a host without one gets a new code); `-Relay <address>[:<port>]` goes through a relay you
-trust. `ask` for `-Join` or `-Room` asks in the window.
+- **Play alone**;
+- **Link Play with players on this network** (the same Wi-Fi): host, or find the other players' towns;
+- **Host over the internet**: your router forwards port **47600, TCP and UDP**, to this PC. A second window shows your
+  **room code** with a **Copy** button; give it to the visitors with this PC's internet address. "Keep my room code from
+  last time" saves them typing a new one;
+- **Visit a host over the internet**: type the host's address and room code.
+
+It remembers your choice. **Don't ask again** starts the same way every time; hold **Shift** while starting the game to
+see the window again. The settings live in `%APPDATA%\Pokopia Native\linkplay.json`.
+
+From a terminal, switches after the launcher's name skip the window: `-LinkPlay`; `-Join <address>[:<port>]` visits one
+host by address; `-Internet` with `-Room <code>` (a host without one gets a new code); `-Relay <address>[:<port>]` goes
+through a relay you trust.
 
 - **The first time**, Windows Firewall asks whether the game may use networks: allow **Private networks**. Your network
   must be Private (Settings → Network & internet → your connection → Network profile type: Private): on a Public network

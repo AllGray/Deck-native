@@ -47,12 +47,13 @@ PC (our own recompiler, through LLVM) and runs on our own runtime with a Vulkan 
 The game's **Link Play → Local connection** now works between our builds: Windows, Mac and iPhone in any mix, up to four
 players, without Nintendo's servers. ("Online connection" in the same menu is Nintendo's service and does nothing here.)
 
-- **On the same Wi-Fi:** turn on **Link Play on this network** in the iPhone or Mac launcher; on Windows start
-  `Play Pokopia <version> - Link Play.cmd`. Hosts find each other by themselves.
+- **On the same Wi-Fi:** turn on **Link Play on this network** in the iPhone or Mac launcher; on Windows a window before
+  the game starts asks how you want to play. Hosts find each other by themselves.
 - **Over the internet** (opt-in): the host forwards port **47600 (TCP and UDP)** on its router and shares its address and
   a **room code**; visitors type both in (iPhone / Mac: **Join address**, **Internet play**, **Room code** in the launcher;
-  Windows: `Play Pokopia <version> - Visit online.cmd`, while `- Host online.cmd` shows the host's code). Every connection
-  proves the room code and every message is protected against changes; the traffic is not encrypted.
+  Windows: "Visit a host over the internet" in that window, while a Windows host gets its code in a window with a
+  **Copy** button). Every connection proves the room code and every message is protected against changes; the traffic is
+  not encrypted.
 - **Tested:** a Windows PC hosting with an iPhone visiting over home Wi-Fi, and over the internet with the phone on mobile
   data; Windows and Mac together; four players; players leaving and coming back.
 - Windows asks once to allow the game on networks (allow **Private**), and the network must be Private; the iPhone and

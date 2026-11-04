@@ -269,8 +269,8 @@ host has reached the point in the game where Link Play opens.
 
 - **iPhone and Mac:** in the launcher (the settings shown before the game starts) turn on **Link Play on this network**
   and allow local network access when asked. With the switch off, the game's Link Play does nothing.
-- **Windows:** start the game with **`Play Pokopia <version> - Link Play.cmd`** (beside the usual launcher in the build
-  folder's `out`). When Windows Firewall asks, allow **Private networks**, and make sure your network is Private:
+- **Windows:** start the game as usual; the window that opens first asks how you want to play: pick **Link Play with
+  players on this network**. When Windows Firewall asks, allow **Private networks**, and make sure your network is Private:
   Settings → Network & internet → your connection → Network profile type: **Private**. On a Public network Windows keeps
   the other devices out.
 - In the game: **Link Play → Local connection**. One player hosts; the others look for towns, and the host's appears in a
@@ -281,7 +281,8 @@ host has reached the point in the game where Link Play opens.
 1. **The host's router** must let visitors in: forward port **47600, TCP and UDP**, to the computer that hosts (the
    router's "Port forwarding", "NAT" or "NAT/Gaming" page; check it points at the right device).
 2. **The host** needs a room code, a 16-character password for the session:
-   - **Windows:** start **`Play Pokopia <version> - Host online.cmd`**. Its window shows the room code.
+   - **Windows:** pick **Host over the internet** in the window before the game starts. The next window shows your room
+     code with a **Copy** button.
    - **Mac:** in the launcher turn on Link Play on this network and **Internet play**, leave Room code empty and start the
      game once: the log (`~/Library/Logs/nxnative`) says "this session's room code is …". Type it into **Room code** to
      keep it.
@@ -289,7 +290,8 @@ host has reached the point in the game where Link Play opens.
 3. **The visitors:**
    - **iPhone and Mac:** turn on Link Play on this network, type the host's internet address into **Join address**, turn on
      **Internet play** and type the room code.
-   - **Windows:** start **`Play Pokopia <version> - Visit online.cmd`**: it asks for the address and the code.
+   - **Windows:** pick **Visit a host over the internet** in the window before the game starts, and type the address and
+     the code.
 4. In the game: **Link Play → Local connection**, then look for towns.
 
 Good to know:
