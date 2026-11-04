@@ -69,7 +69,9 @@ firewall / local-network prompts, the limits (no Nintendo servers, no internet p
 ## Upgrading
 
 - **Mac / iPhone:** unzip the new download, run Setup once in it, build again with your dump: only what changed is
-  redone. Your saves are untouched.
+  redone, and your recorded shaders stay. Install the new iPhone app **over** the old one (never delete the app first:
+  that deletes its save); the game files on the phone only need copying again if you moved to another update of the
+  game. Mac saves live outside the app. Steps: the README's "Updating from an older version".
 - **Windows (iPhone builder from 1.0.x):** the same. The Windows game is new: tick "Windows: play on this PC".
 
 ## Release day (remove this section from the published notes)

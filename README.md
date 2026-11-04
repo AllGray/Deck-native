@@ -36,6 +36,7 @@ Playing together (Link Play):
 - **Each player needs their own save**: the game refuses two copies of the same save, so a save copied to a second device cannot play with itself.
 
 Older versions and the release notes: [all releases](https://github.com/xFractals/pokopia-native/releases).
+Already have an older version set up? [Updating from an older version](#updating-from-an-older-version) keeps your save.
 
 Before anything else:
 
@@ -123,6 +124,23 @@ is missing.
   are held down (palm rejection), so the game never sees the movement. An external mouse or a controller works.
 - **Your dump is a single file** (.nsp, .xci or something else). The builder takes the game's files as folders, an
   `exefs/` and a `romfs/` (see "Your dump" above); have your dumping tool extract them.
+
+## Updating from an older version
+
+Your build folder, the shaders you have recorded and your save all carry over.
+
+1. Download the new version ([Which download do I need?](#which-download-do-i-need)) and unzip it into a new folder.
+2. Press **Setup** once in the new folder (or `python3.12 nxs2.py setup`). Every new download needs it once.
+3. Build again from the same dump. The build reuses your build folder (`<dump folder>_native`) and only redoes what
+   changed, so it is much quicker than the first time. Shaders you already recorded and refreshed stay.
+4. **iPhone:** sign the new IPA and install it **over** the old app. Installing over it keeps the app's Documents, which
+   hold your save and the game files. **Do not delete the app first**: deleting an iPhone app deletes its save with it.
+5. **Mac:** replace the app. Saves live in `~/Library/Application Support/nxnative/0400A3A01EE4C000/`, outside the app.
+
+The game files on the phone only need copying again if you moved to another update of the game (v327680 to 2.0.1,
+say): run `tools/phone_setup.py --romfs "<build folder>/extract/RomFS.img"` once more. Same game update, same dump:
+nothing to copy. Backing your save up first never hurts (Finder's file sharing for the phone, your Library folder on
+the Mac). Link Play needs the same pokopia-native version on every device, so update them all.
 
 ## The Apple developer thing (iPhone only, read this)
 
