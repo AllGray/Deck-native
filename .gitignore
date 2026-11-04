@@ -10,3 +10,4 @@ windows/bin/
 windows/build/
 windows/_local/
 toolchains/
+builder-log.txt

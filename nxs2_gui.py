@@ -17,6 +17,22 @@ NAME = 'Pokemon Pokopia'
 MAC = sys.platform == 'darwin'
 WIN = sys.platform == 'win32'
 SETTINGS = pathlib.Path.home() / ('.nxs2_gui.json')
+LOG = HERE / 'builder-log.txt'   # Windows: the launcher's start-up checks and the window's own errors, for a report
+
+
+def log_line(text):
+    if not WIN: return
+    try:
+        with open(LOG, 'a', encoding='utf-8') as f: f.write(text.rstrip('\n') + '\n')
+    except OSError: pass
+
+
+def report_crash(where):   # the window has no console on Windows: an error goes to the log and on screen
+    import traceback
+    t = traceback.format_exc()
+    log_line(f'{where}:\n{t}')
+    try: messagebox.showerror('Pokopia Native Builder', f'{where}:\n\n{t[-1500:]}' + (f'\nThis is also in {LOG}.' if WIN else ''))
+    except Exception: pass
 
 
 def tool_version():
@@ -281,7 +297,7 @@ class App(tk.Tk):
 
     def win_launcher(self):
         b = self.build_dir(); out = b / 'out' if b else None
-        hits = sorted(out.glob('Play Pokopia *.cmd')) if out and out.is_dir() else []
+        hits = sorted(p for p in out.glob('Play Pokopia *.cmd') if ' - ' not in p.name) if out and out.is_dir() else []   # not the Link Play ones
         return hits[-1] if hits else None
 
     def do_play(self):   # the launcher in its own console window: this window stays free
@@ -313,9 +329,15 @@ def _self_shot(app, path):   # NXS2_GUI_SHOT=<png>: save a picture of the window
 
 
 if __name__ == '__main__':
-    if not NXS2.is_file(): sys.exit(f'nxs2.py not found beside {__file__}')
-    app = App()
-    if os.environ.get('NXS2_GUI_SHOT'):
-        app.attributes('-topmost', True); app.lift(); app.focus_force()
-        app.after(2500, lambda: _self_shot(app, os.environ['NXS2_GUI_SHOT']))
-    app.mainloop()
+    try:
+        log_line(f'window: Python {sys.version.split()[0]}, Tk {tk.TkVersion}, pokopia-native {tool_version()}')
+        if not NXS2.is_file(): raise FileNotFoundError(f'nxs2.py not found beside {__file__}: unzip the whole download and start the builder from that folder')
+        app = App()
+        app.report_callback_exception = lambda *e: report_crash('The window hit an error')
+        if os.environ.get('NXS2_GUI_SHOT'):
+            app.attributes('-topmost', True); app.lift(); app.focus_force()
+            app.after(2500, lambda: _self_shot(app, os.environ['NXS2_GUI_SHOT']))
+        log_line('window: open')
+        app.mainloop()
+    except Exception:
+        report_crash('The window could not start'); sys.exit(1)

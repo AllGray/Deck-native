@@ -70,7 +70,7 @@ index d16b9cb..b14a328 100644
          out.append(s)
      return {'schema': SCHEMA, 'game': g.id, 'settings': out}
 diff --git a/dm/games/settings.tsv b/dm/games/settings.tsv
-index 00e1ddd..78bf43b 100644
+index 00e1ddd..a8d1677 100644
 --- a/dm/games/settings.tsv
 +++ b/dm/games/settings.tsv
 @@ -5,6 +5,7 @@
@@ -81,11 +81,12 @@ index 00e1ddd..78bf43b 100644
  #   default   a value (a toggle's: 1 on, 0 off); DM_GAME_<NAME>: the host's own default from the game profile (game_profile.h, game.py); build:<VAR>: the IPA build's setting (build_ipa.sh)
  #             <ios>|<mac> selects the platform's default before resolving a profile macro or build variable
  #   shown     always; DM_GAME_<NAME>!=<value> or ==<value>; fixups:<KEY>: main's rewriter table has that key (a stub in the game's build, patch_nso.py); languages>1; gfxapi:<API>: the packer's GFXAPI;
-@@ -22,7 +23,13 @@ DM_PRESENT_UPSCALE	choice	off=Standard,metalfx=MetalFX	off	always	Game	Upscaling
+@@ -22,7 +23,14 @@ DM_PRESENT_UPSCALE	choice	off=Standard,metalfx=MetalFX	off	always	Game	Upscaling
  DM_LANG	choice	languages	build:DM_LANG	languages>1	Game	Game language		level=basic
  DM_FULLSCREEN	choice	0=Window,1=Fullscreen	0	platform:mac	Game	Display mode		level=basic
  DM_SHOW_FPS	toggle	-	build:DM_SHOW_FPS	platform:ios	Game	Frame-rate counter
 +DM_COOP	toggle	auto/off	0	always	Game	Link Play on this network	Visit and host towns with players on the same Wi-Fi. Asks once for local network access.
++DM_COOP_JOIN	text	21		always	Game	Join address	Visit one host by its address, IPv4[:port] (on another network, turn on Internet play too). Empty: find hosts on this Wi-Fi, or host.	needs=DM_COOP=auto
 +DM_COOP_INTERNET	toggle	-	0	always	Game	Internet play	Play with someone on another network: both enter the same room code. Not encrypted.	needs=DM_COOP=auto
 +DM_COOP_ROOM	text	19		always	Game	Room code	The host's code, XXXX-XXXX-XXXX-XXXX. A host without one gets a new code each time.	needs=DM_COOP_INTERNET=1
 +DM_COOP_RELAY	text	21		always	Game	Relay address	A relay you trust, as IPv4[:port]. Empty: visitors connect to the host's address.	needs=DM_COOP_INTERNET=1
@@ -4073,10 +4074,10 @@ index 0000000..2c24ad0
 +#endif
 diff --git a/dm/host/coop_int.h b/dm/host/coop_int.h
 new file mode 100644
-index 0000000..5fb0fda
+index 0000000..05ef756
 --- /dev/null
 +++ b/dm/host/coop_int.h
-@@ -0,0 +1,331 @@
+@@ -0,0 +1,344 @@
 +// coop internals shared by coop_ldn.c, coop_vnet.c, coop_mpnet.c, coop_disc.c, coop_plat.c and coop_auth.c (MIT, our own code). Not for the HLE: it
 +// includes the platform's socket headers.
 +#pragma once
@@ -4130,7 +4131,11 @@ index 0000000..5fb0fda
 +void cplat_close(csock s);
 +int cplat_poll(cpollfd *f, int n, int ms);                               // fills got; < 0 on error
 +int cplat_route_ip(uint32_t *ip);   // the IPv4 this machine sends from towards the default route (or the mDNS group): nothing is sent; 0 on success
-+int cplat_network_public(void);     // Windows: 1 when a connected network has the Public profile (its firewall blocks visitors), 0 none, -1 unknown; elsewhere 0
++typedef struct caddr { uint32_t ip, mask; int is_public; } caddr;
++// This machine's IPv4 addresses on interfaces that are up (loopback left out), with their subnet masks. is_public (only asked for with profiles, a
++// COM call): Windows, the interface's network has the Public profile (its firewall keeps visitors out there); elsewhere 0. The count (at most
++// max), -1 when the list cannot be read
++int cplat_local_addrs(caddr *out, int max, int profiles);
 +
 +// ---------- the node ----------
 +#define LDN_NETINFO 0x480
@@ -4216,6 +4221,7 @@ index 0000000..5fb0fda
 +
 +// A host a station knows: the configured one (JOIN) or one DNS-SD found (AUTO). Its link carries scans, the join and, once joined, the session
 +#define PEERS 8
++#define DISC_ADDRS 4              // a DNS-SD host's addresses kept (a PC on two networks, or a phone's Wi-Fi and its USB link)
 +enum { PEER_CFG = 1, PEER_DISC };
 +typedef struct peer {
 +    int used, src;
@@ -4230,6 +4236,7 @@ index 0000000..5fb0fda
 +    uint8_t scan_info[LDN_NETINFO];   // the host's NetworkInfo from its last SCAN_RESP, checked sane
 +    char name[64];                    // the DNS-SD instance (logs)
 +    int relay;                        // the relay (DM_COOP_RELAY): every dial asks it for the room's host
++    uint32_t alt[DISC_ADDRS]; int nalt, alti;   // DNS-SD: the host's addresses, the one on this machine's subnet first; a failed dial tries the next
 +    int said;                         // the last relay or room-code problem logged (a line when it changes)
 +} peer;
 +
@@ -4239,8 +4246,10 @@ index 0000000..5fb0fda
 +    int used;
 +    char name[64]; uint32_t ifindex;
 +    uint32_t ip; uint16_t port;
++    uint32_t addrs[DISC_ADDRS]; int naddrs;   // every LAN address to try, ip (the one on this machine's subnet, else the first) first
 +    int proto; char build[17]; uint64_t mods; int has_txt;   // from the TXT record (p=, b=, m=)
-+    uint32_t txt_ip;      // the TXT's a=: the host's LAN address as it routes (used when no A record answers)
++    uint32_t txt_ip;      // the TXT's a=: the host's best LAN address (used when no A record answers)
++    uint32_t txt_x[DISC_ADDRS - 1]; int txt_nx;   // the TXT's x=: its other LAN addresses, best first
 +    int64_t seen;         // Windows: last reported (stale entries expire); Apple: 0, gone on its remove event
 +} cdisc_entry;
 +typedef struct cdisc {
@@ -4369,7 +4378,12 @@ index 0000000..5fb0fda
 +csock cdisc_fd(coop_node *n);                 // Apple: the daemon connection for the I/O thread's poll; else CSOCK_BAD
 +void cdisc_process(coop_node *n);             // Apple: that socket is readable (lock held)
 +int cdisc_txt_parse(const uint8_t *txt, size_t len, cdisc_entry *e);   // a DNS-SD TXT record (length-prefixed key=value strings): 1 when p, b and m are valid
-+size_t cdisc_txt_make(uint8_t *out, size_t cap, int proto, const char *build, uint64_t mods, uint32_t ip);
++size_t cdisc_txt_make(uint8_t *out, size_t cap, int proto, const char *build, uint64_t mods, const uint32_t *ip, int nip);   // a= ip[0], x= the rest
++// A host's LAN addresses for its record, best first (at most max): those on networks visitors can reach before those on Public ones (Windows), private
++// before link-local, the route's own first among equals. Loopback and non-LAN addresses are left out
++int cdisc_host_addrs(const caddr *mine, int n, uint32_t route, uint32_t *out, int max);
++// A visitor's choice among a host's addresses (in the host's order): the index of the first on one of this machine's subnets, else 0
++int cdisc_pick(const uint32_t *cand, int n, const caddr *mine, int nm);
 +int cdisc_name_ok(const char *s, size_t max);  // an instance name from the network: printable, terminated, short enough
 +
 +// TCP frames: u32 length of (type + body), u8 type, body. UDP packets: u32 magic, u8 type, 3 reserved, u64 token, body
@@ -4728,14 +4742,15 @@ index 0000000..09bdd1c
 +}
 diff --git a/dm/host/hle_coop_disc.c b/dm/host/hle_coop_disc.c
 new file mode 100644
-index 0000000..db74ed9
+index 0000000..62401bf
 --- /dev/null
 +++ b/dm/host/hle_coop_disc.c
-@@ -0,0 +1,466 @@
+@@ -0,0 +1,531 @@
 +// coop disc (MIT, our own code): DNS-SD on the LAN (research/06 §5.5, docs/coop-step1c.md). A hosting node registers "Pokopia-<8 hex>" as
 +// _pokopia-ldn._udp with its control port and a TXT record: p = the coop protocol, b = main's build ID (16 hex digits, "-" unknown), m = the mods
-+// fingerprint, a = the host's LAN IPv4 as it routes. Nothing else is published: no player, town or computer names. A scanning node browses for the
-+// type and turns each instance into an address and port (the responder's A record when there is one, else the TXT's a=).
++// fingerprint, a = the host's best LAN IPv4, x = its other LAN IPv4s, comma-separated (a PC on two networks, such as Wi-Fi and a phone's USB link).
++// Nothing else is published: no player, town or computer names. A scanning node browses for the type and turns each instance into an address and
++// port: of the responder's A record and the TXT's addresses, the first on one of its own subnets (else the first), the others tried in turn.
 +// Backends: Apple dns_sd (macOS, iOS: one shared connection to mDNSResponder that the I/O thread polls; unicast and Bonjour need no multicast
 +// entitlement), Windows 10 1809+ DnsServiceRegister / DnsServiceBrowse (asynchronous, callbacks on system threads, loaded from dnsapi.dll at run
 +// time; its browse delivers PTR, SRV and TXT records but resolves no A record for a registration on the same machine, hence a=), nothing elsewhere.
@@ -4774,9 +4789,18 @@ index 0000000..db74ed9
 +    if (i != n) return 0;
 +    *ip = v; return 1;
 +}
++static int dotted_list(const uint8_t *s, size_t n, uint32_t *ip, int max) {   // "a.b.c.d,e.f.g.h": the count, -1 when malformed or too long
++    int k = 0;
++    for (size_t i = 0; i <= n;) {
++        size_t j = i; while (j < n && s[j] != ',') j++;
++        if (k == max || !dotted4(s + i, j - i, &ip[k])) return -1;
++        k++; i = j + 1;
++    }
++    return k;
++}
 +int cdisc_txt_parse(const uint8_t *t, size_t len, cdisc_entry *e) {
 +    int have = 0;
-+    e->proto = 0; e->build[0] = 0; e->mods = 0; e->txt_ip = 0; e->has_txt = 0;
++    e->proto = 0; e->build[0] = 0; e->mods = 0; e->txt_ip = 0; e->txt_nx = 0; e->has_txt = 0;
 +    if (!t || len > 1300) return 0;   // one mDNS packet's worth
 +    for (size_t i = 0; i < len;) {
 +        size_t l = t[i++];
@@ -4790,6 +4814,7 @@ index 0000000..db74ed9
 +        case 'b': if (vl == 1 && v[0] == '-') e->build[0] = 0; else if (!hex16(v, vl, NULL, e->build)) return 0; have |= 2; break;
 +        case 'm': if (!hex16(v, vl, &e->mods, NULL)) return 0; have |= 4; break;
 +        case 'a': if (!dotted4(v, vl, &e->txt_ip)) return 0; break;
++        case 'x': if ((e->txt_nx = dotted_list(v, vl, e->txt_x, DISC_ADDRS - 1)) < 0) return 0; break;
 +        default: break;   // keys of later protocols
 +        }
 +    }
@@ -4802,13 +4827,43 @@ index 0000000..db74ed9
 +    out[at] = (uint8_t)l; memcpy(out + at + 1, kv, l);
 +    return at + 1 + l;
 +}
-+size_t cdisc_txt_make(uint8_t *out, size_t cap, int proto, const char *build, uint64_t mods, uint32_t ip) {
-+    char kv[40]; size_t at = 0;
++static int addr_list(char *o, size_t cap, const uint32_t *ip, int n) {   // "a.b.c.d,e.f.g.h"; the length
++    size_t at = 0;
++    for (int i = 0; i < n && at < cap; i++)
++        at += (size_t)snprintf(o + at, cap - at, "%s%u.%u.%u.%u", i ? "," : "", ip[i] >> 24, ip[i] >> 16 & 0xFF, ip[i] >> 8 & 0xFF, ip[i] & 0xFF);
++    return (int)(at < cap ? at : cap - 1);
++}
++size_t cdisc_txt_make(uint8_t *out, size_t cap, int proto, const char *build, uint64_t mods, const uint32_t *ip, int nip) {
++    char kv[80]; size_t at = 0;
 +    snprintf(kv, sizeof kv, "p=%d", proto); at = txt_put(out, cap, at, kv);
 +    snprintf(kv, sizeof kv, "b=%s", build && build[0] ? build : "-"); at = txt_put(out, cap, at, kv);
 +    snprintf(kv, sizeof kv, "m=%016llx", (unsigned long long)mods); at = txt_put(out, cap, at, kv);
-+    if (ip) { snprintf(kv, sizeof kv, "a=%u.%u.%u.%u", ip >> 24, ip >> 16 & 0xFF, ip >> 8 & 0xFF, ip & 0xFF); at = txt_put(out, cap, at, kv); }
++    if (nip > DISC_ADDRS) nip = DISC_ADDRS;
++    if (nip > 0) { memcpy(kv, "a=", 2); addr_list(kv + 2, sizeof kv - 2, ip, 1); at = txt_put(out, cap, at, kv); }
++    if (nip > 1) { memcpy(kv, "x=", 2); addr_list(kv + 2, sizeof kv - 2, ip + 1, nip - 1); at = txt_put(out, cap, at, kv); }
 +    return at;
++}
++int cdisc_host_addrs(const caddr *mine, int n, uint32_t route, uint32_t *out, int max) {
++    int rank[64], idx[64], k = 0;
++    for (int i = 0; i < n && k < 64; i++) {
++        int cls = coop_addr4_class(mine[i].ip), dup = 0;
++        if (cls != COOP_ADDR_PRIVATE && cls != COOP_ADDR_LINKLOCAL) continue;
++        for (int j = 0; j < k; j++) dup |= mine[idx[j]].ip == mine[i].ip;
++        if (dup) continue;
++        rank[k] = (mine[i].is_public ? 4 : 0) + (cls == COOP_ADDR_LINKLOCAL ? 2 : 0) + (mine[i].ip != route);
++        idx[k++] = i;
++    }
++    for (int i = 1; i < k; i++)   // stable: equals keep the system's order
++        for (int j = i; j > 0 && rank[j] < rank[j - 1]; j--) { int t = rank[j]; rank[j] = rank[j - 1]; rank[j - 1] = t; t = idx[j]; idx[j] = idx[j - 1]; idx[j - 1] = t; }
++    int m = k < max ? k : max;
++    for (int i = 0; i < m; i++) out[i] = mine[idx[i]].ip;
++    return m;
++}
++int cdisc_pick(const uint32_t *cand, int n, const caddr *mine, int nm) {
++    for (int i = 0; i < n; i++)
++        for (int j = 0; j < nm; j++)
++            if (mine[j].mask && mine[j].ip != cand[i] && (mine[j].ip & mine[j].mask) == (cand[i] & mine[j].mask)) return i;
++    return 0;
 +}
 +int cdisc_name_ok(const char *s, size_t max) {
 +    size_t k = 0;
@@ -4818,12 +4873,24 @@ index 0000000..db74ed9
 +
 +// ---------- the entry table (dlk) ----------
 +static void ipstr(char *o, uint32_t ip) { snprintf(o, 16, "%u.%u.%u.%u", ip >> 24, ip >> 16 & 0xFF, ip >> 8 & 0xFF, ip & 0xFF); }
-+// A resolved instance. txt has the TXT's fields; ip is the responder's A record (0: none, use a=). Returns 1 when kept
++// A resolved instance. txt has the TXT's fields; ip is the responder's A record (0: none). The addresses to try: the A record, a= and x=, LAN ones
++// only, the first on one of this machine's subnets moved to the front. Returns 1 when kept
 +static int found(coop_node *n, const char *name, uint32_t ifi, uint32_t ip, uint16_t port, const cdisc_entry *txt, int timed) {
 +    cdisc *d = &n->disc;
 +    char a[16];
-+    if (!ip) ip = txt->txt_ip;
-+    if (!cdisc_name_ok(name, sizeof d->e[0].name) || !port || !txt->has_txt || !coop_addr_allowed(COOP_SCOPE_LAN, coop_addr4_class(ip))) {
++    uint32_t cand[DISC_ADDRS] = {0}, all[2 + DISC_ADDRS - 1] = {ip, txt->txt_ip}; int nc = 0;
++    memcpy(all + 2, txt->txt_x, sizeof txt->txt_x);
++    for (int i = 0; i < 2 + txt->txt_nx && nc < DISC_ADDRS; i++) {
++        int dup = 0;
++        for (int j = 0; j < nc; j++) dup |= cand[j] == all[i];
++        if (!dup && all[i] && coop_addr_allowed(COOP_SCOPE_LAN, coop_addr4_class(all[i]))) cand[nc++] = all[i];
++    }
++    if (nc > 1) {
++        caddr mine[16]; int nm = cplat_local_addrs(mine, 16, 0), k = cdisc_pick(cand, nc, mine, nm > 0 ? nm : 0);
++        uint32_t t = cand[k]; memmove(cand + 1, cand, (size_t)k * sizeof cand[0]); cand[0] = t;
++    }
++    ip = nc ? cand[0] : ip ? ip : txt->txt_ip;
++    if (!cdisc_name_ok(name, sizeof d->e[0].name) || !port || !txt->has_txt || !nc) {
 +        cplat_lock(&n->dlk); d->bad++; uint64_t k = d->bad; cplat_unlock(&n->dlk);
 +        ipstr(a, ip);
 +        if (k <= 4) coop_logf(n, "disc: an instance ignored (%s, %s:%u): not a LAN address, no port or no valid TXT record", cdisc_name_ok(name, 64) ? name : "a bad name", a, port);
@@ -4841,13 +4908,14 @@ index 0000000..db74ed9
 +        cdisc_entry t = *txt;
 +        snprintf(t.name, sizeof t.name, "%s", name);
 +        t.used = 1; t.ifindex = ifi; t.ip = ip; t.port = port; t.seen = timed ? now_ms() : 0;
++        memcpy(t.addrs, cand, sizeof cand); t.naddrs = nc;
 +        *e = t;
 +    }
 +    cplat_unlock(&n->dlk);
 +    ipstr(a, ip);
 +    if (!e) coop_logf(n, "disc: %s at %s:%u not kept: %d hosts known already", name, a, port, DISC_MAX);
-+    else if (fresh) coop_logf(n, "disc: found %s at %s:%u (coop protocol %d, build %s, mods %016llx)", name, a, port, txt->proto, txt->build[0] ? txt->build : "unknown",
-+                              (unsigned long long)txt->mods);
++    else if (fresh) coop_logf(n, "disc: found %s at %s:%u%s (coop protocol %d, build %s, mods %016llx)", name, a, port, nc > 1 ? " (and other addresses)" : "", txt->proto,
++                              txt->build[0] ? txt->build : "unknown", (unsigned long long)txt->mods);
 +    return e != NULL;
 +}
 +static void lost(coop_node *n, const char *name, uint32_t ifi) {
@@ -4861,6 +4929,17 @@ index 0000000..db74ed9
 +    if (k) coop_logf(n, "disc: %s is gone", name);
 +}
 +static void clear_entries(coop_node *n) { cplat_lock(&n->dlk); memset(n->disc.e, 0, sizeof n->disc.e); cplat_unlock(&n->dlk); }
++#if defined(__APPLE__) || defined(_WIN32)
++static int host_addrs(uint32_t *out, char *shown, size_t cap) {   // this host's LAN addresses for its record, best first, and as text for the log
++    caddr mine[16]; uint32_t route = 0; int k = 0;
++    if (cplat_route_ip(&route)) route = 0;
++    int nm = cplat_local_addrs(mine, 16, 1);
++    if (nm > 0) k = cdisc_host_addrs(mine, nm, route, out, DISC_ADDRS);
++    else if (route && coop_addr_allowed(COOP_SCOPE_LAN, coop_addr4_class(route)) && coop_addr4_class(route) != COOP_ADDR_LOOPBACK) out[k++] = route;
++    addr_list(shown, cap, out, k);
++    return k;
++}
++#endif
 +static void make_instance(char *out, size_t n) { uint32_t r; cplat_random(&r, sizeof r); snprintf(out, n, "Pokopia-%08x", r); }
 +
 +#if defined(__APPLE__)
@@ -4868,7 +4947,7 @@ index 0000000..db74ed9
 +#include <arpa/inet.h>
 +#include <dns_sd.h>
 +typedef struct aslot { coop_node *n; int used; DNSServiceRef res, gai; char name[64], type[64], dom[64]; uint32_t ifi; uint16_t port; cdisc_entry txt; int64_t t0, txt_at; } aslot;
-+typedef struct aimpl { DNSServiceRef conn, reg, browse; uint16_t reg_port; char inst[32]; int64_t retry_at; aslot s[DISC_MAX]; } aimpl;
++typedef struct aimpl { DNSServiceRef conn, reg, browse; uint16_t reg_port; char inst[32], addrs[80]; int64_t retry_at; aslot s[DISC_MAX]; } aimpl;
 +static aimpl *AI(coop_node *n) { return n->disc.impl; }
 +static const char *policy_hint(DNSServiceErrorType e) {
 +    return e == kDNSServiceErr_PolicyDenied ? ": local network access is off for this app (Settings, Privacy & Security, Local Network)" : "";
@@ -4891,7 +4970,7 @@ index 0000000..db74ed9
 +    coop_node *n = ctx; (void)r; (void)fl; (void)type; (void)dom;
 +    if (err) { coop_logf(n, "disc: advertising failed (dns_sd %d)%s", (int)err, policy_hint(err)); n->disc.adv_on = 0; return; }
 +    n->disc.adv_on = 1;
-+    coop_logf(n, "disc: advertising \"%s\" (%s) on port %u", name ? name : "?", COOP_SERVICE, AI(n)->reg_port);
++    coop_logf(n, "disc: advertising \"%s\" (%s) on port %u, addresses %s", name ? name : "?", COOP_SERVICE, AI(n)->reg_port, AI(n)->addrs[0] ? AI(n)->addrs : "none");
 +}
 +static void DNSSD_API gai_cb(DNSServiceRef r, DNSServiceFlags fl, uint32_t ifi, DNSServiceErrorType err, const char *host, const struct sockaddr *addr, uint32_t ttl, void *ctx) {
 +    aslot *s = ctx; (void)r; (void)host; (void)ttl;
@@ -4954,9 +5033,9 @@ index 0000000..db74ed9
 +        a->conn = NULL; a->retry_at = now + DISC_RETRY_MS; coop_logf(n, "disc: mDNSResponder is not reachable; retrying in 5 s"); goto slots;
 +    }
 +    if (d->adv_want && !a->reg) {
-+        uint8_t txt[160]; uint32_t ip = 0;
-+        if (cplat_route_ip(&ip) || !coop_addr_allowed(COOP_SCOPE_LAN, coop_addr4_class(ip))) ip = 0;
-+        size_t tl = cdisc_txt_make(txt, sizeof txt, n->proto, n->build, n->mods, ip);
++        uint8_t txt[200]; uint32_t ips[DISC_ADDRS];   // mDNSResponder publishes an A record per interface itself; the TXT lists them all
++        int k = host_addrs(ips, a->addrs, sizeof a->addrs);
++        size_t tl = cdisc_txt_make(txt, sizeof txt, n->proto, n->build, n->mods, ips, k);
 +        make_instance(a->inst, sizeof a->inst);
 +        a->reg = a->conn; a->reg_port = d->adv_port;
 +        DNSServiceErrorType e = DNSServiceRegister(&a->reg, kDNSServiceFlagsShareConnection, kDNSServiceInterfaceIndexAny, a->inst, COOP_SERVICE, NULL, NULL,
@@ -4998,7 +5077,7 @@ index 0000000..db74ed9
 +    // dlk: shared with the callbacks
 +    wctx *bctx; DNS_SERVICE_CANCEL bcancel_h; int64_t browse_at;
 +    wctx *rctx; DNS_SERVICE_REGISTER_REQUEST rreq; PDNS_SERVICE_INSTANCE inst; int reg_state;   // 0 none, 1 registering, 2 registered, 3 deregistering
-+    uint16_t reg_port; char inst_name[32]; int64_t retry_at; int warned, noaddr_said;
++    uint16_t reg_port; char inst_name[32], addrs[80]; int64_t retry_at; int warned, noaddr_said;
 +} wimpl;
 +static wimpl *WI(coop_node *n) { return n->disc.impl; }
 +static wctx *wctx_new(coop_node *n, int kind) { wctx *c = calloc(1, sizeof *c); if (c) { c->n = n; c->kind = kind; InterlockedIncrement(&g_wpending); } return c; }
@@ -5062,7 +5141,7 @@ index 0000000..db74ed9
 +    n->disc.adv_on = w->reg_state == 2;
 +    cplat_unlock(&n->dlk);
 +    if (state == 3) coop_logf(n, "disc: stopped advertising");
-+    else if (st == ERROR_SUCCESS) coop_logf(n, "disc: advertising \"%s\" (%s) on port %u", w->inst_name, COOP_SERVICE, w->reg_port);
++    else if (st == ERROR_SUCCESS) coop_logf(n, "disc: advertising \"%s\" (%s) on port %u, addresses %s", w->inst_name, COOP_SERVICE, w->reg_port, w->addrs);
 +    else coop_logf(n, "disc: advertising failed (status %lu)", (unsigned long)st);
 +    if (done) wctx_done(c);
 +}
@@ -5129,21 +5208,21 @@ index 0000000..db74ed9
 +    }
 +    if (now < w->retry_at) return;
 +    if (d->adv_want && rs == 0) {
-+        uint32_t ip = 0;
-+        if (cplat_route_ip(&ip) || !coop_addr_allowed(COOP_SCOPE_LAN, coop_addr4_class(ip))) {
++        uint32_t ips[DISC_ADDRS]; int k = host_addrs(ips, w->addrs, sizeof w->addrs);
++        if (!k) {
 +            w->retry_at = now + DISC_RETRY_MS;
-+            if (!w->noaddr_said++) coop_logf(n, "disc: no LAN address to advertise (this PC routes from a non-LAN address): visitors join by address");
++            if (!w->noaddr_said++) coop_logf(n, "disc: no LAN address to advertise (this PC has no private or link-local address): visitors join by address");
 +        } else {
-+            WCHAR inst[96], host[48], wv[3][40]; char v[3][40];
++            WCHAR inst[96], host[48], wv[5][80]; char v[5][80];
 +            make_instance(w->inst_name, sizeof w->inst_name);
 +            swprintf(inst, 96, L"%hs%ls", w->inst_name, k_wtype);
 +            swprintf(host, 48, L"pokopia-%hs.local", w->inst_name + 8);   // a name of its own: the computer's name is not published
-+            snprintf(v[0], 40, "%d", n->proto); snprintf(v[1], 40, "%s", n->build[0] ? n->build : "-"); snprintf(v[2], 40, "%016llx", (unsigned long long)n->mods);
-+            for (int i = 0; i < 3; i++) swprintf(wv[i], 40, L"%hs", v[i]);
-+            WCHAR wa[20]; swprintf(wa, 20, L"%u.%u.%u.%u", ip >> 24, ip >> 16 & 0xFF, ip >> 8 & 0xFF, ip & 0xFF);
-+            PCWSTR keys[4] = {L"p", L"b", L"m", L"a"}, vals[4] = {wv[0], wv[1], wv[2], wa};
-+            IP4_ADDRESS a4 = htonl(ip);
-+            PDNS_SERVICE_INSTANCE si = w->construct(inst, host, &a4, NULL, d->adv_port, 0, 0, 4, keys, vals);
++            snprintf(v[0], 80, "%d", n->proto); snprintf(v[1], 80, "%s", n->build[0] ? n->build : "-"); snprintf(v[2], 80, "%016llx", (unsigned long long)n->mods);
++            addr_list(v[3], 80, ips, 1); addr_list(v[4], 80, ips + 1, k - 1);
++            for (int i = 0; i < 5; i++) swprintf(wv[i], 80, L"%hs", v[i]);
++            PCWSTR keys[5] = {L"p", L"b", L"m", L"a", L"x"}, vals[5] = {wv[0], wv[1], wv[2], wv[3], wv[4]};
++            IP4_ADDRESS a4 = htonl(ips[0]);   // one A record: the best address; a visitor on another of this PC's networks finds its own in x=
++            PDNS_SERVICE_INSTANCE si = w->construct(inst, host, &a4, NULL, d->adv_port, 0, 0, k > 1 ? 5 : 4, keys, vals);
 +            wctx *c = si ? wctx_new(n, 2) : NULL;
 +            if (!si || !c) { if (si) w->ifree(si); w->retry_at = now + DISC_RETRY_MS; }
 +            else {
@@ -5200,10 +5279,10 @@ index 0000000..db74ed9
 +#endif
 diff --git a/dm/host/hle_coop_ldn.c b/dm/host/hle_coop_ldn.c
 new file mode 100644
-index 0000000..525a3f7
+index 0000000..6d10595
 --- /dev/null
 +++ b/dm/host/hle_coop_ldn.c
-@@ -0,0 +1,596 @@
+@@ -0,0 +1,601 @@
 +// coop ldn (MIT, our own code): the nn::ldn state machine (None 0, Initialized 1, AccessPoint 2, AccessPointCreated 3, Station 4,
 +// StationConnected 5), the 0x480 NetworkInfo the host builds, scan and connect over the transport, configuration and address classes. Layouts and
 +// result codes follow switchbrew and research/06 §3.1, §4. The host is node 0 at 169.254.S.1; a station with node id k is 169.254.S.(k+1).
@@ -5377,14 +5456,19 @@ index 0000000..525a3f7
 +    cplat_lock(&once);
 +    if (!done) {
 +        done = 1;
-+        coop_cfg c; char err[240] = "";
++        coop_cfg c; char err[240] = "", jm[96], msg[300];
 +        const char *mode = getenv("DM_COOP"), *inet = getenv("DM_COOP_INTERNET"), *room = getenv("DM_COOP_ROOM"), *relay = getenv("DM_COOP_RELAY");
++        const char *join = getenv("DM_COOP_JOIN");   // the launcher's "Join address" under its Link Play switch: auto becomes join:<it>
++        int joined = join && *join && mode && !strcmp(mode, "auto") && strlen(join) < 64;
++        if (joined) { snprintf(jm, sizeof jm, "join:%s", join); mode = jm; }
 +        int r = coop_cfg_parse_ex(&c, mode, getenv("DM_UID"), inet, room, relay, err, sizeof err);
 +        const char *t = getenv("DM_COOP_TCP"), *d = getenv("DM_COOP_DISCOVERY");
 +        c.tcp_only = t && *t && strcmp(t, "0");
 +        if (d && !strcmp(d, "0")) c.discovery = 0;
 +        if (hooks) c.hooks = *hooks;
++        if (r < 0 && joined) { snprintf(msg, sizeof msg, "DM_COOP_JOIN (the Join address): %s", err); snprintf(err, sizeof err, "%s", msg); }
 +        if (r < 0 && hooks && hooks->log) hooks->log(hooks->user, err);
++        if (join && *join && !joined && r > 0 && hooks && hooks->log) hooks->log(hooks->user, "DM_COOP_JOIN ignored: it goes with DM_COOP=auto (the launcher's Link Play switch)");
 +        if (r == 0 && mode && *mode && hooks && hooks->log) hooks->log(hooks->user, "DM_COOP=off: Link Play stays offline");
 +        if (r > 0 && (node = coop_create(&c))) {
 +            uint8_t *u = c.uid; char a[16]; snprintf(a, sizeof a, "%u.%u.%u.%u", c.addr >> 24, c.addr >> 16 & 0xFF, c.addr >> 8 & 0xFF, c.addr & 0xFF);
@@ -5802,10 +5886,10 @@ index 0000000..525a3f7
 +}
 diff --git a/dm/host/hle_coop_mpnet.c b/dm/host/hle_coop_mpnet.c
 new file mode 100644
-index 0000000..13a71e4
+index 0000000..2c46413
 --- /dev/null
 +++ b/dm/host/hle_coop_mpnet.c
-@@ -0,0 +1,1062 @@
+@@ -0,0 +1,1090 @@
 +// coop mpnet (MIT, our own code): the real transport, a star around the host (the LDN access point).
 +// - Control: one TCP link per station and host, framed messages (u32 length, u8 type, body): HELLO / WELCOME (the coop protocol; the host's build and
 +//   mods fingerprint), SCAN_REQ / SCAN_RESP (the host's NetworkInfo and identity), JOIN / ACCEPT / REFUSE (the host checks the network, passphrase,
@@ -6570,6 +6654,12 @@ index 0000000..13a71e4
 +}
 +static void peer_failed(coop_node *n, peer *p) {
 +    int64_t now = cplat_now_ms();
++    if (p->src == PEER_DISC && p->nalt > 1) {   // a host on several networks: its next address right away; the back-off counts whole rounds
++        char was[16], next[16]; ipstr(was, p->ip);
++        p->alti = (p->alti + 1) % p->nalt; p->ip = p->alt[p->alti]; ipstr(next, p->ip);
++        if (!p->fails) coop_logf(n, "mp: host %s does not answer at %s: trying %s", p->name, was, next);
++        if (p->alti) { p->dead_until = p->next_dial = now; return; }
++    }
 +    p->fails++;
 +    int64_t back = (int64_t)DIAL_RETRY_MS * p->fails, cap = p->src == PEER_CFG ? 1000 : DIAL_BACKOFF_MS;   // the configured host comes back quickly
 +    p->dead_until = now + (back > cap ? cap : back);
@@ -6582,10 +6672,23 @@ index 0000000..13a71e4
 +    for (int i = 0; i < DISC_MAX; i++) {
 +        if (!e[i].used || !e[i].ip || !e[i].port || !coop_addr_allowed(COOP_SCOPE_LAN, coop_addr4_class(e[i].ip))) continue;
 +        int k = -1, fr = -1;
-+        for (int j = 0; j < PEERS; j++) { if (n->pr[j].used && n->pr[j].ip == e[i].ip && n->pr[j].port == e[i].port) { k = j; break; } if (!n->pr[j].used && fr < 0) fr = j; }
++        for (int j = 0; j < PEERS; j++) {   // the same host: its address, or its instance name while a dial tries its other addresses
++            peer *q = &n->pr[j];
++            if (q->used && q->port == e[i].port && (q->ip == e[i].ip || (q->src == PEER_DISC && !strcmp(q->name, e[i].name)))) { k = j; break; }
++            if (!q->used && fr < 0) fr = j;
++        }
++        if (k >= 0 && n->pr[k].src == PEER_DISC) {   // new addresses (the host moved networks): from the best one again
++            peer *p = &n->pr[k]; int known = 0;
++            for (int x = 0; x < p->nalt; x++) known |= p->alt[x] == e[i].ip;
++            if (!known) {
++                memcpy(p->alt, e[i].addrs, sizeof p->alt); p->nalt = e[i].naddrs; p->alti = 0;
++                if (p->c.state == CONN_FREE) p->ip = e[i].ip;
++            }
++        }
 +        if (k < 0 && fr >= 0) {
 +            peer *p = &n->pr[fr]; peer_free(n, p);
 +            p->used = 1; p->src = PEER_DISC; p->ip = e[i].ip; p->port = e[i].port;
++            memcpy(p->alt, e[i].addrs, sizeof p->alt); p->nalt = e[i].naddrs;
 +            snprintf(p->name, sizeof p->name, "%s", e[i].name);
 +            if (e[i].has_txt && e[i].proto != n->proto) {   // the TXT says it speaks another protocol: not dialled
 +                p->compat = -2; char t[96];
@@ -6725,10 +6828,19 @@ index 0000000..13a71e4
 +    int64_t now = cplat_now_ms();
 +    if (!n->profile_said && (n->cfg.scope == COOP_SCOPE_LAN || (n->cfg.scope == COOP_SCOPE_INTERNET && !n->cfg.relay_ip)) &&
 +        ((n->hosting && !n->cfg.bind_loopback) || n->browse || n->cfg.role == COOP_ROLE_JOIN)) {
-+        n->profile_said = 1;   // once per Initialize: a Public network keeps other devices out, silently
-+        if (cplat_network_public() == 1)
++        n->profile_said = 1;   // once per Initialize: a Public network keeps other devices out, silently. Only the LAN ones count (not a phone's USB link
++        caddr mine[16]; int nm = cplat_local_addrs(mine, 16, 1), lan = 0, pub = 0; char pubs[64] = "", oks[64] = "";   // beside the Wi-Fi, say)
++        for (int i = 0; i < nm; i++) {
++            int cls = coop_addr4_class(mine[i].ip); char a[16]; ipstr(a, mine[i].ip);
++            if (cls != COOP_ADDR_PRIVATE && cls != COOP_ADDR_LINKLOCAL) continue;
++            char *to = mine[i].is_public ? pubs : oks; size_t l = strlen(to);
++            if (l + 17 < sizeof pubs) snprintf(to + l, sizeof pubs - l, "%s%s", l ? ", " : "", a);
++            lan++; pub += mine[i].is_public;
++        }
++        if (lan && pub == lan)
 +            coop_logf(n, "mp: this PC's network is set to Public: Windows Firewall keeps other devices out (visitors cannot reach a host here, DNS-SD answers may not "
 +                         "arrive). Make it Private: Settings, Network & internet, your connection, Network profile type: Private (docs/coop-step1c.md)");
++        else if (pub) coop_logf(n, "mp: %s is on a Public network (Windows Firewall keeps visitors out there); visitors reach this PC at %s", pubs, oks);
 +    }
 +    if (n->cfg.role != COOP_ROLE_HOST) station_timers(n, now);
 +    if (n->hosting) cmp_host_accepts(n);
@@ -6870,10 +6982,10 @@ index 0000000..13a71e4
 +}
 diff --git a/dm/host/hle_coop_plat.c b/dm/host/hle_coop_plat.c
 new file mode 100644
-index 0000000..58e674d
+index 0000000..9372de7
 --- /dev/null
 +++ b/dm/host/hle_coop_plat.c
-@@ -0,0 +1,267 @@
+@@ -0,0 +1,312 @@
 +// coop platform layer (MIT, our own code): sockets, threads, locks, time and randomness. Winsock + Win32 on Windows, BSD sockets + pthreads
 +// elsewhere (macOS, iOS, Android, Linux). Every socket the transport opens is non-blocking.
 +#ifdef _WIN32
@@ -7069,28 +7181,73 @@ index 0000000..58e674d
 +#define COBJMACROS
 +#include <objbase.h>
 +#include <netlistmgr.h>
++#include <iphlpapi.h>
++#include <stdio.h>
 +static const GUID k_clsid_nlm = {0xDCB00C01, 0x570F, 0x4A9B, {0x8D, 0x69, 0x19, 0x9F, 0xDB, 0xA5, 0x72, 0x3B}};   // CLSID_NetworkListManager
 +static const GUID k_iid_nlm = {0xDCB00000, 0x570F, 0x4A9B, {0x8D, 0x69, 0x19, 0x9F, 0xDB, 0xA5, 0x72, 0x3B}};    // IID_INetworkListManager
-+int cplat_network_public(void) {   // read only: the Network List Manager's category of every connected network
++static int public_adapters(char (*out)[40], int max) {   // read only: the adapters whose network has the Public profile, as "{GUID}" (GetAdaptersAddresses' name)
 +    HRESULT hi = CoInitializeEx(NULL, COINIT_MULTITHREADED);
-+    INetworkListManager *m = NULL; IEnumNetworks *e = NULL; int r = -1;
++    INetworkListManager *m = NULL; IEnumNetworkConnections *e = NULL; int k = 0;
 +    if (SUCCEEDED(CoCreateInstance(&k_clsid_nlm, NULL, CLSCTX_ALL, &k_iid_nlm, (void **)&m))) {
-+        if (SUCCEEDED(INetworkListManager_GetNetworks(m, NLM_ENUM_NETWORK_CONNECTED, &e))) {
-+            INetwork *net = NULL; ULONG got = 0; r = 0;
-+            while (IEnumNetworks_Next(e, 1, &net, &got) == S_OK && got) {
-+                NLM_NETWORK_CATEGORY c;
-+                if (SUCCEEDED(INetwork_GetCategory(net, &c)) && c == NLM_NETWORK_CATEGORY_PUBLIC) r = 1;
-+                INetwork_Release(net);
++        if (SUCCEEDED(INetworkListManager_GetNetworkConnections(m, &e))) {
++            INetworkConnection *c = NULL; ULONG got = 0;
++            while (IEnumNetworkConnections_Next(e, 1, &c, &got) == S_OK && got) {
++                INetwork *net = NULL; NLM_NETWORK_CATEGORY cat; GUID g;
++                if (SUCCEEDED(INetworkConnection_GetNetwork(c, &net))) {
++                    if (SUCCEEDED(INetwork_GetCategory(net, &cat)) && cat == NLM_NETWORK_CATEGORY_PUBLIC && k < max && SUCCEEDED(INetworkConnection_GetAdapterId(c, &g)))
++                        snprintf(out[k++], 40, "{%08lX-%04X-%04X-%02X%02X-%02X%02X%02X%02X%02X%02X}", (unsigned long)g.Data1, g.Data2, g.Data3, g.Data4[0], g.Data4[1],
++                                 g.Data4[2], g.Data4[3], g.Data4[4], g.Data4[5], g.Data4[6], g.Data4[7]);
++                    INetwork_Release(net);
++                }
++                INetworkConnection_Release(c);
 +            }
-+            IEnumNetworks_Release(e);
++            IEnumNetworkConnections_Release(e);
 +        }
 +        INetworkListManager_Release(m);
 +    }
 +    if (SUCCEEDED(hi)) CoUninitialize();
-+    return r;
++    return k;
++}
++int cplat_local_addrs(caddr *out, int max, int profiles) {
++    ULONG len = 16384, r = ERROR_BUFFER_OVERFLOW; IP_ADAPTER_ADDRESSES *aa = NULL;
++    for (int tries = 0; tries < 3 && r == ERROR_BUFFER_OVERFLOW; tries++) {
++        free(aa);
++        if (!(aa = malloc(len))) return -1;
++        r = GetAdaptersAddresses(AF_INET, GAA_FLAG_SKIP_ANYCAST | GAA_FLAG_SKIP_MULTICAST | GAA_FLAG_SKIP_DNS_SERVER | GAA_FLAG_SKIP_FRIENDLY_NAME, NULL, aa, &len);
++    }
++    if (r != NO_ERROR) { free(aa); return -1; }
++    char pub[16][40]; int np = profiles ? public_adapters(pub, 16) : 0, k = 0;
++    for (IP_ADAPTER_ADDRESSES *a = aa; a && k < max; a = a->Next) {
++        if (a->OperStatus != IfOperStatusUp || a->IfType == IF_TYPE_SOFTWARE_LOOPBACK) continue;
++        int is_pub = 0;
++        for (int i = 0; i < np; i++) if (a->AdapterName && !_stricmp(pub[i], a->AdapterName)) is_pub = 1;
++        for (IP_ADAPTER_UNICAST_ADDRESS *u = a->FirstUnicastAddress; u && k < max; u = u->Next) {
++            if (!u->Address.lpSockaddr || u->Address.lpSockaddr->sa_family != AF_INET) continue;
++            uint32_t ip = ntohl(((struct sockaddr_in *)u->Address.lpSockaddr)->sin_addr.s_addr);
++            unsigned pl = u->OnLinkPrefixLength;
++            if ((ip >> 24) == 127) continue;
++            out[k].ip = ip; out[k].mask = !pl ? 0 : pl >= 32 ? 0xFFFFFFFFu : 0xFFFFFFFFu << (32 - pl); out[k].is_public = is_pub; k++;
++        }
++    }
++    free(aa);
++    return k;
 +}
 +#else
-+int cplat_network_public(void) { return 0; }   // no network profiles: the platform asks for local network access itself (iOS, macOS)
++#include <ifaddrs.h>
++#include <net/if.h>
++int cplat_local_addrs(caddr *out, int max, int profiles) {   // no network profiles: the platform asks for local network access itself (iOS, macOS)
++    struct ifaddrs *ifs = NULL; int k = 0;
++    (void)profiles;
++    if (getifaddrs(&ifs)) return -1;
++    for (struct ifaddrs *i = ifs; i && k < max; i = i->ifa_next) {
++        if (!i->ifa_addr || i->ifa_addr->sa_family != AF_INET || (i->ifa_flags & (IFF_UP | IFF_RUNNING)) != (IFF_UP | IFF_RUNNING) || (i->ifa_flags & IFF_LOOPBACK)) continue;
++        out[k].ip = ntohl(((const struct sockaddr_in *)(const void *)i->ifa_addr)->sin_addr.s_addr);
++        out[k].mask = i->ifa_netmask ? ntohl(((const struct sockaddr_in *)(const void *)i->ifa_netmask)->sin_addr.s_addr) : 0;
++        out[k].is_public = 0; k++;
++    }
++    freeifaddrs(ifs);
++    return k;
++}
 +#endif
 +int cplat_route_ip(uint32_t *ip) {   // connect() on a UDP socket picks the source address and sends nothing
 +    static const uint32_t to[2] = {0x08080808u, 0xE00000FBu};   // a public address (the default route), else the mDNS group 224.0.0.251
@@ -8306,7 +8463,7 @@ index 154ed24..f7f6712 100644
                  Operand value = EmitLoadConstant(context, slot, offset);
  
 diff --git a/dm/tools/tests/test_launcher_settings.py b/dm/tools/tests/test_launcher_settings.py
-index cd43d2d..67b11ff 100644
+index cd43d2d..13e2253 100644
 --- a/dm/tools/tests/test_launcher_settings.py
 +++ b/dm/tools/tests/test_launcher_settings.py
 @@ -94,7 +94,7 @@ class LauncherSettingsTests(unittest.TestCase):
@@ -8318,7 +8475,7 @@ index cd43d2d..67b11ff 100644
          self.assertEqual([e for e, s in rows.items() if s.get('level') == 'basic'], ['DM_FPS_TARGET', 'DM_RENDER_SCALE', 'DM_OPMODE', 'DM_LANG', 'DM_RUMBLE'])
          self.assertEqual(rows['DM_RUMBLE_GAIN']['needs'], 'DM_RUMBLE=1')
          self.assertFalse({'level', 'needs'} & set(rows['DM_METAL_HUD']), 'a row without meta has no optional fields')
-@@ -127,12 +127,24 @@ class LauncherSettingsTests(unittest.TestCase):
+@@ -127,12 +127,25 @@ class LauncherSettingsTests(unittest.TestCase):
                      patch.object(settings.nacp, 'languages', return_value=['en-US']), patch.dict(os.environ, {'GFXAPI': api, **({'SETTINGS_PLATFORM': platform} if platform else {})}):
                  self.assertEqual(conforms(settings.build(gid, tmp, Path(tmp) / 'control.nacp'), schema, schema), [])
  
@@ -8336,18 +8493,19 @@ index cd43d2d..67b11ff 100644
 +        self.assertEqual(conforms({'schema': settings.SCHEMA, 'game': BOTW, 'settings': [{**text, 'length': 19}]}, schema, schema), [])
 +        self.assertNotEqual(conforms({'schema': settings.SCHEMA, 'game': BOTW, 'settings': [text]}, schema, schema), [], 'a text row has a length')
 +
-+    def test_link_play_rows(self):   # the co-op rows: Link Play, then internet play and its two text rows under it
++    def test_link_play_rows(self):   # the co-op rows: Link Play, then the join address, internet play and its two text rows under it
 +        rows = build(BOTW, 'nvn')
 +        self.assertEqual((rows['DM_COOP']['kind'], rows['DM_COOP']['default']), ('toggle', 'off'))
++        self.assertEqual((rows['DM_COOP_JOIN']['kind'], rows['DM_COOP_JOIN']['default'], rows['DM_COOP_JOIN']['length'], rows['DM_COOP_JOIN']['needs']), ('text', '', 21, 'DM_COOP=auto'))
 +        self.assertEqual((rows['DM_COOP_INTERNET']['kind'], rows['DM_COOP_INTERNET']['default'], rows['DM_COOP_INTERNET']['needs']), ('toggle', '0', 'DM_COOP=auto'))
 +        for env, length in (('DM_COOP_ROOM', 19), ('DM_COOP_RELAY', 21)):
 +            self.assertEqual((rows[env]['kind'], rows[env]['default'], rows[env]['length'], rows[env]['needs']), ('text', '', length, 'DM_COOP_INTERNET=1'))
 +        envs = list(rows)
-+        self.assertEqual(envs[envs.index('DM_COOP'):envs.index('DM_COOP') + 4], ['DM_COOP', 'DM_COOP_INTERNET', 'DM_COOP_ROOM', 'DM_COOP_RELAY'])
++        self.assertEqual(envs[envs.index('DM_COOP'):envs.index('DM_COOP') + 5], ['DM_COOP', 'DM_COOP_JOIN', 'DM_COOP_INTERNET', 'DM_COOP_ROOM', 'DM_COOP_RELAY'])
  
      def test_render_base_goes_into_the_render_scale_row(self):
          schema = json.loads((ROOT / 'docs/launcher.schema.json').read_text(encoding='utf-8'))
-@@ -154,7 +166,8 @@ class LauncherSettingsTests(unittest.TestCase):
+@@ -154,7 +167,8 @@ class LauncherSettingsTests(unittest.TestCase):
                           ('DM_X\ttoggle\t-\t0\talways\tGame\tX\t\tneeds=DM_NOPE=1\n', 'no row sets'),
                           ('DM_Y\ttoggle\t-\t0\talways\tGame\tY\t\tneeds=DM_X=on\n', 'never takes'),
                           ('DM_X\ttoggle\t-\t0\talways\tX\n', 'columns'), ('DM_X\ttoggle\t-\t0\talways\tsecret\tX\n', 'section'),
@@ -8358,23 +8516,24 @@ index cd43d2d..67b11ff 100644
                  (Path(tmp) / 'settings.tsv').write_text('# header\n' + good + bad, encoding='utf-8')
                  with patch.object(settings, 'HERE', Path(tmp)), \
 diff --git a/docs/env_switches.tsv b/docs/env_switches.tsv
-index 5fdc1af..1111ebd 100644
+index 5fdc1af..7ba751c 100644
 --- a/docs/env_switches.tsv
 +++ b/docs/env_switches.tsv
-@@ -17,6 +17,12 @@ DM_CHEATS_ANY_BUILD	switch	`1` loads a cheat file written for another build of t
+@@ -17,6 +17,13 @@ DM_CHEATS_ANY_BUILD	switch	`1` loads a cheat file written for another build of t
  DM_CHEATS_DEBUG	diagnostic	Logs every memory write a cheat makes and the cheat file context the menu's "another version" rows come from
  DM_CHEATS_ON	switch	Comma-separated cheat names turned on at launch, besides the saved per-build enabled states
  DM_CHEATS_WINDOW	switch	`1` opens the Mac Cheats panel beside the game from the start
 +DM_COOP	player	Link Play between our builds (hle_coop_*.c): `auto` hosts on the LAN while the game hosts and finds LAN hosts with DNS-SD while it scans; `join:<IPv4>[:<port>]` joins one host by address (loopback, RFC 1918 or 169.254 only, any address with `DM_COOP_INTERNET=1`; port 47600 by default); `host:<port>` hosts on 127.0.0.1 only; `off` (the default) keeps Link Play offline. The launcher's "Link Play on this network" switch sets `auto` / `off`
 +DM_COOP_DISCOVERY	switch	`0` turns DNS-SD off under `DM_COOP=auto` (no advertising, no browsing): visitors join by address
 +DM_COOP_INTERNET	player	`1` turns on internet play (the launcher's "Internet play"): links from any address, each proving `DM_COOP_ROOM`, every message tagged against changes (not encrypted); `join:` takes public addresses. Off by default
++DM_COOP_JOIN	player	`<IPv4>[:<port>]`: with `DM_COOP=auto`, joins that host instead of finding hosts with DNS-SD (as `DM_COOP=join:` does; a public address needs `DM_COOP_INTERNET=1`). The launcher's "Join address"; empty by default
 +DM_COOP_RELAY	player	`<IPv4>[:<port>]` (port 47610 by default): with `DM_COOP_INTERNET=1` and `DM_COOP=auto`, a relay players run themselves (windows-native tools/coop-relay): hosting opens the room there, scanning asks it for the room's host. The launcher's "Relay address"; empty by default
 +DM_COOP_ROOM	player	The room code, `XXXX-XXXX-XXXX-XXXX` (16 letters and digits, 80 bits): with `DM_COOP_INTERNET=1` every link proves it. A visitor needs the host's; a host without one gets a new one each session (in the log). The launcher's "Room code"; empty by default
 +DM_COOP_TCP	switch	`1` sends the game's Link Play datagrams over the control link instead of UDP (a TCP-only path such as an SSH tunnel)
  DM_COPY_GAME_RESOURCES	switch	`NO` skips the Xcode build phase that copies the game's resources into the app (`stage_resources.sh`, on by default); `build_ipa.sh` sets it for its unsigned build, which packs them itself
  DM_COPY_ROMFS	switch	`NO` keeps the game files out of the app, in the Xcode build phase (`stage_resources.sh`) and in the unsigned IPA of `build_ipa.sh` (on by default): `main.m` takes the validated `Documents/romfs.img` copied by `scripts/push_romfs.sh`, then a `Documents/romfs` folder; the build writes the image's identity as `romfs.id` into the app, and `main.m` uses only a matching image (`--romfs separate` of the NSP script sets this)
  DM_CTL	diagnostic	`=<file>` (Mac): the host polls the file every 100 ms and runs each appended line: button presses, `shot`, `passdump`, `texdump`, `env KEY=VALUE`, `peek`, `memdump`, `drag` and more
-@@ -309,6 +315,7 @@ DM_TOUCH_LOG	diagnostic	`=1` logs each touch-screen read with touch points (samp
+@@ -309,6 +316,7 @@ DM_TOUCH_LOG	diagnostic	`=1` logs each touch-screen read with touch points (samp
  DM_UDC_SELFTEST	diagnostic	`=1` runs a start-up check of DontCare load and store on private depth-stencil and RGBA8 textures (clear, Load + DontCare, read back) and logs one result line
  DM_UE_SHADERS	path	Folder of the Unreal shader code archives decoded by `uepak.py`, for `shader_split.py` (default `ue_shaders` beside the RomFS); needed when the RomFS has Unreal paks
  DM_UE_TEXTURE_POOL	switch	Megabytes Unreal's texture streaming pool (`r.Streaming.PoolSize`) is raised to, overriding the profile's `ue_texture_pool`; `0` keeps the game's own pool. On iOS only this switch turns it on (`Documents/env.txt`)

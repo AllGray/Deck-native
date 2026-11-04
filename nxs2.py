@@ -997,16 +997,25 @@ def st_win_play(b, t):
         prev = json.loads(old.read_text(encoding='utf-8')); cfg.update({k: prev[k] for k in ('save', 'work') if prev.get(k)})
     old.write_text(json.dumps(cfg, indent=1) + '\n', encoding='utf-8')
     b.outputs.mkdir(parents=True, exist_ok=True)
+    play = r'powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0..\windows\runtime\play.ps1" -Config "%~dp0..\windows\play.json"'
+    end = 'set "RC=%ERRORLEVEL%"\nif not "%RC%"=="0" pause\nexit /b %RC%\n'   # a failed start keeps its window open, so its message can be read
     cmd = b.outputs / f'Play Pokopia {b.version}.cmd'
     cmd.write_text(f'''@echo off
 rem Pokemon Pokopia {b.version} on Windows, built from your own dump by pokopia-native {TOOL_VERSION} (nxs2.py build --windows). Double-click to play.
 rem The save is in {cfg["save"]} (windows\\play.json names it; nxs2.py import-save brings one from Eden, the phone or a Mac).
 rem play.ps1's switches can follow: -Fullscreen, -Window 1600x900, -Silent, -PadCheck; -Save and -Work with other folders for a second player
-rem on this PC; -CoopHost and -CoopJoin for Link Play between our builds (docs/WINDOWS.md).
-powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0..\\windows\\runtime\\play.ps1" -Config "%~dp0..\\windows\\play.json" %*
-exit /b %ERRORLEVEL%
-''', encoding='ascii')
-    say(f'Windows game: {cmd}  (save: {win_save_dir(b)})')
+rem on this PC; -LinkPlay, -Join, -Internet and -Room for Link Play with other devices (docs/WINDOWS.md, and the Link Play launchers beside this one).
+{play} %*
+''' + end, encoding='ascii')
+    for name, switches, what in (('Link Play', '-LinkPlay', 'Link Play with players on this network: host, or visit a town found here'),
+                                 ('Host online', '-Internet', 'Link Play over the internet, this PC hosting: it shows the room code; '
+                                  'your router forwards port 47600 (TCP and UDP) to this PC'),
+                                 ('Visit online', '-Internet -Join ask -Room ask', "Link Play over the internet, visiting: it asks for the host's address and room code")):
+        (b.outputs / f'Play Pokopia {b.version} - {name}.cmd').write_text(f'''@echo off
+rem Pokemon Pokopia {b.version} on Windows, with {what} (docs/WINDOWS.md, Link Play).
+{play} {switches} %*
+''' + end, encoding='ascii')
+    say(f'Windows game: {cmd}  (save: {win_save_dir(b)}); for Link Play: the "- Link Play", "- Host online" and "- Visit online" launchers beside it')
     return cmd
 
 
