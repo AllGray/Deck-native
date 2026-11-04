@@ -85,6 +85,8 @@ Mac compiling 3,800 shaders. After that, rebuilds take a couple of minutes.
 
 - A **Mac with Apple silicon** (M1 or newer) and roughly 20 GB of free disk. The game's code is arm64, so an Intel Mac
   cannot run it. The Mac does the building for the iPhone too, or a Windows PC can (the last item here).
+- **16 GB of memory is recommended on the Mac.** The game itself uses about 6 GB there, so on an 8 GB Mac it can run out
+  of graphics memory once macOS and your other apps have taken their share (see [Common problems](#common-problems)).
 - **Xcode 27** installed, with its command line tools and the Metal toolchain (Xcode → Settings → Components). For the
   iPhone build you also need the iOS platform from that same screen, and `xcodegen` (`brew install xcodegen`).
 - **Python 3.12 or newer**: `brew install python@3.12`, then `python3.12 -m pip install "capstone>=5,<6" lz4 fonttools pillow`
@@ -108,6 +110,19 @@ Mac compiling 3,800 shaders. After that, rebuilds take a couple of minutes.
 
 `python3.12 nxs2.py doctor` (or the window's **Check tools** button) checks all of this and tells you how to get whatever
 is missing.
+
+## Common problems
+
+- **The title screen is black apart from its text on the first launch.** That is the shaders the game makes while it
+  runs, not a broken build: play a few minutes, then run `python3.12 nxs2.py setup` once (if you never have) and
+  `python3.12 nxs2.py refresh "<build folder>"`. Details: [the shaders, and what refresh is for](#the-shaders-and-what-refresh-is-for-read-this-too).
+- **On an 8 GB Mac the game freezes at a scene change and the screen later turns pink.** The Mac ran out of graphics
+  memory (the log says "Insufficient Memory"). Quit other apps, browsers above all, and start the game again; 16 GB is
+  the comfortable size for now.
+- **Mouse look stops while you hold movement keys on a MacBook's trackpad.** The trackpad ignores your finger while keys
+  are held down (palm rejection), so the game never sees the movement. An external mouse or a controller works.
+- **Your dump is a single file** (.nsp, .xci or something else). The builder takes the game's files as folders, an
+  `exefs/` and a `romfs/` (see "Your dump" above); have your dumping tool extract them.
 
 ## The Apple developer thing (iPhone only, read this)
 
