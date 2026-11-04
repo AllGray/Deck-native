@@ -1,0 +1,31 @@
+--- nxnative/dm/host/crash.c	2026-11-01 07:18:29
++++ nxnative-trace/dm/host/crash.c	2026-11-03 21:36:38
+@@ -116,6 +116,7 @@
+ // The diagnostics module (the probes in diag.c) and the thread state dump (hle_thread.c) each register themselves here: a unit test that links only this file does not depend on them
+ static int (*g_trap_hook)(ucontext_t *uc);
+ void crash_set_trap_hook(int (*fn)(ucontext_t *uc)) { g_trap_hook = fn; }
++int (*crash_get_trap_hook(void))(ucontext_t *uc) { return g_trap_hook; }   // trace copy: hle_trace.c chains to it
+ void crash_set_dump_hook(void (*fn)(void)) { g_dump_hook = fn; }
+ void crash_set_wait_dump(void (*fn)(void)) { g_wait_dump = fn; }
+ // Dump the current state on demand (without exiting): the iOS app has no no-progress watchdog, so when the smoke test fails it sends dump through DM_LOG_PORT to trigger this -- what each guest thread is waiting on + the graphics-side wait points, the same thing the watchdog prints
+--- nxnative/dm/host/hle.c	2026-11-02 03:53:07
++++ nxnative-trace/dm/host/hle.c	2026-11-03 21:36:38
+@@ -112,6 +112,8 @@
+ uint64_t gate_dispatch(uint64_t ret_addr, uint64_t *regs) {
+     for (unsigned i = gate_h(ret_addr);; i = (i + 1) & ((1u << GATE_BITS) - 1)) {
+         const gate_t *g = &g_gate[i];
++        if (g->ret == ret_addr) { extern int g_trace_on; void trace_gate(uint64_t, int, int, uint64_t, uint64_t *);   // trace copy
++            if (g_trace_on) trace_gate(g->ret, g->kind, g->arg, g->orig, regs); }
+         if (g->ret == ret_addr) switch (g->kind) {
+             case G_CNTPCT: case G_CNTVCT: {
+                 guest_clock_read_wait();
+--- nxnative/dm/host/main.c	2026-11-01 07:18:29
++++ nxnative-trace/dm/host/main.c	2026-11-03 21:36:38
+@@ -106,6 +106,7 @@
+     dm_sdk_major();   // logs the SDK version, which SDK-dependent behaviour follows (loader.c)
+     uint64_t ta = now_ns();
+     probe_install();   // DM_PROBE probes (for diagnostics)
++    { void trace_install(void); trace_install(); }   // trace copy: DM_TRACE (hle_trace.c)
+     hid_keys_init();   // DM_KEYS scripted input
+     uint64_t tb = now_ns();
+     stubs_report();

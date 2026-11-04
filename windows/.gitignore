@@ -1,0 +1,19 @@
+# Game data and anything derived from it never enters the repository
+_local/
+*.nso
+*.bin
+*.img
+
+# Build output
+build/
+out/
+# ... except the HLE registry and adapters nxrt builds from (gen_hle.py writes them; nxrt.generated checks them)
+!src/nxrt/gen/out/
+*.obj
+*.pdb
+*.ilk
+*.exe
+*.dll
+*.lib
+
+__pycache__/
