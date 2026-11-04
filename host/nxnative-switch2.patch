@@ -44,15 +44,51 @@ index 6089fe9..6a4ae7c 100644
           f'#define DM_GAME_OPMODE {int(om == "console")}',
           f'#define DM_GAME_PERF_BOOST {int(pm == "boost")}',
           f'#define DM_GAME_TEX_FLUSH_UPLOAD {int(tfu == "on")}',
+diff --git a/dm/games/settings.py b/dm/games/settings.py
+index d16b9cb..b14a328 100644
+--- a/dm/games/settings.py
++++ b/dm/games/settings.py
+@@ -11,7 +11,7 @@ sys.path.insert(0, str(HERE)); sys.path.insert(0, str(HERE.parent / 'tools'))
+ import game, nacp
+ 
+ SECTIONS = ('Game', 'Controls', 'Performance')   # headings on the single settings screen
+-SCHEMA = 1   # launcher.json's version (docs/launcher.schema.json); it grows only by optional fields, so a reader of 1 reads every 1
++SCHEMA = 2   # launcher.json's version (docs/launcher.schema.json): 2 added the text kind; within a version it grows only by optional fields
+ # The meta column's keys, each with the pattern its value must match. A key is added here, in docs/frontends.md and in
+ # docs/launcher.schema.json together (test_launcher_settings.py checks that the three agree); a reader ignores keys it does not know
+ META = {
+@@ -118,6 +118,11 @@ def build(gid, patched, control):
+             on_off = ['1', '0'] if values == '-' else values.split('/')
+             if len(on_off) != 2 or not all(on_off) or on_off[0] == on_off[1]: sys.exit(f'settings.tsv:{n}: toggle values are - or <on>/<off>: {values}')
+             s.update(on=on_off[0], off=on_off[1], default=on_off[0] if s['default'] == '1' else on_off[1])   # the default as the value the variable takes
++        elif kind == 'text':   # a short free text (a room code, an address): printable ASCII up to its length, empty by default
++            if not re.fullmatch(r'[1-9][0-9]?', values) or int(values) > 64: sys.exit(f'settings.tsv:{n}: text values are its longest length, 1-64: {values}')
++            if len(s['default']) > int(values) or not all(' ' <= ch <= '~' for ch in s['default']):
++                sys.exit(f'settings.tsv:{n}: a text default is printable ASCII of at most {values} characters: {s["default"]}')
++            s['length'] = int(values)
+         else: sys.exit(f'settings.tsv:{n}: unknown kind {kind}')
+         out.append(s)
+     return {'schema': SCHEMA, 'game': g.id, 'settings': out}
 diff --git a/dm/games/settings.tsv b/dm/games/settings.tsv
-index 00e1ddd..c194d85 100644
+index 00e1ddd..78bf43b 100644
 --- a/dm/games/settings.tsv
 +++ b/dm/games/settings.tsv
-@@ -22,7 +22,10 @@ DM_PRESENT_UPSCALE	choice	off=Standard,metalfx=MetalFX	off	always	Game	Upscaling
+@@ -5,6 +5,7 @@
+ #   variable  the environment variable the setting sets
+ #   kind      choice: values value=label,... (languages: the game's own, from its control data); range: values low:high:step, shown as a percentage;
+ #             toggle: values - (on sets 1, off 0) or <on>/<off>, the two values the variable takes (on/off)
++#             text: values its longest length (1-64): a short free text, printable ASCII, such as a code or an address; empty by default
+ #   default   a value (a toggle's: 1 on, 0 off); DM_GAME_<NAME>: the host's own default from the game profile (game_profile.h, game.py); build:<VAR>: the IPA build's setting (build_ipa.sh)
+ #             <ios>|<mac> selects the platform's default before resolving a profile macro or build variable
+ #   shown     always; DM_GAME_<NAME>!=<value> or ==<value>; fixups:<KEY>: main's rewriter table has that key (a stub in the game's build, patch_nso.py); languages>1; gfxapi:<API>: the packer's GFXAPI;
+@@ -22,7 +23,13 @@ DM_PRESENT_UPSCALE	choice	off=Standard,metalfx=MetalFX	off	always	Game	Upscaling
  DM_LANG	choice	languages	build:DM_LANG	languages>1	Game	Game language		level=basic
  DM_FULLSCREEN	choice	0=Window,1=Fullscreen	0	platform:mac	Game	Display mode		level=basic
  DM_SHOW_FPS	toggle	-	build:DM_SHOW_FPS	platform:ios	Game	Frame-rate counter
 +DM_COOP	toggle	auto/off	0	always	Game	Link Play on this network	Visit and host towns with players on the same Wi-Fi. Asks once for local network access.
++DM_COOP_INTERNET	toggle	-	0	always	Game	Internet play	Play with someone on another network: both enter the same room code. Not encrypted.	needs=DM_COOP=auto
++DM_COOP_ROOM	text	19		always	Game	Room code	The host's code, XXXX-XXXX-XXXX-XXXX. A host without one gets a new code each time.	needs=DM_COOP_INTERNET=1
++DM_COOP_RELAY	text	21		always	Game	Relay address	A relay you trust, as IPv4[:port]. Empty: visitors connect to the host's address.	needs=DM_COOP_INTERNET=1
  DM_TOUCH_HAPTICS	toggle	-	1	platform:ios	Controls	Touch feedback
 +DM_LOOK_SCALE	range	0.25:3.0:0.05	1.0	DM_GAME_LOOK_RATE!=0.0f	Controls	Look sensitivity		level=basic
 +DM_LOOK_INVERT_Y	toggle	-	0	DM_GAME_LOOK_RATE!=0.0f	Controls	Invert look up and down
@@ -3846,16 +3882,18 @@ index 54afe1a..21162d4 100644
  .PHONY: clean
 diff --git a/dm/host/coop.h b/dm/host/coop.h
 new file mode 100644
-index 0000000..fa5c948
+index 0000000..2c24ad0
 --- /dev/null
 +++ b/dm/host/coop.h
-@@ -0,0 +1,159 @@
+@@ -0,0 +1,185 @@
 +// coop: Pokopia's Link Play "Local Connection" between our native builds (research/06 §5, docs/coop-step1.md, docs/coop-step1c.md). MIT, our own code.
 +// One portable C11 module every port's HLE layer calls: `ldn` (the nn::ldn state machine and the 0x480 NetworkInfo), `vnet` (the game's UDP
 +// sockets on a virtual 169.254.S.0/24), `mpnet` (the real transport: a star of TCP control links around the host plus UDP for game datagrams)
 +// and `disc` (DNS-SD on the LAN: Apple dns_sd, Windows DnsService*, nothing elsewhere).
 +// BSD sockets (macOS, iOS, Android, Linux) or Winsock (Windows). Every entry point is thread-safe; each node has one lock and one I/O thread.
-+// Peers are loopback or LAN addresses only (step 1c); configured by DM_COOP / DM_COOP_TCP / DM_UID.
++// Peers are loopback or LAN addresses (step 1c), configured by DM_COOP / DM_COOP_TCP / DM_UID; internet play (step 1d, docs/coop-step1d.md) is an
++// explicit opt-in (DM_COOP_INTERNET=1): every link proves the host's room code and every frame and datagram carries a tag (coop_auth.c), but
++// nothing is encrypted. DM_COOP_RELAY names a relay players host themselves (tools/coop-relay).
 +#pragma once
 +#include <stddef.h>
 +#include <stdint.h>
@@ -3869,10 +3907,13 @@ index 0000000..fa5c948
 +// HOST: listens on 127.0.0.1 while the game hosts (step 1; an SSH tunnel's end). JOIN: dials one configured host. AUTO: hosts on the LAN while the
 +// game hosts and finds LAN hosts with DNS-SD while it scans
 +enum { COOP_ROLE_NONE, COOP_ROLE_HOST, COOP_ROLE_JOIN, COOP_ROLE_AUTO };
-+// Which addresses may connect or be dialed. An internet scope (join by public address, a relay) is not built; it would be its own explicit opt-in
-+enum { COOP_SCOPE_LOOPBACK, COOP_SCOPE_LAN };
++// Which addresses may connect or be dialed. INTERNET (DM_COOP_INTERNET=1 only) takes any address, and only links that prove the room code
++enum { COOP_SCOPE_LOOPBACK, COOP_SCOPE_LAN, COOP_SCOPE_INTERNET };
 +#define COOP_PORT_DEFAULT 47600            // auto hosts listen here (TCP control, UDP datagrams), or on a port the system picks when it is taken; join's default
 +#define COOP_SERVICE "_pokopia-ldn._udp"   // the DNS-SD service type (iOS lists it in NSBonjourServices)
++#define COOP_RELAY_PORT_DEFAULT 47610      // tools/coop-relay's port
++#define COOP_ROOM_LEN 16                   // a room code's symbols (Crockford base32, 5 bits each: 80 bits)
++#define COOP_ROOM_SHOWN (COOP_ROOM_LEN + 4)  // XXXX-XXXX-XXXX-XXXX and its NUL
 +
 +typedef struct coop_hooks {
 +    void *user;
@@ -3895,6 +3936,12 @@ index 0000000..fa5c948
 +    uint64_t lcid;       // LocalCommunicationId that replaces the SDK's -1 ("this application") in NetworkConfig, ScanFilter and Connect; 0: keep -1
 +    uint8_t platform;    // NodeInfo.Platform (1: Switch 2)
 +    int tcp_only;        // game datagrams over the control link instead of UDP
++    // internet play (coop_cfg_parse_ex): every link proves the room code, frames and datagrams carry tags
++    int auth;            // 1: internet play (coop protocol 3); 0: step 1c's LAN links, unchanged
++    char room[COOP_ROOM_LEN + 1];   // the room code, normalized (coop_room_normalize)
++    int room_new;        // the code was made here (the host shows it: coop_env_node logs it)
++    uint32_t relay_ip;   // the relay, host order (0: none): auto hosts through it while the game hosts and joins its room while the game scans
++    uint16_t relay_port;
 +    coop_hooks hooks;
 +} coop_cfg;
 +
@@ -3902,8 +3949,17 @@ index 0000000..fa5c948
 +// and 169.254/16 addresses only. Returns 1 configured, 0 when coop is NULL, empty, "off" or "0", -1 invalid (err says why). Defaults: platform 1,
 +// discovery on, the constant nxnative Uid when uid is NULL or empty.
 +int coop_cfg_parse(coop_cfg *c, const char *coop, const char *uid, char *err, size_t errn);
++// The same with internet play: internet "1" turns it on (NULL, empty or "0": off, and then room and relay are ignored and join stays LAN-only).
++// On: join takes public addresses; room is the host's code (a visitor must give it; a host without one gets a new one, room_new); relay is
++// <IPv4>[:<port>] and needs DM_COOP=auto. Returns as coop_cfg_parse.
++int coop_cfg_parse_ex(coop_cfg *c, const char *coop, const char *uid, const char *internet, const char *room, const char *relay, char *err, size_t errn);
++// Room codes: normalize accepts upper or lower case, '-' and spaces between symbols, O for 0 and I / L for 1; 1 when it is 16 symbols
++int coop_room_normalize(const char *in, char out[COOP_ROOM_LEN + 1]);
++void coop_room_new(char out[COOP_ROOM_LEN + 1]);   // 80 bits from the system's random source
++void coop_room_format(const char *norm, char out[COOP_ROOM_SHOWN]);
 +// The process's node from DM_COOP / DM_UID, created on first call (thread-safe); NULL when DM_COOP is unset, off or invalid (logged once).
 +// DM_COOP_TCP=1 sets tcp_only (game datagrams over the control link: a TCP-only path such as an SSH tunnel; a station's choice, the host follows it).
++// DM_COOP_INTERNET=1, DM_COOP_ROOM=<code>, DM_COOP_RELAY=<IPv4>[:<port>]: internet play (coop_cfg_parse_ex); a host's new room code is logged.
 +coop_node *coop_env_node(const coop_hooks *hooks);
 +// The Uid DM_UID names when DM_COOP is set: 1 and out filled, else 0 (the host keeps its constant).
 +int coop_env_uid(uint8_t out[16]);
@@ -3922,6 +3978,12 @@ index 0000000..fa5c948
 +    uint64_t rate_drops;    // frames and datagrams dropped by the rate limits, connections refused by them
 +    int discovered;         // DNS-SD: hosts found and resolved
 +    int advertising;        // DNS-SD: this host's service is registered
++    // internet play
++    uint64_t auth_ok;       // links that proved the room code (both ends)
++    uint64_t auth_fail;     // links that failed it (a wrong code, a host that did not prove it) or were refused by the failure limit
++    uint64_t bad_tag;       // frames and datagrams whose tag did not verify (changed, replayed in a stream, another key): link closed or dropped
++    uint64_t replays;       // datagrams refused as repeats or older than the window
++    int relay_up;           // host: its room is open at the relay
 +} coop_stats;
 +void coop_get_stats(coop_node *n, coop_stats *s);
 +
@@ -4011,12 +4073,12 @@ index 0000000..fa5c948
 +#endif
 diff --git a/dm/host/coop_int.h b/dm/host/coop_int.h
 new file mode 100644
-index 0000000..f6e8f67
+index 0000000..5fb0fda
 --- /dev/null
 +++ b/dm/host/coop_int.h
-@@ -0,0 +1,264 @@
-+// coop internals shared by coop_ldn.c, coop_vnet.c, coop_mpnet.c, coop_disc.c and coop_plat.c (MIT, our own code). Not for the HLE: it includes the
-+// platform's socket headers.
+@@ -0,0 +1,331 @@
++// coop internals shared by coop_ldn.c, coop_vnet.c, coop_mpnet.c, coop_disc.c, coop_plat.c and coop_auth.c (MIT, our own code). Not for the HLE: it
++// includes the platform's socket headers.
 +#pragma once
 +#include "coop.h"
 +#include <stdarg.h>
@@ -4095,8 +4157,28 @@ index 0000000..f6e8f67
 +    b->milli -= n * 1000; return 1;
 +}
 +
-+// One TCP control link: on the host, a station's (a scanner until it joins); on a station, its link to one host
-+enum { CONN_FREE, CONN_CONNECTING, CONN_HELLO, CONN_READY };
++// ---------- internet play's message authentication (coop_auth.c): SHA-256, HMAC-SHA256, HKDF-SHA256 ----------
++typedef struct { uint32_t h[8]; uint64_t len; uint8_t buf[64]; size_t n; } csha;
++typedef struct { csha in, out; } chmac;   // a key's hashed inner and outer pads
++void csha_init(csha *s);
++void csha_update(csha *s, const void *p, size_t n);
++void csha_final(csha *s, uint8_t out[32]);
++void csha256(const void *p, size_t n, uint8_t out[32]);
++void chmac_key(chmac *k, const void *key, size_t n);
++void chmac_start(const chmac *k, csha *s);              // then csha_update the message
++void chmac_end(const chmac *k, csha *s, uint8_t out[32]);
++void chmac_once(const void *key, size_t kn, const void *msg, size_t mn, uint8_t out[32]);   // one message
++void chkdf_extract(const void *salt, size_t sn, const void *ikm, size_t in, uint8_t prk[32]);
++int chkdf_expand(const uint8_t prk[32], const void *info, size_t infon, uint8_t *out, size_t outn);   // -1 past 255 blocks
++int cct_eq(const void *a, const void *b, size_t n);      // constant time
++void cwipe(void *p, size_t n);
++void croom_keys(const char *norm, uint8_t k_auth[32], uint8_t room_id[16]);
++#define CAUTH_TAG 16   // tag bytes on every frame and datagram (HMAC-SHA256 cut to 128 bits, as RFC 4868)
++#define CAUTH_NONCE 16
++
++// One TCP control link: on the host, a station's (a scanner until it joins); on a station, its link to one host. RELAY: a station's link to a relay,
++// waiting for it to pair the visitor with the host. AUTH: internet play's room-code handshake (host: waiting for the proof; station: for the answer)
++enum { CONN_FREE, CONN_CONNECTING, CONN_RELAY, CONN_HELLO, CONN_AUTH, CONN_READY };
 +typedef struct conn {
 +    int state;
 +    csock s;
@@ -4116,7 +4198,21 @@ index 0000000..f6e8f67
 +    uint32_t udp_ip; uint16_t udp_port;   // the station's UDP endpoint, learned from its UHELLO; 0 until then
 +    int accept_pending;   // joined, ACCEPT held until the host's game has read a NetworkInfo listing it (or ACCEPT_WAIT_MS)
 +    uint64_t accept_gen; int64_t accept_due;
++    // internet play: the handshake's nonces, then the link's keys (coop_auth.c cauth_link_keys) and sequence numbers
++    uint8_t ns[CAUTH_NONCE], nh[CAUTH_NONCE];   // the station's and the host's nonce
++    uint8_t hello[17];    // the station's HELLO platform and Uid, which its proof binds
++    int keyed;            // frames and datagrams carry tags from here on
++    chmac ktx, krx, kutx, kurx;                  // TCP and UDP, each direction
++    uint64_t seq_tx, seq_rx;                     // frames sent and received since keyed (never sent: part of each tag)
++    uint64_t useq_tx, useq_max, uwin;            // datagrams: the last sent, the highest received and the replay window below it
++    // the relay: host side, a link the host dialled for one visitor (rly_id, rly_cookie from the relay); station side, its link through the relay
++    int relay; uint32_t rly_id, rly_cookie;
 +} conn;
++void cauth_proof(const uint8_t k_auth[32], int host, const uint8_t ns[16], const uint8_t nh[16], const uint8_t *hello, size_t hn, uint8_t out[32]);
++void cauth_link_keys(conn *c, const uint8_t k_auth[32], const uint8_t ns[16], const uint8_t nh[16], int host);
++void cauth_frame_tag(const chmac *k, uint64_t seq, const uint8_t *hdr5, const uint8_t *body, size_t n, uint8_t tag[CAUTH_TAG]);
++void cauth_udp_tag(const chmac *k, const uint8_t *pkt, size_t n, uint8_t tag[CAUTH_TAG]);
++int cauth_replay_ok(uint64_t *max, uint64_t *win, uint64_t seq);
 +
 +// A host a station knows: the configured one (JOIN) or one DNS-SD found (AUTO). Its link carries scans, the join and, once joined, the session
 +#define PEERS 8
@@ -4133,6 +4229,8 @@ index 0000000..f6e8f67
 +    int scan_wait, scan_done, scan_has;
 +    uint8_t scan_info[LDN_NETINFO];   // the host's NetworkInfo from its last SCAN_RESP, checked sane
 +    char name[64];                    // the DNS-SD instance (logs)
++    int relay;                        // the relay (DM_COOP_RELAY): every dial asks it for the room's host
++    int said;                         // the last relay or room-code problem logged (a line when it changes)
 +} peer;
 +
 +// DNS-SD (coop_disc.c). The I/O thread starts and stops the backend as adv_want / browse_want say; found hosts land in e[] under the node's dlk
@@ -4157,6 +4255,7 @@ index 0000000..f6e8f67
 +#define HOST_CONNS 16
 +#define MP_UDP_HDR 16   // u32 magic, u8 type, 3 reserved, u64 token
 +#define MP_DG_HDR 12    // u32 source address, u32 destination address, u16 source port, u16 destination port (virtual, host order)
++#define MP_UDP_HDR3 24  // internet play: u32 magic, u8 type, 3 reserved, u64 token, u64 sequence number; the tag follows the body
 +
 +struct coop_node {
 +    coop_cfg cfg;
@@ -4182,7 +4281,19 @@ index 0000000..f6e8f67
 +    int io_on, io_stop;
 +    int64_t stop_until;
 +    cthread io;
-+    uint8_t scratch[MP_UDP_HDR + MP_DG_HDR + COOP_DGRAM_MAX];   // packet assembly under the lock: game threads' stacks can be small
++    uint8_t scratch[MP_UDP_HDR3 + MP_DG_HDR + COOP_DGRAM_MAX + CAUTH_TAG];   // packet assembly under the lock: game threads' stacks can be small
++    // internet play (cfg.auth): the coop protocol spoken (MP_PROTO, or MP_PROTO_INET with the handshake and tags) and the room's keys
++    int proto;
++    size_t uhdr;          // a datagram's header: MP_UDP_HDR, or MP_UDP_HDR3 with its sequence number
++    uint8_t k_auth[32], room_id[16];
++    bucket fail_all;      // failed proofs, every link (a budget per minute)
++    struct { uint32_t ip; bucket b; } fail_ip[16];   // and per address (links through the relay all come from it: only the first limit)
++    uint64_t auth_ok, auth_fail, bad_tag, replays;
++    int64_t log_auth_at, log_roam_at;
++    // host through a relay (cfg.relay_ip): the control link that keeps its room open while the game hosts
++    conn rc;
++    int rc_open;          // the relay said the room is open
++    int64_t rc_next, rc_said_at; int rc_fails, rc_said;
 +    // host: listening only while the game hosts (CreateNetwork to DestroyNetwork / CloseAccessPoint / Finalize)
 +    int hosting;
 +    csock lsock, husock;  // the listener and the host's UDP socket
@@ -4272,6 +4383,24 @@ index 0000000..f6e8f67
 +#define MP_WELCOME_LEN 32        // magic, protocol, UDP port, build (16 hex digits), mods
 +#define MP_IDENT_LEN 24          // build (16 hex digits) + mods (u64)
 +#define MP_JOIN_LEN (0x5A + MP_IDENT_LEN)   // NetworkId 0x20, UserConfig 0x30, version u16, passphrase hash u64, identity
++// Protocol 3 (internet play, docs/coop-step1d.md): HELLO adds the station's nonce; the host answers AUTH_CHAL (its nonce), the station AUTH_PROOF
++// (HMAC over both nonces and its HELLO), the host AUTH_OK (its own proof) or AUTH_FAIL. From AUTH_OK on, every frame ends in a tag and every
++// datagram has a sequence number and a tag (MP_UMAGIC3). The rest of protocol 2 is unchanged inside the tagged frames
++#define MP_PROTO_INET 3
++#define MP_HELLO3_LEN (MP_HELLO_LEN + CAUTH_NONCE)
++#define MP_CHAL_LEN (6 + CAUTH_NONCE)     // magic, protocol, the host's nonce
++#define MP_UMAGIC3 0x33554350u   // "PCU3"
++enum { M_AUTH_CHAL = 0x20, M_AUTH_PROOF, M_AUTH_OK, M_AUTH_FAIL };
++
++// The relay (tools/coop-relay, the same values as its coop_relay.h): a link's first 32 bytes say what it is (magic, kind, version 1, 2 reserved,
++// room id, visitor id, cookie); the relay answers in 16-byte messages (magic, type, code, 2 reserved, arg, cookie), and once it pairs a visitor's
++// link with one its host dialled, it copies bytes between them without reading them
++#define RLY_MAGIC 0x31524B50u    // "PKR1"
++#define RLY_HELLO_LEN 32
++#define RLY_MSG_LEN 16
++enum { RLY_HOST = 1, RLY_JOIN, RLY_ATTACH };
++enum { RLY_OK = 1, RLY_VISITOR, RLY_GONE, RLY_ERR, RLY_PONG, RLY_PING };
++enum { RLY_E_NOROOM = 1, RLY_E_TAKEN, RLY_E_FULL, RLY_E_LIMIT, RLY_E_TIMEOUT, RLY_E_BAD, RLY_E_EXPIRED };
 +
 +static inline void put16(uint8_t *p, uint32_t v) { p[0] = (uint8_t)v; p[1] = (uint8_t)(v >> 8); }
 +static inline void put32(uint8_t *p, uint32_t v) { put16(p, v); put16(p + 2, v >> 16); }
@@ -4400,9 +4529,206 @@ index de79bc9..e09a927 100644
                  regs[g->arg] = t;
                  return t;
              }
+diff --git a/dm/host/hle_coop_auth.c b/dm/host/hle_coop_auth.c
+new file mode 100644
+index 0000000..09bdd1c
+--- /dev/null
++++ b/dm/host/hle_coop_auth.c
+@@ -0,0 +1,191 @@
++// coop auth (MIT, our own code): internet play's room code and message authentication (docs/coop-step1d.md). SHA-256 as FIPS 180-4 §6.2 specifies
++// it, HMAC-SHA256 as RFC 2104 / FIPS 198-1, HKDF as RFC 5869; the unit tests check all three against the published vectors (FIPS 180-4's examples,
++// RFC 4231, RFC 5869). Integrity and authentication only: nothing here encrypts (the user's decision: a vetted library such as Monocypher would).
++// - Room code: 16 symbols of Crockford's base32 (0-9 and A-Z without I, L, O, U), 80 bits from the system's random source, shown XXXX-XXXX-XXXX-XXXX.
++// - Keys: prk = HKDF-Extract("pokopia-coop room v1", the 16 symbols); k_auth = Expand(prk, "auth"); room id = Expand(prk, "relay room id", 16), the
++//   only thing a relay sees (it cannot get the code or k_auth back from it). A link's keys: HKDF over k_auth with both nonces as the salt.
++#include "coop_int.h"
++
++// ---------- SHA-256 ----------
++static const uint32_t K256[64] = {
++    0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5, 0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3,
++    0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174, 0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,
++    0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7, 0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967, 0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13,
++    0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85, 0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070,
++    0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3, 0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208,
++    0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2};
++#define ROR(x, n) ((x) >> (n) | (x) << (32 - (n)))
++static void sha_block(uint32_t h[8], const uint8_t *p) {
++    uint32_t w[64];
++    for (int t = 0; t < 16; t++) w[t] = (uint32_t)p[4 * t] << 24 | (uint32_t)p[4 * t + 1] << 16 | (uint32_t)p[4 * t + 2] << 8 | p[4 * t + 3];
++    for (int t = 16; t < 64; t++) {
++        uint32_t s0 = ROR(w[t - 15], 7) ^ ROR(w[t - 15], 18) ^ w[t - 15] >> 3, s1 = ROR(w[t - 2], 17) ^ ROR(w[t - 2], 19) ^ w[t - 2] >> 10;
++        w[t] = w[t - 16] + s0 + w[t - 7] + s1;
++    }
++    uint32_t a = h[0], b = h[1], c = h[2], d = h[3], e = h[4], f = h[5], g = h[6], k = h[7];
++    for (int t = 0; t < 64; t++) {
++        uint32_t t1 = k + (ROR(e, 6) ^ ROR(e, 11) ^ ROR(e, 25)) + ((e & f) ^ (~e & g)) + K256[t] + w[t];
++        uint32_t t2 = (ROR(a, 2) ^ ROR(a, 13) ^ ROR(a, 22)) + ((a & b) ^ (a & c) ^ (b & c));
++        k = g; g = f; f = e; e = d + t1; d = c; c = b; b = a; a = t1 + t2;
++    }
++    h[0] += a; h[1] += b; h[2] += c; h[3] += d; h[4] += e; h[5] += f; h[6] += g; h[7] += k;
++}
++void csha_init(csha *s) {
++    static const uint32_t h0[8] = {0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19};
++    memcpy(s->h, h0, sizeof h0); s->len = 0; s->n = 0;
++}
++void csha_update(csha *s, const void *data, size_t n) {
++    const uint8_t *p = data;
++    s->len += n;
++    if (s->n) {
++        size_t k = 64 - s->n < n ? 64 - s->n : n;
++        memcpy(s->buf + s->n, p, k); s->n += k; p += k; n -= k;
++        if (s->n < 64) return;
++        sha_block(s->h, s->buf); s->n = 0;
++    }
++    for (; n >= 64; p += 64, n -= 64) sha_block(s->h, p);
++    if (n) { memcpy(s->buf, p, n); s->n = n; }
++}
++void csha_final(csha *s, uint8_t out[32]) {
++    uint64_t bits = s->len * 8;
++    uint8_t pad[72] = {0x80};
++    size_t padn = (s->n < 56 ? 56 : 120) - s->n;
++    for (int i = 0; i < 8; i++) pad[padn + i] = (uint8_t)(bits >> (56 - 8 * i));
++    csha_update(s, pad, padn + 8);
++    for (int i = 0; i < 8; i++) { out[4 * i] = (uint8_t)(s->h[i] >> 24); out[4 * i + 1] = (uint8_t)(s->h[i] >> 16); out[4 * i + 2] = (uint8_t)(s->h[i] >> 8); out[4 * i + 3] = (uint8_t)s->h[i]; }
++}
++void csha256(const void *p, size_t n, uint8_t out[32]) { csha s; csha_init(&s); csha_update(&s, p, n); csha_final(&s, out); }
++
++// ---------- HMAC-SHA256: the key's inner and outer pads are hashed once (chmac_key), each message then costs its own blocks plus two ----------
++void chmac_key(chmac *k, const void *key, size_t n) {
++    uint8_t kb[64] = {0}, pad[64];
++    if (n > 64) csha256(key, n, kb); else if (n) memcpy(kb, key, n);
++    for (int i = 0; i < 64; i++) pad[i] = kb[i] ^ 0x36;
++    csha_init(&k->in); csha_update(&k->in, pad, 64);
++    for (int i = 0; i < 64; i++) pad[i] = kb[i] ^ 0x5c;
++    csha_init(&k->out); csha_update(&k->out, pad, 64);
++    cwipe(kb, sizeof kb); cwipe(pad, sizeof pad);
++}
++void chmac_start(const chmac *k, csha *s) { *s = k->in; }
++void chmac_end(const chmac *k, csha *s, uint8_t out[32]) {
++    uint8_t ih[32]; csha_final(s, ih);
++    csha o = k->out; csha_update(&o, ih, 32); csha_final(&o, out);
++}
++void chmac_once(const void *key, size_t kn, const void *msg, size_t mn, uint8_t out[32]) {
++    chmac k; csha s; chmac_key(&k, key, kn); chmac_start(&k, &s); csha_update(&s, msg, mn); chmac_end(&k, &s, out); cwipe(&k, sizeof k);
++}
++
++// ---------- HKDF-SHA256 (RFC 5869) ----------
++void chkdf_extract(const void *salt, size_t sn, const void *ikm, size_t in, uint8_t prk[32]) {
++    static const uint8_t zero[32];
++    if (!salt || !sn) { salt = zero; sn = 32; }
++    chmac_once(salt, sn, ikm, in, prk);
++}
++int chkdf_expand(const uint8_t prk[32], const void *info, size_t infon, uint8_t *out, size_t outn) {
++    if (outn > 255 * 32) return -1;
++    chmac k; chmac_key(&k, prk, 32);
++    uint8_t t[32]; size_t tn = 0;
++    for (uint8_t i = 1; outn; i++) {
++        csha s; chmac_start(&k, &s);
++        csha_update(&s, t, tn); if (infon) csha_update(&s, info, infon); csha_update(&s, &i, 1);
++        chmac_end(&k, &s, t); tn = 32;
++        size_t m = outn < 32 ? outn : 32;
++        memcpy(out, t, m); out += m; outn -= m;
++    }
++    cwipe(&k, sizeof k); cwipe(t, sizeof t);
++    return 0;
++}
++
++int cct_eq(const void *a, const void *b, size_t n) {   // constant time in n: no early exit on the first difference
++    const volatile uint8_t *x = a, *y = b; uint8_t d = 0;
++    for (size_t i = 0; i < n; i++) d |= x[i] ^ y[i];
++    return d == 0;
++}
++void cwipe(void *p, size_t n) { volatile uint8_t *b = p; while (n--) *b++ = 0; }
++
++// ---------- the room code ----------
++static const char B32[] = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";   // Crockford's base32
++int coop_room_normalize(const char *in, char out[COOP_ROOM_LEN + 1]) {
++    int k = 0;
++    if (!in) return 0;
++    for (; *in; in++) {
++        char ch = *in;
++        if (ch == '-' || ch == ' ') continue;
++        if (ch >= 'a' && ch <= 'z') ch = (char)(ch - 'a' + 'A');
++        if (ch == 'O') ch = '0';
++        else if (ch == 'I' || ch == 'L') ch = '1';   // Crockford's reading of the look-alikes
++        if (!strchr(B32, ch) || !ch || k == COOP_ROOM_LEN) return 0;
++        out[k++] = ch;
++    }
++    out[k] = 0;
++    return k == COOP_ROOM_LEN;
++}
++void coop_room_new(char out[COOP_ROOM_LEN + 1]) {
++    uint8_t r[COOP_ROOM_LEN];
++    cplat_random(r, sizeof r);
++    for (int i = 0; i < COOP_ROOM_LEN; i++) out[i] = B32[r[i] & 31];   // 256 is a multiple of 32: no bias
++    out[COOP_ROOM_LEN] = 0;
++    cwipe(r, sizeof r);
++}
++void coop_room_format(const char *norm, char out[COOP_ROOM_SHOWN]) {
++    int k = 0;
++    for (int i = 0; i < COOP_ROOM_LEN && norm[i]; i++) { if (i && i % 4 == 0) out[k++] = '-'; out[k++] = norm[i]; }
++    out[k] = 0;
++}
++void croom_keys(const char *norm, uint8_t k_auth[32], uint8_t room_id[16]) {
++    static const char salt[] = "pokopia-coop room v1";
++    uint8_t prk[32];
++    chkdf_extract(salt, sizeof salt - 1, norm, strlen(norm), prk);
++    chkdf_expand(prk, "auth", 4, k_auth, 32);
++    chkdf_expand(prk, "relay room id", 13, room_id, 16);
++    cwipe(prk, sizeof prk);
++}
++
++// ---------- a link's handshake and keys ----------
++// The station proves the code first and the host answers only after checking it, so a stranger who dials a host learns nothing it could guess
++// the code from offline. Both proofs bind both nonces; the station's also binds its HELLO (platform and Uid)
++void cauth_proof(const uint8_t k_auth[32], int host, const uint8_t ns[16], const uint8_t nh[16], const uint8_t *hello, size_t hn, uint8_t out[32]) {
++    static const char ls[] = "PKP3 station proof", lh[] = "PKP3 host proof";
++    chmac k; csha s; chmac_key(&k, k_auth, 32); chmac_start(&k, &s);
++    if (host) csha_update(&s, lh, sizeof lh - 1); else csha_update(&s, ls, sizeof ls - 1);
++    csha_update(&s, ns, 16); csha_update(&s, nh, 16);
++    if (hn) csha_update(&s, hello, hn);
++    chmac_end(&k, &s, out);
++    cwipe(&k, sizeof k);
++}
++void cauth_link_keys(conn *c, const uint8_t k_auth[32], const uint8_t ns[16], const uint8_t nh[16], int host) {
++    uint8_t salt[32], prk[32], k[32];
++    memcpy(salt, ns, 16); memcpy(salt + 16, nh, 16);
++    chkdf_extract(salt, 32, k_auth, 32, prk);
++    // each direction and each path its own key: a frame cannot be reflected back or replayed as a datagram
++    chkdf_expand(prk, host ? "tcp h2s" : "tcp s2h", 7, k, 32); chmac_key(&c->ktx, k, 32);
++    chkdf_expand(prk, host ? "tcp s2h" : "tcp h2s", 7, k, 32); chmac_key(&c->krx, k, 32);
++    chkdf_expand(prk, host ? "udp h2s" : "udp s2h", 7, k, 32); chmac_key(&c->kutx, k, 32);
++    chkdf_expand(prk, host ? "udp s2h" : "udp h2s", 7, k, 32); chmac_key(&c->kurx, k, 32);
++    c->seq_tx = c->seq_rx = 0; c->useq_tx = 0; c->useq_max = 0; c->uwin = 0;
++    c->keyed = 1;
++    cwipe(prk, sizeof prk); cwipe(k, sizeof k);
++}
++// A TCP frame's tag: the first 16 bytes of HMAC(key, seq || length || type || body). seq is each direction's frame count since the keys were made,
++// known to both ends and never sent, so a frame dropped, repeated or moved fails the next check
++void cauth_frame_tag(const chmac *k, uint64_t seq, const uint8_t *hdr5, const uint8_t *body, size_t n, uint8_t tag[CAUTH_TAG]) {
++    uint8_t sq[8], t[32]; csha s;
++    put64(sq, seq);
++    chmac_start(k, &s); csha_update(&s, sq, 8); csha_update(&s, hdr5, 5); if (n) csha_update(&s, body, n); chmac_end(k, &s, t);
++    memcpy(tag, t, CAUTH_TAG);
++}
++// A datagram's tag: over its whole header (with its sequence number) and body
++void cauth_udp_tag(const chmac *k, const uint8_t *pkt, size_t n, uint8_t tag[CAUTH_TAG]) {
++    uint8_t t[32]; csha s;
++    chmac_start(k, &s); csha_update(&s, pkt, n); chmac_end(k, &s, t);
++    memcpy(tag, t, CAUTH_TAG);
++}
++// Datagrams arrive unordered: a 64-packet window below the highest sequence number seen; a number seen before or older than the window is refused
++int cauth_replay_ok(uint64_t *max, uint64_t *win, uint64_t seq) {
++    if (!seq) return 0;
++    if (seq > *max) { uint64_t d = seq - *max; *win = d >= 64 ? 1 : (*win << d) | 1; *max = seq; return 1; }
++    uint64_t d = *max - seq;
++    if (d >= 64 || (*win >> d & 1)) return 0;
++    *win |= 1ull << d;
++    return 1;
++}
 diff --git a/dm/host/hle_coop_disc.c b/dm/host/hle_coop_disc.c
 new file mode 100644
-index 0000000..958cfa5
+index 0000000..db74ed9
 --- /dev/null
 +++ b/dm/host/hle_coop_disc.c
 @@ -0,0 +1,466 @@
@@ -4630,7 +4956,7 @@ index 0000000..958cfa5
 +    if (d->adv_want && !a->reg) {
 +        uint8_t txt[160]; uint32_t ip = 0;
 +        if (cplat_route_ip(&ip) || !coop_addr_allowed(COOP_SCOPE_LAN, coop_addr4_class(ip))) ip = 0;
-+        size_t tl = cdisc_txt_make(txt, sizeof txt, MP_PROTO, n->build, n->mods, ip);
++        size_t tl = cdisc_txt_make(txt, sizeof txt, n->proto, n->build, n->mods, ip);
 +        make_instance(a->inst, sizeof a->inst);
 +        a->reg = a->conn; a->reg_port = d->adv_port;
 +        DNSServiceErrorType e = DNSServiceRegister(&a->reg, kDNSServiceFlagsShareConnection, kDNSServiceInterfaceIndexAny, a->inst, COOP_SERVICE, NULL, NULL,
@@ -4812,7 +5138,7 @@ index 0000000..958cfa5
 +            make_instance(w->inst_name, sizeof w->inst_name);
 +            swprintf(inst, 96, L"%hs%ls", w->inst_name, k_wtype);
 +            swprintf(host, 48, L"pokopia-%hs.local", w->inst_name + 8);   // a name of its own: the computer's name is not published
-+            snprintf(v[0], 40, "%d", MP_PROTO); snprintf(v[1], 40, "%s", n->build[0] ? n->build : "-"); snprintf(v[2], 40, "%016llx", (unsigned long long)n->mods);
++            snprintf(v[0], 40, "%d", n->proto); snprintf(v[1], 40, "%s", n->build[0] ? n->build : "-"); snprintf(v[2], 40, "%016llx", (unsigned long long)n->mods);
 +            for (int i = 0; i < 3; i++) swprintf(wv[i], 40, L"%hs", v[i]);
 +            WCHAR wa[20]; swprintf(wa, 20, L"%u.%u.%u.%u", ip >> 24, ip >> 16 & 0xFF, ip >> 8 & 0xFF, ip & 0xFF);
 +            PCWSTR keys[4] = {L"p", L"b", L"m", L"a"}, vals[4] = {wv[0], wv[1], wv[2], wa};
@@ -4874,10 +5200,10 @@ index 0000000..958cfa5
 +#endif
 diff --git a/dm/host/hle_coop_ldn.c b/dm/host/hle_coop_ldn.c
 new file mode 100644
-index 0000000..ae66fcd
+index 0000000..525a3f7
 --- /dev/null
 +++ b/dm/host/hle_coop_ldn.c
-@@ -0,0 +1,557 @@
+@@ -0,0 +1,596 @@
 +// coop ldn (MIT, our own code): the nn::ldn state machine (None 0, Initialized 1, AccessPoint 2, AccessPointCreated 3, Station 4,
 +// StationConnected 5), the 0x480 NetworkInfo the host builds, scan and connect over the transport, configuration and address classes. Layouts and
 +// result codes follow switchbrew and research/06 §3.1, §4. The host is node 0 at 169.254.S.1; a station with node id k is 169.254.S.(k+1).
@@ -4887,6 +5213,7 @@ index 0000000..ae66fcd
 +// nxnative's constant local user (hle_account.c k_uid), the default when DM_UID is unset
 +static const uint64_t k_uid_default[2] = {0x78626c0000000001ull, 0x53574e4154495645ull};
 +#define SCAN_LINK_MS 500     // a Scan waits this long for its links to the hosts, then this long again for their answers
++#define SCAN_LINK_INET_MS 1500   // internet play: round trips are longer and each link proves the room code (a relay pairs it first)
 +#define BROWSE_GRACE_MS 1500 // the first scans after DNS-SD browsing starts wait up to this long from its start for hosts to be found
 +#define CONNECT_MS 4000      // nn::ldn's connect timeout is about this
 +
@@ -4955,6 +5282,7 @@ index 0000000..ae66fcd
 +}
 +int coop_addr_allowed(int scope, int cls) {
 +    if (cls == COOP_ADDR_LOOPBACK) return 1;
++    if (scope == COOP_SCOPE_INTERNET) return cls != COOP_ADDR_INVALID;   // internet play: who may stay is decided by the room code
 +    return scope == COOP_SCOPE_LAN && (cls == COOP_ADDR_PRIVATE || cls == COOP_ADDR_LINKLOCAL);
 +}
 +
@@ -4985,13 +5313,19 @@ index 0000000..ae66fcd
 +    put64(out, w[0]); put64(out + 8, w[1]);
 +    return 0;
 +}
-+int coop_cfg_parse(coop_cfg *c, const char *coop, const char *uid, char *err, size_t errn) {
++int coop_cfg_parse(coop_cfg *c, const char *coop, const char *uid, char *err, size_t errn) { return coop_cfg_parse_ex(c, coop, uid, NULL, NULL, NULL, err, errn); }
++int coop_cfg_parse_ex(coop_cfg *c, const char *coop, const char *uid, const char *internet, const char *room, const char *relay, char *err, size_t errn) {
 +    memset(c, 0, sizeof *c);
 +    c->platform = 1; c->discovery = 1;
 +    put64(c->uid, k_uid_default[0]); put64(c->uid + 8, k_uid_default[1]);
 +    if (!coop || !*coop || !strcmp(coop, "off") || !strcmp(coop, "0")) return 0;
 +    const char *end = coop + strlen(coop);
 +    unsigned long port;
++    int inet = 0;
++    if (internet && *internet && strcmp(internet, "0") && strcmp(internet, "off")) {
++        if (strcmp(internet, "1") && strcmp(internet, "on")) { snprintf(err, errn, "DM_COOP_INTERNET=%s: 1 (internet play) or 0 wanted", internet); return -1; }
++        inet = 1;
++    }
 +    if (!strcmp(coop, "auto") || !strncmp(coop, "auto:", 5)) {
 +        port = COOP_PORT_DEFAULT;
 +        if (coop[4] == ':' && (parse_u(coop + 5, end, 65535, &port) || !port)) { snprintf(err, errn, "DM_COOP=%s: auto:<port 1-65535> wanted", coop); return -1; }
@@ -5006,14 +5340,32 @@ index 0000000..ae66fcd
 +            snprintf(err, errn, "DM_COOP=%s: join:<IPv4>[:<port>] wanted", coop); return -1;
 +        }
 +        int cls = coop_addr4_class(c->addr);
-+        if (!coop_addr_allowed(COOP_SCOPE_LAN, cls)) {
-+            snprintf(err, errn, "DM_COOP=%s: %u.%u.%u.%u is not a loopback, private (RFC 1918) or link-local address; joining over the internet is not built", coop,
-+                     c->addr >> 24, c->addr >> 16 & 0xFF, c->addr >> 8 & 0xFF, c->addr & 0xFF);
++        if (!coop_addr_allowed(inet ? COOP_SCOPE_INTERNET : COOP_SCOPE_LAN, cls)) {
++            if (inet) snprintf(err, errn, "DM_COOP=%s: %u.%u.%u.%u is not an address a host can have", coop, c->addr >> 24, c->addr >> 16 & 0xFF, c->addr >> 8 & 0xFF, c->addr & 0xFF);
++            else snprintf(err, errn, "DM_COOP=%s: %u.%u.%u.%u is not a loopback, private (RFC 1918) or link-local address; internet play is a separate opt-in "
++                          "(DM_COOP_INTERNET=1 and the host's DM_COOP_ROOM code, docs/coop-step1d.md)", coop, c->addr >> 24, c->addr >> 16 & 0xFF, c->addr >> 8 & 0xFF, c->addr & 0xFF);
 +            return -1;
 +        }
-+        c->role = COOP_ROLE_JOIN; c->scope = cls == COOP_ADDR_LOOPBACK ? COOP_SCOPE_LOOPBACK : COOP_SCOPE_LAN; c->port = (uint16_t)port;
++        c->role = COOP_ROLE_JOIN; c->scope = cls == COOP_ADDR_LOOPBACK ? COOP_SCOPE_LOOPBACK : inet ? COOP_SCOPE_INTERNET : COOP_SCOPE_LAN; c->port = (uint16_t)port;
 +    } else { snprintf(err, errn, "DM_COOP=%s: auto, auto:<port>, join:<IPv4>[:<port>], host:<port> or off wanted", coop); return -1; }
 +    if (uid && *uid && parse_uid(uid, c->uid)) { snprintf(err, errn, "DM_UID=%s: 32 hex digits, not all zero, wanted", uid); return -1; }
++    if (!inet) return 1;
++    // internet play: the room code every link proves (a visitor needs the host's; a host without one gets a new one), the relay, any address
++    c->auth = 1;
++    if (c->role == COOP_ROLE_AUTO) c->scope = COOP_SCOPE_INTERNET;   // host: links from anywhere (port forwarding); join: any address. host: stays 127.0.0.1
++    if (room && *room) {
++        if (!coop_room_normalize(room, c->room)) { snprintf(err, errn, "DM_COOP_ROOM: a room code is 16 letters and digits, XXXX-XXXX-XXXX-XXXX as the host's log shows it"); return -1; }
++    } else if (c->role == COOP_ROLE_JOIN) { snprintf(err, errn, "DM_COOP_INTERNET=1: joining needs the host's room code (DM_COOP_ROOM=XXXX-XXXX-XXXX-XXXX)"); return -1; }
++    else { coop_room_new(c->room); c->room_new = 1; }
++    if (relay && *relay) {
++        const char *re = relay + strlen(relay), *colon = memchr(relay, ':', (size_t)(re - relay)), *ie = colon ? colon : re;
++        port = COOP_RELAY_PORT_DEFAULT;
++        if (parse_ip(relay, ie, &c->relay_ip) || (colon && (parse_u(colon + 1, re, 65535, &port) || !port)) || coop_addr4_class(c->relay_ip) == COOP_ADDR_INVALID) {
++            snprintf(err, errn, "DM_COOP_RELAY=%s: <IPv4>[:<port>] wanted", relay); return -1;
++        }
++        if (c->role != COOP_ROLE_AUTO) { snprintf(err, errn, "DM_COOP_RELAY needs DM_COOP=auto: it hosts through the relay while the game hosts and joins its room while the game scans"); return -1; }
++        c->relay_port = (uint16_t)port; c->discovery = 0;   // the relay is the meeting place: no DNS-SD
++    }
 +    return 1;
 +}
 +int coop_env_uid(uint8_t out[16]) {
@@ -5025,9 +5377,9 @@ index 0000000..ae66fcd
 +    cplat_lock(&once);
 +    if (!done) {
 +        done = 1;
-+        coop_cfg c; char err[200] = "";
-+        const char *mode = getenv("DM_COOP");
-+        int r = coop_cfg_parse(&c, mode, getenv("DM_UID"), err, sizeof err);
++        coop_cfg c; char err[240] = "";
++        const char *mode = getenv("DM_COOP"), *inet = getenv("DM_COOP_INTERNET"), *room = getenv("DM_COOP_ROOM"), *relay = getenv("DM_COOP_RELAY");
++        int r = coop_cfg_parse_ex(&c, mode, getenv("DM_UID"), inet, room, relay, err, sizeof err);
 +        const char *t = getenv("DM_COOP_TCP"), *d = getenv("DM_COOP_DISCOVERY");
 +        c.tcp_only = t && *t && strcmp(t, "0");
 +        if (d && !strcmp(d, "0")) c.discovery = 0;
@@ -5038,9 +5390,18 @@ index 0000000..ae66fcd
 +            uint8_t *u = c.uid; char a[16]; snprintf(a, sizeof a, "%u.%u.%u.%u", c.addr >> 24, c.addr >> 16 & 0xFF, c.addr >> 8 & 0xFF, c.addr & 0xFF);
 +            coop_logf(node, "DM_COOP %s%s%s, port %u, peers: %s, Uid %016llx%016llx%s%s", c.role == COOP_ROLE_HOST ? "host" : c.role == COOP_ROLE_JOIN ? "join " : "auto",
 +                      c.role == COOP_ROLE_JOIN ? a : "", c.role == COOP_ROLE_AUTO && !c.discovery ? " (DNS-SD off)" : "", c.port,
-+                      c.scope == COOP_SCOPE_LOOPBACK ? "loopback only" : "loopback, private and link-local addresses only",
++                      c.scope == COOP_SCOPE_LOOPBACK ? "loopback only" : c.scope == COOP_SCOPE_INTERNET ? "any address that proves the room code" : "loopback, private and link-local addresses only",
 +                      (unsigned long long)get64(u), (unsigned long long)get64(u + 8), getenv("DM_UID") ? "" : " (the constant: DM_UID unset)",
 +                      c.tcp_only ? ", game datagrams over the control link (DM_COOP_TCP)" : "");
++            if (c.auth) {
++                char shown[COOP_ROOM_SHOWN]; coop_room_format(c.room, shown);
++                if (c.room_new) coop_logf(node, "internet play: this session's room code is %s; visitors need it (set DM_COOP_ROOM to keep one code across sessions)", shown);
++                else coop_logf(node, "internet play: room code %s", shown);
++                if (c.relay_ip) coop_logf(node, "internet play: through the relay %u.%u.%u.%u:%u (hosting opens the room there, scanning asks it for the room's host)",
++                                          c.relay_ip >> 24, c.relay_ip >> 16 & 0xFF, c.relay_ip >> 8 & 0xFF, c.relay_ip & 0xFF, c.relay_port);
++                coop_logf(node, "internet play: every link proves the room code and every message is tagged against changes, but nothing is encrypted: "
++                                "anyone on the way (a relay too) can read the game's traffic (docs/coop-step1d.md)");
++            } else if ((room && *room) || (relay && *relay)) coop_logf(node, "DM_COOP_ROOM / DM_COOP_RELAY ignored: internet play is off (DM_COOP_INTERNET=1 turns it on)");
 +        }
 +    }
 +    cplat_unlock(&once);
@@ -5054,6 +5415,9 @@ index 0000000..ae66fcd
 +    n->cfg = *c;
 +    cplat_mutex_init(&n->lk); cplat_mutex_init(&n->life); cplat_mutex_init(&n->dlk);
 +    n->lsock = n->husock = n->susock = CSOCK_BAD; n->upi = -1; n->join_peer = -1;
++    n->proto = c->auth ? MP_PROTO_INET : MP_PROTO; n->uhdr = c->auth ? MP_UDP_HDR3 : MP_UDP_HDR;
++    if (c->auth) croom_keys(n->cfg.room, n->k_auth, n->room_id);
++    n->rc.s = CSOCK_BAD;
 +    for (int i = 0; i < HOST_CONNS; i++) n->hc[i].s = CSOCK_BAD;
 +    for (int i = 0; i < PEERS; i++) n->pr[i].c.s = CSOCK_BAD;
 +    n->next_eph = 49152;
@@ -5066,6 +5430,7 @@ index 0000000..ae66fcd
 +    cdisc_fini(n);
 +    cvnet_reset(n);
 +    cplat_mutex_destroy(&n->lk); cplat_mutex_destroy(&n->life); cplat_mutex_destroy(&n->dlk);
++    cwipe(n, sizeof *n);   // the room code and keys
 +    free(n);
 +    cplat_fini();
 +}
@@ -5287,7 +5652,7 @@ index 0000000..ae66fcd
 +    while (n->scan_busy && n->io_on) cldn_wait(n, 1000000);
 +    if (!n->io_on) { cnode_unlock(n); return 0; }
 +    n->scan_busy = 1;
-+    int64_t t0 = cplat_now_ms(), until = t0 + SCAN_LINK_MS;
++    int64_t t0 = cplat_now_ms(), until = t0 + (n->cfg.auth ? SCAN_LINK_INET_MS : SCAN_LINK_MS);
 +    if (n->cfg.role == COOP_ROLE_AUTO && n->cfg.discovery && n->browse_t0 + BROWSE_GRACE_MS > until) until = n->browse_t0 + BROWSE_GRACE_MS;
 +    for (;;) {   // links: every host that is not known to be down or incompatible, or the deadline
 +        int ready = 0, waiting = 0; int64_t now = cplat_now_ms();
@@ -5310,7 +5675,7 @@ index 0000000..ae66fcd
 +        cmp_send_frame(n, &p->c, M_SCAN_REQ, NULL, 0);
 +        asked++;
 +    }
-+    int64_t until2 = cplat_now_ms() + SCAN_LINK_MS;
++    int64_t until2 = cplat_now_ms() + (n->cfg.auth ? SCAN_LINK_INET_MS : SCAN_LINK_MS);
 +    while (asked && cplat_now_ms() < until2 && n->io_on) {
 +        int open = 0;
 +        for (int i = 0; i < PEERS; i++) open += n->pr[i].used && n->pr[i].scan_wait && !n->pr[i].scan_done;
@@ -5350,7 +5715,7 @@ index 0000000..ae66fcd
 +        cnode_unlock(n); return COOP_LDN_CONNECT_NOT_FOUND;
 +    }
 +    if (p->compat < 0) { coop_logf(n, "ldn: Connect: that host runs another build or other mods"); cnode_unlock(n); return COOP_LDN_CONNECT_REJECTED; }
-+    int64_t until = cplat_now_ms() + SCAN_LINK_MS;
++    int64_t until = cplat_now_ms() + (n->cfg.auth ? SCAN_LINK_INET_MS : SCAN_LINK_MS);
 +    while ((p->c.state != CONN_READY || p->c.closing) && n->io_on && cplat_now_ms() < until) cldn_wait(n, 2000000);
 +    if (p->c.state != CONN_READY || p->c.closing) { cnode_unlock(n); return COOP_LDN_CONNECT_NOT_FOUND; }
 +    cldn_ident(n);   // cheats may have changed since the scan
@@ -5437,10 +5802,10 @@ index 0000000..ae66fcd
 +}
 diff --git a/dm/host/hle_coop_mpnet.c b/dm/host/hle_coop_mpnet.c
 new file mode 100644
-index 0000000..ea3bd7b
+index 0000000..13a71e4
 --- /dev/null
 +++ b/dm/host/hle_coop_mpnet.c
-@@ -0,0 +1,740 @@
+@@ -0,0 +1,1062 @@
 +// coop mpnet (MIT, our own code): the real transport, a star around the host (the LDN access point).
 +// - Control: one TCP link per station and host, framed messages (u32 length, u8 type, body): HELLO / WELCOME (the coop protocol; the host's build and
 +//   mods fingerprint), SCAN_REQ / SCAN_RESP (the host's NetworkInfo and identity), JOIN / ACCEPT / REFUSE (the host checks the network, passphrase,
@@ -5455,6 +5820,12 @@ index 0000000..ea3bd7b
 +//   it is given before the game sees it.
 +// A station keeps one link per host it knows (the configured one, or the ones DNS-SD found), scans over all of them and joins over one.
 +// One I/O thread per node owns accepting, dialing, reading, DNS-SD and closing; game threads only append to a link's send buffer under the node lock.
++// Internet play (cfg.auth, protocol 3, docs/coop-step1d.md): any address may connect, but a link counts only once the station has proven the room
++// code (AUTH_CHAL / AUTH_PROOF) and the host has proven it back (AUTH_OK); then every frame carries a tag over an implicit sequence number and every
++// datagram a sequence number and a tag (coop_auth.c), so changed, dropped, repeated or foreign messages close the link or are dropped. Failed proofs
++// are limited per minute, per address and for all links. Nothing is encrypted. Through a relay (cfg.relay_ip) the host keeps a control link open
++// at the relay while the game hosts and dials one more link per visitor the relay announces; a station dials the relay and asks for the room; the
++// relay pairs the two and copies bytes, and game datagrams then use the control link.
 +#include "coop_int.h"
 +#include <stdio.h>
 +
@@ -5482,6 +5853,15 @@ index 0000000..ea3bd7b
 +#define RATE_JOINS 5             // JOIN per second per link (burst as much); a faster one is refused (ConnectRejected) unread
 +#define UDP_READS 512            // packets read per wakeup
 +#define LOG_GAP_MS 5000          // repeated refusals and drops: one line per this
++// Internet play
++#define AUTH_HELLO_MS 6000       // HELLO to READY with the room-code handshake (a relay adds a pairing and longer round trips)
++#define AUTH_FAILS_MIN 30        // failed proofs a minute for all links (burst as much); beyond, new handshakes are refused until the budget refills
++#define AUTH_FAILS_IP_MIN 6      // and from one address
++#define AUTH_RETRY_MS 30000      // a station whose code a host refused, or a host that did not prove it, is not dialled again for this long
++#define RELAY_WAIT_MS 12000      // a station's link to the relay waits this long for the relay to pair it (the relay gives up after 10 s)
++#define RELAY_PING_MS 5000       // the host's control link to the relay: a ping this often; silent for RELAY_TIMEOUT_MS, it is dialled again
++#define RELAY_TIMEOUT_MS 20000
++#define RELAY_RETRY_MS 2000      // a refused or lost control link: dialled again after this (and up to 15 s while it keeps failing)
 +
 +static void conn_init(conn *c, csock s, int state) {
 +    free(c->rx); free(c->tx);
@@ -5505,12 +5885,36 @@ index 0000000..ea3bd7b
 +}
 +void cmp_send_frame(coop_node *n, conn *c, int type, const void *p, size_t len) {
 +    (void)n;
-+    if (c->state < CONN_HELLO || c->closing || len + 1 > MP_FRAME_MAX) return;
-+    if (c->txn + len + 5 > TX_MAX || grow(&c->tx, &c->txcap, c->txn + len + 5)) { c->closing = 2; return; }   // a peer that stopped reading is lost
-+    put32(c->tx + c->txn, (uint32_t)len + 1); c->tx[c->txn + 4] = (uint8_t)type;
-+    if (len) memcpy(c->tx + c->txn + 5, p, len);
-+    c->txn += len + 5;
++    size_t tl = c->keyed ? CAUTH_TAG : 0;   // internet play: the tag after the body
++    if (c->state < CONN_HELLO || c->closing || len + 1 + tl > MP_FRAME_MAX) return;
++    if (c->txn + len + 5 + tl > TX_MAX || grow(&c->tx, &c->txcap, c->txn + len + 5 + tl)) { c->closing = 2; return; }   // a peer that stopped reading is lost
++    uint8_t *h = c->tx + c->txn;
++    put32(h, (uint32_t)(len + 1 + tl)); h[4] = (uint8_t)type;
++    if (len) memcpy(h + 5, p, len);
++    if (tl) cauth_frame_tag(&c->ktx, c->seq_tx++, h, h + 5, len, h + 5 + len);
++    c->txn += len + 5 + tl;
 +    conn_flush(c);
++}
++static void conn_raw(conn *c, const void *p, size_t len) {   // the relay's own messages: unframed, before the pairing (and on its control link)
++    if (c->closing || c->txn + len > TX_MAX || grow(&c->tx, &c->txcap, c->txn + len)) { c->closing = 2; return; }
++    memcpy(c->tx + c->txn, p, len); c->txn += len;
++    conn_flush(c);
++}
++static void relay_hello(conn *c, int kind, const uint8_t room[16], uint32_t id, uint32_t cookie) {
++    uint8_t h[RLY_HELLO_LEN] = {0};
++    put32(h, RLY_MAGIC); h[4] = (uint8_t)kind; h[5] = 1; memcpy(h + 8, room, 16); put32(h + 24, id); put32(h + 28, cookie);
++    conn_raw(c, h, sizeof h);
++}
++static const char *relay_err(int code) {
++    switch (code) {
++    case RLY_E_NOROOM: return "no room with this code is open there (is the host hosting yet?)";
++    case RLY_E_TAKEN: return "a host already holds this room";
++    case RLY_E_FULL: return "the room is full";
++    case RLY_E_LIMIT: return "the relay is at one of its limits";
++    case RLY_E_TIMEOUT: return "the host did not answer through the relay in time";
++    case RLY_E_EXPIRED: return "the room reached the relay's age or byte limit";
++    default: return "it refused the request";
++    }
 +}
 +static void ipstr(char *o, uint32_t ip) { snprintf(o, 16, "%u.%u.%u.%u", ip >> 24, ip >> 16 & 0xFF, ip >> 8 & 0xFF, ip & 0xFF); }
 +static const char *peer_tag(peer *p, char *o, size_t n) {   // "192.168.1.20:47600 (Pokopia-1a2b3c4d)" for logs
@@ -5553,11 +5957,50 @@ index 0000000..ea3bd7b
 +    n->refused_src++;
 +    if (n->refused_src <= 4 || now - n->log_src_at >= LOG_GAP_MS) {
 +        char a[16]; ipstr(a, ip);
-+        coop_logf(n, "mp: refused %s: not a %s address (%llu refused so far)", a, n->cfg.scope == COOP_SCOPE_LOOPBACK ? "loopback" : "loopback, private or link-local",
-+                  (unsigned long long)n->refused_src);
++        coop_logf(n, "mp: refused %s: not a %s address (%llu refused so far)", a, n->cfg.scope == COOP_SCOPE_LOOPBACK ? "loopback" :
++                  n->cfg.scope == COOP_SCOPE_INTERNET ? "valid unicast" : "loopback, private or link-local", (unsigned long long)n->refused_src);
 +        n->log_src_at = now;
 +    }
 +    return 0;
++}
++// Failed room-code proofs (internet play): a budget per minute for all links and per address, as thousandths of a failure in a bucket
++static int fail_left(bucket *b, int64_t now, int64_t per_min) {
++    if (!b->last) { b->last = now; b->milli = per_min * 1000; }
++    int64_t add = (now - b->last) * per_min / 60;
++    if (add > 0) { b->milli += add; b->last = now; if (b->milli > per_min * 1000) b->milli = per_min * 1000; }
++    return b->milli >= 1000;
++}
++static bucket *fail_ip(coop_node *n, uint32_t ip) {
++    int k = 0;
++    for (int i = 0; i < 16; i++) { if (n->fail_ip[i].ip == ip) return &n->fail_ip[i].b; if (n->fail_ip[i].b.last < n->fail_ip[k].b.last) k = i; }
++    n->fail_ip[k].ip = ip; memset(&n->fail_ip[k].b, 0, sizeof n->fail_ip[k].b);   // the address unseen the longest makes room
++    return &n->fail_ip[k].b;
++}
++static int auth_allowed(coop_node *n, conn *c) {   // may this link try the room code now?
++    int64_t now = cplat_now_ms();
++    int ok = fail_left(&n->fail_all, now, AUTH_FAILS_MIN) && (c->relay || fail_left(fail_ip(n, c->peer_ip), now, AUTH_FAILS_IP_MIN));
++    if (!ok) {
++        n->auth_fail++;
++        if (now - n->log_auth_at >= LOG_GAP_MS) {
++            char a[16]; ipstr(a, c->peer_ip);
++            coop_logf(n, "mp: a link from %s closed before its handshake: too many wrong room codes in the last minute%s (%llu failures so far)", a,
++                      c->relay ? "" : " (from it, or from everyone)", (unsigned long long)n->auth_fail);
++            n->log_auth_at = now;
++        }
++    }
++    return ok;
++}
++static void auth_failed(coop_node *n, conn *c) {
++    int64_t now = cplat_now_ms();
++    fail_left(&n->fail_all, now, AUTH_FAILS_MIN); n->fail_all.milli -= 1000;
++    if (!c->relay) { bucket *b = fail_ip(n, c->peer_ip); fail_left(b, now, AUTH_FAILS_IP_MIN); b->milli -= 1000; }
++    n->auth_fail++;
++    if (n->auth_fail <= 4 || now - n->log_auth_at >= LOG_GAP_MS) {
++        char a[16]; ipstr(a, c->peer_ip);
++        coop_logf(n, "mp: a link from %s:%u%s did not prove the room code (a wrong code, or not a player): closed (%llu failures so far)", a, c->peer_port,
++                  c->relay ? " (through the relay)" : "", (unsigned long long)n->auth_fail);
++        n->log_auth_at = now;
++    }
 +}
 +// The identity in WELCOME, SCAN_RESP and JOIN: main's build ID as 16 hex digits (zeros: unknown), the mods fingerprint
 +static void ident_put(coop_node *n, uint8_t *p) { memset(p, 0, 16); memcpy(p, n->build, strlen(n->build)); put64(p + 16, n->mods); }
@@ -5572,15 +6015,22 @@ index 0000000..ea3bd7b
 +    *mods = get64(p + 16);
 +    return 1;
 +}
-+// A datagram's header and payload go to n->scratch + MP_UDP_HDR; send_udp puts the UDP header in front
++// A datagram's header and payload go to n->scratch + n->uhdr; send_udp puts the UDP header in front (and, in internet play, the tag behind)
 +static size_t dg_build(coop_node *n, uint32_t sip, uint16_t sport, uint32_t dip, uint16_t dport, const uint8_t *p, size_t len) {
-+    uint8_t *b = n->scratch + MP_UDP_HDR;
++    uint8_t *b = n->scratch + n->uhdr;
 +    put32(b, sip); put32(b + 4, dip); put16(b + 8, sport); put16(b + 10, dport);
 +    if (len) memcpy(b + MP_DG_HDR, p, len);
 +    return MP_DG_HDR + len;
 +}
-+static void send_udp(coop_node *n, csock s, int type, uint64_t token, uint32_t ip, uint16_t port, size_t blen) {
++static void send_udp(coop_node *n, csock s, conn *c, int type, uint64_t token, uint32_t ip, uint16_t port, size_t blen) {
 +    uint8_t *b = n->scratch;
++    if (n->cfg.auth) {
++        if (!c->keyed) return;
++        put32(b, MP_UMAGIC3); b[4] = (uint8_t)type; b[5] = b[6] = b[7] = 0; put64(b + 8, token); put64(b + 16, ++c->useq_tx);
++        cauth_udp_tag(&c->kutx, b, MP_UDP_HDR3 + blen, b + MP_UDP_HDR3 + blen);
++        cplat_sendto(s, b, MP_UDP_HDR3 + blen + CAUTH_TAG, ip, port);
++        return;
++    }
 +    put32(b, MP_UMAGIC); b[4] = (uint8_t)type; b[5] = b[6] = b[7] = 0; put64(b + 8, token);
 +    cplat_sendto(s, b, MP_UDP_HDR + blen, ip, port);
 +}
@@ -5597,16 +6047,16 @@ index 0000000..ea3bd7b
 +            conn *c = &n->hc[i];
 +            if (c->state != CONN_READY || c->node <= 0 || c->accept_pending || c->closing || c->node == from_node || !(bc || dst_ip == vip_of(n, c->node))) continue;
 +            if (!bl) bl = dg_build(n, src_ip, src_port, dst_ip, dst_port, p, len);
-+            if (!n->cfg.tcp_only && c->udp_port && n->husock != CSOCK_BAD) { send_udp(n, n->husock, U_DGRAM, c->token, c->udp_ip, c->udp_port, bl); n->st_udp_tx++; }
-+            else { cmp_send_frame(n, c, M_DGRAM, n->scratch + MP_UDP_HDR, bl); n->st_tcp_tx++; }
++            if (!n->cfg.tcp_only && c->udp_port && n->husock != CSOCK_BAD) { send_udp(n, n->husock, c, U_DGRAM, c->token, c->udp_ip, c->udp_port, bl); n->st_udp_tx++; }
++            else { cmp_send_frame(n, c, M_DGRAM, n->scratch + n->uhdr, bl); n->st_tcp_tx++; }
 +        }
 +    } else if (n->ls == COOP_LS_STATION_CONNECTED) {   // a station: everything not for itself goes to the hub
 +        if (dst_ip == own) { cvnet_deliver(n, src_ip, src_port, dst_ip, dst_port, p, len); return; }
 +        peer *up = cmp_up(n);
 +        if (!up) return;
 +        size_t bl = dg_build(n, src_ip, src_port, dst_ip, dst_port, p, len);
-+        if (!n->cfg.tcp_only && n->udp_ok && n->susock != CSOCK_BAD) { send_udp(n, n->susock, U_DGRAM, n->token, up->ip, up->udp_port, bl); n->st_udp_tx++; }
-+        else { cmp_send_frame(n, &up->c, M_DGRAM, n->scratch + MP_UDP_HDR, bl); n->st_tcp_tx++; }
++        if (!n->cfg.tcp_only && n->udp_ok && n->susock != CSOCK_BAD) { send_udp(n, n->susock, &up->c, U_DGRAM, n->token, up->ip, up->udp_port, bl); n->st_udp_tx++; }
++        else { cmp_send_frame(n, &up->c, M_DGRAM, n->scratch + n->uhdr, bl); n->st_tcp_tx++; }
 +    }
 +}
 +static void host_dgram(coop_node *n, conn *c, const uint8_t *b, size_t len, int udp) {   // a station's datagram: its source address is the station's own
@@ -5658,27 +6108,56 @@ index 0000000..ea3bd7b
 +    for (int i = 0; i < HOST_CONNS; i++) if (n->hc[i].state == CONN_READY && n->hc[i].node > 0 && vip_of(n, n->hc[i].node) == ip) return &n->hc[i];
 +    return NULL;
 +}
-+static void host_welcome(coop_node *n, conn *c) {
-+    uint8_t w[MP_WELCOME_LEN]; put32(w, MP_MAGIC); put16(w + 4, MP_PROTO); put16(w + 6, n->udp_port); ident_put(n, w + 8);
++static void host_welcome(coop_node *n, conn *c, int full) {   // not full: only the protocol, for a link that is closed next (internet play tells it nothing more)
++    uint8_t w[MP_WELCOME_LEN] = {0}; put32(w, MP_MAGIC); put16(w + 4, (uint32_t)n->proto);
++    if (full) { put16(w + 6, c->relay ? 0 : n->udp_port); ident_put(n, w + 8); }
 +    cmp_send_frame(n, c, M_WELCOME, w, sizeof w);
++}
++static void host_up(coop_node *n, conn *c) {
++    char a[16]; ipstr(a, c->peer_ip);
++    c->state = CONN_READY;
++    host_welcome(n, c, 1);
++    if (c->relay) coop_logf(n, "mp: station link %d up through the relay (visitor %u)%s", (int)(c - n->hc), c->rly_id, c->keyed ? ", room code proven" : "");
++    else coop_logf(n, "mp: station link %d up from %s:%u%s", (int)(c - n->hc), a, c->peer_port, c->keyed ? ", room code proven" : "");
 +}
 +static void host_frame(coop_node *n, conn *c, int type, const uint8_t *b, size_t len) {
 +    int64_t now = cplat_now_ms();
 +    if (c->state == CONN_HELLO) {
 +        if (type != M_HELLO || len < 6 || get32(b) != MP_MAGIC) { bad_input(n, c, "a link from", "no coop HELLO"); return; }
 +        uint16_t proto = get16(b + 4);
-+        if (proto != MP_PROTO) {   // told this host's protocol, so the other end can say what to update
-+            host_welcome(n, c); c->closing = 1;
++        if (proto != n->proto) {   // told this host's protocol, so the other end can say what to update
++            host_welcome(n, c, !n->cfg.auth); c->closing = 1;
 +            char a[16]; ipstr(a, c->peer_ip);
-+            coop_logf(n, "mp: %s speaks coop protocol %u, this build %u: closed (both players need the same build of this app)", a, proto, MP_PROTO);
++            if (proto == MP_PROTO_INET || n->proto == MP_PROTO_INET)
++                coop_logf(n, "mp: %s speaks coop protocol %u, this host %u: closed (internet play must be on for both players, or off for both)", a, proto, n->proto);
++            else coop_logf(n, "mp: %s speaks coop protocol %u, this build %u: closed (both players need the same build of this app)", a, proto, n->proto);
 +            return;
 +        }
-+        if (len < MP_HELLO_LEN) { bad_input(n, c, "a link from", "a short HELLO"); return; }
++        if (len < (n->cfg.auth ? MP_HELLO3_LEN : MP_HELLO_LEN)) { bad_input(n, c, "a link from", "a short HELLO"); return; }
 +        c->platform = b[6]; memcpy(c->uid, b + 7, 16);
-+        c->state = CONN_READY;
-+        host_welcome(n, c);
-+        char a[16]; ipstr(a, c->peer_ip);
-+        coop_logf(n, "mp: station link %d up from %s:%u", (int)(c - n->hc), a, c->peer_port);
++        if (n->cfg.auth) {   // internet play: the station proves the room code before anything else is said
++            if (!auth_allowed(n, c)) { c->closing = 2; return; }
++            memcpy(c->hello, b + 6, 17); memcpy(c->ns, b + MP_HELLO_LEN, CAUTH_NONCE);
++            cplat_random(c->nh, CAUTH_NONCE);
++            uint8_t ch[MP_CHAL_LEN]; put32(ch, MP_MAGIC); put16(ch + 4, MP_PROTO_INET); memcpy(ch + 6, c->nh, CAUTH_NONCE);
++            cmp_send_frame(n, c, M_AUTH_CHAL, ch, sizeof ch);
++            c->state = CONN_AUTH;
++            return;
++        }
++        host_up(n, c);
++        return;
++    }
++    if (c->state == CONN_AUTH) {
++        if (type != M_AUTH_PROOF || len < 32) { bad_input(n, c, "a link from", "no room-code proof"); return; }
++        uint8_t want[32]; cauth_proof(n->k_auth, 0, c->ns, c->nh, c->hello, 17, want);
++        int ok = cct_eq(want, b, 32);
++        cwipe(want, sizeof want);
++        if (!ok) { auth_failed(n, c); cmp_send_frame(n, c, M_AUTH_FAIL, NULL, 0); c->closing = 1; return; }
++        uint8_t th[32]; cauth_proof(n->k_auth, 1, c->ns, c->nh, NULL, 0, th);
++        cmp_send_frame(n, c, M_AUTH_OK, th, 32);   // the last frame without a tag
++        cauth_link_keys(c, n->k_auth, c->ns, c->nh, 1);
++        n->auth_ok++;
++        host_up(n, c);
 +        return;
 +    }
 +    if (!bucket_take(&c->frames, now, RATE_FRAMES, 2 * RATE_FRAMES, 1)) { rate_drop(n, c, "frames"); return; }
@@ -5730,7 +6209,7 @@ index 0000000..ea3bd7b
 +        int pending = 0; conn *slot = NULL;
 +        for (int j = 0; j < HOST_CONNS; j++) {
 +            if (n->hc[j].state == CONN_FREE) { if (!slot) slot = &n->hc[j]; }
-+            else if (n->hc[j].state == CONN_HELLO && n->hc[j].peer_ip == ip) pending++;
++            else if ((n->hc[j].state == CONN_HELLO || n->hc[j].state == CONN_AUTH) && n->hc[j].peer_ip == ip) pending++;
 +        }
 +        if (!slot || pending >= PENDING_PER_IP || !bucket_take(&n->accepts, now, RATE_ACCEPTS, RATE_ACCEPTS, 1)) {
 +            n->rate_drops++;
@@ -5747,6 +6226,12 @@ index 0000000..ea3bd7b
 +int cmp_host_open(coop_node *n) {
 +    if (n->hosting) return 0;
 +    for (int i = 0; i < 25 && n->nzap && n->io_on; i++) cldn_wait(n, 2000000);   // the last network's sockets close after the I/O thread's poll
++    if (n->cfg.relay_ip) {   // through the relay: nothing listens here; the I/O thread opens the room and dials a link per visitor
++        n->hosting = 1; n->rc_open = 0; n->rc_next = 0; n->rc_fails = 0; n->rc_said = 0; n->udp_port = 0; n->bound_port = 0;
++        coop_logf(n, "mp: hosting through the relay %u.%u.%u.%u:%u (nothing listens on this device); game build %s, mods %016llx", n->cfg.relay_ip >> 24,
++                  n->cfg.relay_ip >> 16 & 0xFF, n->cfg.relay_ip >> 8 & 0xFF, n->cfg.relay_ip & 0xFF, n->cfg.relay_port, n->build[0] ? n->build : "unknown", (unsigned long long)n->mods);
++        return 0;
++    }
 +    int lo = n->cfg.role == COOP_ROLE_HOST || n->cfg.bind_loopback;
 +    uint32_t ip = lo ? 0x7F000001u : 0;
 +    n->lsock = cplat_tcp_listen(ip, n->cfg.port, &n->bound_port);
@@ -5762,9 +6247,12 @@ index 0000000..ea3bd7b
 +    n->hosting = 1;
 +    n->disc.adv_port = n->bound_port;
 +    n->disc.adv_want = n->cfg.role == COOP_ROLE_AUTO && n->cfg.discovery;
-+    coop_logf(n, "mp: hosting on %s:%u (TCP control), UDP datagrams on %u; links from %s addresses only; game build %s, mods %016llx", lo ? "127.0.0.1" : "every interface",
-+              n->bound_port, n->udp_port, n->cfg.scope == COOP_SCOPE_LOOPBACK ? "loopback" : "loopback, private (RFC 1918) and link-local",
-+              n->build[0] ? n->build : "unknown", (unsigned long long)n->mods);
++    if (n->cfg.scope == COOP_SCOPE_INTERNET)
++        coop_logf(n, "mp: hosting on %s:%u (TCP control), UDP datagrams on %u; links from any address, kept only when they prove the room code; game build %s, "
++                     "mods %016llx", lo ? "127.0.0.1" : "every interface", n->bound_port, n->udp_port, n->build[0] ? n->build : "unknown", (unsigned long long)n->mods);
++    else coop_logf(n, "mp: hosting on %s:%u (TCP control), UDP datagrams on %u; links from %s addresses only%s; game build %s, mods %016llx", lo ? "127.0.0.1" : "every interface",
++                   n->bound_port, n->udp_port, n->cfg.scope == COOP_SCOPE_LOOPBACK ? "loopback" : "loopback, private (RFC 1918) and link-local",
++                   n->cfg.auth ? " that prove the room code" : "", n->build[0] ? n->build : "unknown", (unsigned long long)n->mods);
 +#ifdef _WIN32
 +    if (!lo) coop_logf(n, "mp: Windows asks once whether to allow this app on networks: allow Private networks only (docs/coop-step1c.md)");
 +#endif
@@ -5773,6 +6261,8 @@ index 0000000..ea3bd7b
 +void cmp_host_close(coop_node *n) {
 +    if (!n->hosting) return;
 +    n->hosting = 0; n->disc.adv_want = 0;
++    if (n->rc.state != CONN_FREE && !n->rc.closing) { n->rc.closing = 1; coop_logf(n, "mp: the relay room closes"); }   // the relay forgets the room
++    n->rc_open = 0;
 +    zap(n, n->lsock); zap(n, n->husock);
 +    n->lsock = n->husock = CSOCK_BAD; n->bound_port = n->udp_port = 0;
 +    int k = 0;
@@ -5790,7 +6280,13 @@ index 0000000..ea3bd7b
 +    peer *p = &n->pr[0];
 +    conn_init(&p->c, CSOCK_BAD, CONN_FREE);
 +    p->used = 1; p->src = PEER_CFG; p->ip = n->cfg.addr; p->port = n->cfg.port; p->compat = 0; p->name[0] = 0;
++    if (n->cfg.relay_ip) { p->ip = n->cfg.relay_ip; p->port = n->cfg.relay_port; p->relay = 1; snprintf(p->name, sizeof p->name, "the relay's room"); }
 +    return 0;
++}
++static void peer_say(coop_node *n, peer *p, int what, const char *fmt, const char *why) {   // a relay or room-code problem: a line when it changes
++    if (p->said == what) return;
++    p->said = what;
++    char t[96]; coop_logf(n, fmt, peer_tag(p, t, sizeof t), why);
 +}
 +static void peer_compat(coop_node *n, peer *p) {
 +    char t[96]; const char *why = NULL;
@@ -5816,20 +6312,53 @@ index 0000000..ea3bd7b
 +}
 +static void station_frame(coop_node *n, peer *p, int type, const uint8_t *b, size_t len) {
 +    conn *c = &p->c; int idx = (int)(p - n->pr); int64_t now = cplat_now_ms(); char t[96];
++    if (c->state == CONN_HELLO && n->cfg.auth && !c->keyed && type == M_AUTH_CHAL) {   // internet play: prove the room code
++        if (len < MP_CHAL_LEN || get32(b) != MP_MAGIC || get16(b + 4) != MP_PROTO_INET) { bad_input(n, c, "host", "a bad room-code challenge"); return; }
++        memcpy(c->nh, b + 6, CAUTH_NONCE);
++        uint8_t pr[32]; cauth_proof(n->k_auth, 0, c->ns, c->nh, c->hello, 17, pr);
++        cmp_send_frame(n, c, M_AUTH_PROOF, pr, 32);
++        cwipe(pr, sizeof pr);
++        c->state = CONN_AUTH;
++        return;
++    }
++    if (c->state == CONN_AUTH) {   // the host's answer: its own proof, or a refusal of this one
++        if (type == M_AUTH_FAIL) {
++            n->auth_fail++; p->fails++; p->dead_until = now + AUTH_RETRY_MS; c->closing = 1;
++            peer_say(n, p, 10, "mp: host %s refused the room code: %s", "check DM_COOP_ROOM against the code the host shows (dialled again in 30 s)");
++            return;
++        }
++        if (type != M_AUTH_OK || len < 32) { bad_input(n, c, "host", "no answer to the room-code proof"); return; }
++        uint8_t want[32]; cauth_proof(n->k_auth, 1, c->ns, c->nh, NULL, 0, want);
++        int ok = cct_eq(want, b, 32);
++        cwipe(want, sizeof want);
++        if (!ok) {
++            n->auth_fail++; p->fails++; p->dead_until = now + AUTH_RETRY_MS; c->closing = 2;
++            peer_say(n, p, 11, "mp: host %s %s", "did not prove the room code: not the host this code belongs to (dialled again in 30 s)");
++            return;
++        }
++        cauth_link_keys(c, n->k_auth, c->ns, c->nh, 0);
++        n->auth_ok++;
++        c->state = CONN_HELLO;   // the WELCOME comes next, tagged
++        return;
++    }
 +    if (c->state == CONN_HELLO) {
 +        if (type != M_WELCOME || len < 6 || get32(b) != MP_MAGIC) { bad_input(n, c, "host", "no coop WELCOME"); return; }
 +        uint16_t proto = get16(b + 4);
-+        if (proto != MP_PROTO) {   // not dialled again while this peer lasts (a DNS-SD entry that comes back is a new one)
-+            coop_logf(n, "mp: host %s speaks coop protocol %u, this build %u: hidden from scans (both players need the same build of this app)",
-+                      peer_tag(p, t, sizeof t), proto, MP_PROTO);
++        if (proto != n->proto) {   // not dialled again while this peer lasts (a DNS-SD entry that comes back is a new one)
++            if (proto == MP_PROTO_INET || n->proto == MP_PROTO_INET)
++                coop_logf(n, "mp: host %s speaks coop protocol %u, this build %u: hidden from scans (internet play must be on for both players, or off for both)",
++                          peer_tag(p, t, sizeof t), proto, n->proto);
++            else coop_logf(n, "mp: host %s speaks coop protocol %u, this build %u: hidden from scans (both players need the same build of this app)",
++                           peer_tag(p, t, sizeof t), proto, n->proto);
 +            p->compat = -2; c->closing = 1;
 +            return;
 +        }
++        if (n->cfg.auth && !c->keyed) { bad_input(n, c, "host", "a WELCOME without the room-code handshake"); return; }
 +        if (len < MP_WELCOME_LEN || !ident_get(b + 8, p->build, &p->mods)) { bad_input(n, c, "host", "a short or bad WELCOME"); return; }
-+        p->udp_port = get16(b + 6);
-+        c->state = CONN_READY; p->fails = 0; p->dead_until = 0;
++        p->udp_port = p->relay ? 0 : get16(b + 6);   // through a relay, game datagrams stay on the link
++        c->state = CONN_READY; p->fails = 0; p->dead_until = 0; p->said = 0;
 +        peer_compat(n, p);
-+        coop_logf(n, "mp: host link up: %s", peer_tag(p, t, sizeof t));
++        coop_logf(n, "mp: host link up: %s%s", peer_tag(p, t, sizeof t), c->keyed ? ", room code proven" : "");
 +        return;
 +    }
 +    if (!bucket_take(&c->frames, now, RATE_FRAMES, 2 * RATE_FRAMES, 1)) { rate_drop(n, c, "frames"); return; }
@@ -5927,21 +6456,78 @@ index 0000000..ea3bd7b
 +            else if (k > 0) { c->rxn += (size_t)k; c->last_rx = cplat_now_ms(); more = c->rxn == RX_MAX; }
 +        }
 +        size_t off = 0;
-+        while (c->rxn - off >= 5 && (c->closing == 0 || c->closing == 3)) {
++        if (c->state == CONN_RELAY && p && c->rxn >= RLY_MSG_LEN) {   // the relay's answer to a station's JOIN: paired with the host, or why not
++            const uint8_t *m = c->rx;
++            int64_t now = cplat_now_ms();
++            off = RLY_MSG_LEN;
++            if (get32(m) == RLY_MAGIC && m[4] == RLY_OK) {
++                uint8_t h[MP_HELLO3_LEN]; put32(h, MP_MAGIC); put16(h + 4, (uint32_t)n->proto); h[6] = n->cfg.platform; memcpy(h + 7, n->cfg.uid, 16);
++                memcpy(c->hello, h + 6, 17); cplat_random(c->ns, CAUTH_NONCE); memcpy(h + MP_HELLO_LEN, c->ns, CAUTH_NONCE);
++                c->state = CONN_HELLO; c->opened = now;
++                cmp_send_frame(n, c, M_HELLO, h, n->cfg.auth ? MP_HELLO3_LEN : MP_HELLO_LEN);
++            } else {
++                int code = get32(m) == RLY_MAGIC && m[4] == RLY_ERR ? m[5] : RLY_E_BAD;
++                peer_say(n, p, 100 + code, "mp: %s: the relay says %s", relay_err(code));
++                p->fails++; p->dead_until = now + (code == RLY_E_NOROOM || code == RLY_E_TIMEOUT ? 2000 : 5000);   // within the relay's lookups a minute
++                c->closing = 2;
++            }
++        }
++        size_t tl = c->keyed ? CAUTH_TAG : 0;
++        while (c->state != CONN_RELAY && c->rxn - off >= 5 && (c->closing == 0 || c->closing == 3)) {
 +            uint32_t fl = get32(c->rx + off);
-+            if (fl < 1 || fl > MP_FRAME_MAX) { bad_input(n, c, p ? "host" : "a link from", "a bad frame length"); break; }
++            if (fl < 1 + tl || fl > MP_FRAME_MAX) { bad_input(n, c, p ? "host" : "a link from", "a bad frame length"); break; }
 +            if (c->rxn - off < 4 + (size_t)fl) break;
 +            const uint8_t *b = c->rx + off + 5;
-+            if (p) station_frame(n, p, c->rx[off + 4], b, fl - 1); else host_frame(n, c, c->rx[off + 4], b, fl - 1);
++            size_t bl = fl - 1 - tl;
++            if (tl) {   // internet play: the tag over this direction's frame count, the header and the body
++                uint8_t t[CAUTH_TAG]; cauth_frame_tag(&c->krx, c->seq_rx, c->rx + off, b, bl, t);
++                if (!cct_eq(t, b + bl, CAUTH_TAG)) { n->bad_tag++; bad_input(n, c, p ? "host" : "a link from", "a frame whose tag does not verify (changed on the way, repeated or dropped)"); break; }
++                c->seq_rx++;
++            }
++            if (p) station_frame(n, p, c->rx[off + 4], b, bl); else host_frame(n, c, c->rx[off + 4], b, bl);
 +            off += 4 + fl;
 +            if (c->state == CONN_FREE) return;
++            tl = c->keyed ? CAUTH_TAG : 0;   // keyed from the frame after AUTH_OK on
 +        }
 +        if (off) { memmove(c->rx, c->rx + off, c->rxn - off); c->rxn -= off; }
 +        if (!more) break;
 +    }
 +}
++// Internet play's datagrams: the token finds the link, its key checks the tag over header and body, the window refuses repeats. A tagged datagram
++// from a new endpoint moves the link there (a NAT that changed its mapping), since nobody without the key can make one
++static void udp_read_auth(coop_node *n, int host, uint8_t *b, size_t k, int cut, uint32_t ip, uint16_t port) {
++    if (k < MP_UDP_HDR3 + CAUTH_TAG || cut || get32(b) != MP_UMAGIC3) { n->udp_junk++; return; }
++    int type = b[4]; uint64_t token = get64(b + 8), seq = get64(b + 16);
++    const uint8_t *body = b + MP_UDP_HDR3; size_t blen = k - MP_UDP_HDR3 - CAUTH_TAG;
++    conn *c = NULL; peer *up = NULL;
++    if (host) {
++        for (int j = 0; j < HOST_CONNS && !c; j++) if (n->hc[j].state == CONN_READY && n->hc[j].node > 0 && n->hc[j].token == token && !n->hc[j].closing && n->hc[j].keyed) c = &n->hc[j];
++    } else if ((up = cmp_up(n)) && n->token && token == n->token && up->c.keyed) c = &up->c;
++    if (!c) { n->udp_junk++; return; }
++    uint8_t t[CAUTH_TAG]; cauth_udp_tag(&c->kurx, b, k - CAUTH_TAG, t);
++    if (!cct_eq(t, b + k - CAUTH_TAG, CAUTH_TAG)) { n->bad_tag++; n->udp_junk++; return; }
++    if (!cauth_replay_ok(&c->useq_max, &c->uwin, seq)) { n->replays++; return; }
++    if (host) {
++        if (type == U_HELLO) {
++            if (!c->udp_port) coop_logf(n, "mp: node %d datagrams over UDP", c->node);
++            c->udp_ip = ip; c->udp_port = port;
++            send_udp(n, n->husock, c, U_ACK, token, ip, port, 0);
++        } else if (type == U_DGRAM) {
++            if (c->udp_port && (c->udp_ip != ip || c->udp_port != port)) {
++                int64_t now = cplat_now_ms();
++                if (now - n->log_roam_at >= LOG_GAP_MS) { char a[16]; ipstr(a, ip); coop_logf(n, "mp: node %d's datagrams now come from %s:%u", c->node, a, port); n->log_roam_at = now; }
++                c->udp_ip = ip; c->udp_port = port;
++            }
++            if (c->udp_port) host_dgram(n, c, body, blen, 1);
++        } else n->udp_junk++;
++    } else {
++        if (ip != up->ip || port != up->udp_port) { n->udp_junk++; return; }   // the host's own endpoint (it does not move)
++        if (type == U_ACK && !n->udp_ok) { n->udp_ok = 1; coop_logf(n, "mp: datagrams over UDP"); }
++        else if (type == U_DGRAM) station_dgram(n, up, body, blen, 1);
++    }
++}
 +static void udp_read(coop_node *n, int host) {
-+    uint8_t b[MP_UDP_HDR + MP_DG_HDR + COOP_DGRAM_MAX + 64];   // the I/O thread's own stack
++    uint8_t b[MP_UDP_HDR3 + MP_DG_HDR + COOP_DGRAM_MAX + CAUTH_TAG + 64];   // the I/O thread's own stack
 +    csock s = host ? n->husock : n->susock;
 +    for (int i = 0; i < UDP_READS; i++) {
 +        uint32_t ip; uint16_t port;
@@ -5949,6 +6535,7 @@ index 0000000..ea3bd7b
 +        if (k == -1 || k == -2) break;
 +        if (k < 0) { n->udp_junk++; continue; }   // over-long (dropped by the system) or an ICMP report
 +        if (host && !cmp_src_ok(n, ip)) continue;
++        if (n->cfg.auth) { udp_read_auth(n, host, b, (size_t)k, k == (int64_t)sizeof b, ip, port); continue; }
 +        if (k < MP_UDP_HDR || k == (int64_t)sizeof b || get32(b) != MP_UMAGIC) { n->udp_junk++; continue; }   // short, over-long (cut) or not ours
 +        int type = b[4]; uint64_t token = get64(b + 8);
 +        const uint8_t *body = b + MP_UDP_HDR; size_t blen = (size_t)k - MP_UDP_HDR;
@@ -5960,7 +6547,7 @@ index 0000000..ea3bd7b
 +                if (ip != c->peer_ip) { n->udp_junk++; continue; }   // the endpoint must be the control link's own device
 +                if (!c->udp_port) coop_logf(n, "mp: node %d datagrams over UDP", c->node);
 +                c->udp_ip = ip; c->udp_port = port;
-+                send_udp(n, n->husock, U_ACK, token, ip, port, 0);
++                send_udp(n, n->husock, c, U_ACK, token, ip, port, 0);
 +            } else if (type == U_DGRAM && c->udp_ip == ip && c->udp_port == port) host_dgram(n, c, body, blen, 1);
 +            else n->udp_junk++;
 +        } else {
@@ -6000,9 +6587,9 @@ index 0000000..ea3bd7b
 +            peer *p = &n->pr[fr]; peer_free(n, p);
 +            p->used = 1; p->src = PEER_DISC; p->ip = e[i].ip; p->port = e[i].port;
 +            snprintf(p->name, sizeof p->name, "%s", e[i].name);
-+            if (e[i].has_txt && e[i].proto != MP_PROTO) {   // the TXT says it speaks another protocol: not dialled
++            if (e[i].has_txt && e[i].proto != n->proto) {   // the TXT says it speaks another protocol: not dialled
 +                p->compat = -2; char t[96];
-+                coop_logf(n, "mp: host %s speaks coop protocol %d, this build %d: hidden from scans", peer_tag(p, t, sizeof t), e[i].proto, MP_PROTO);
++                coop_logf(n, "mp: host %s speaks coop protocol %d, this build %d: hidden from scans", peer_tag(p, t, sizeof t), e[i].proto, n->proto);
 +            }
 +            k = fr;
 +        }
@@ -6022,35 +6609,122 @@ index 0000000..ea3bd7b
 +    for (int j = 0; j < PEERS; j++) {
 +        peer *p = &n->pr[j]; conn *c = &p->c;
 +        if (!p->used) continue;
++        int want = active && (!p->relay || n->browse);   // the relay's room only while the game looks for one (OpenStation or Scan on): a host-to-be stays out
 +        if (c->state == CONN_FREE) {
-+            if (active && p->compat != -2 && now >= p->next_dial && now >= p->dead_until) {   // a link to every host while the game may scan or join
++            if (want && p->compat != -2 && now >= p->next_dial && now >= p->dead_until) {   // a link to every host while the game may scan or join
 +                p->next_dial = now + DIAL_RETRY_MS;
 +                csock s = cplat_tcp_connect(p->ip, p->port);
 +                if (s != CSOCK_BAD) { conn_init(c, s, CONN_CONNECTING); c->peer_ip = p->ip; c->peer_port = p->port; } else peer_failed(n, p);
 +            }
-+        } else if (!active && !c->closing) c->closing = 1;
++        } else if (!want && j != n->upi && !c->closing) c->closing = 1;
 +        else if (c->state == CONN_CONNECTING && now - c->opened > CONNECT_TIMEOUT_MS) { conn_close(n, c, p, "connect timeout"); peer_failed(n, p); }
 +    }
 +    peer *up = cmp_up(n);
 +    if (up && n->ls == COOP_LS_STATION_CONNECTED && !n->cfg.tcp_only && !n->udp_ok && n->token && up->udp_port && n->susock != CSOCK_BAD &&
 +        now < n->uhello_until && now >= n->next_uhello) {
 +        n->next_uhello = now + UHELLO_MS;
-+        send_udp(n, n->susock, U_HELLO, n->token, up->ip, up->udp_port, 0);
++        send_udp(n, n->susock, &up->c, U_HELLO, n->token, up->ip, up->udp_port, 0);
 +    }
 +}
 +static void link_timers(coop_node *n, conn *c, peer *p, int64_t now) {
 +    if (c->state == CONN_READY) {
 +        if (now - c->last_tx >= PING_MS) cmp_send_frame(n, c, M_PING, NULL, 0);
 +        if (now - c->last_rx >= LINK_TIMEOUT_MS) conn_close(n, c, p, "silent for 10 s");
-+    } else if (c->state == CONN_HELLO && now - c->opened >= HELLO_TIMEOUT_MS) {
++    } else if ((c->state == CONN_HELLO || c->state == CONN_AUTH || c->state == CONN_RELAY) &&
++               now - c->opened >= (c->state == CONN_RELAY ? RELAY_WAIT_MS : n->cfg.auth ? AUTH_HELLO_MS : HELLO_TIMEOUT_MS)) {
 +        if (!p) { n->bad_input++; }
-+        conn_close(n, c, p, "no HELLO / WELCOME in time");
++        conn_close(n, c, p, c->state == CONN_RELAY ? "the relay did not pair this link in time" : "no HELLO / WELCOME in time");
 +        if (p) peer_failed(n, p);
++    } else if (c->state == CONN_CONNECTING && !p && now - c->opened > CONNECT_TIMEOUT_MS) conn_close(n, c, NULL, "connect timeout");   // a host's link to the relay
++}
++
++// ---------- host through a relay: the control link that keeps the room open while the game hosts ----------
++static void rc_close(coop_node *n, const char *why, int quiet) {
++    conn *c = &n->rc; int64_t now = cplat_now_ms();
++    if (!quiet && n->hosting) {
++        if (n->rc_open || now - n->rc_said_at >= LOG_GAP_MS) { coop_logf(n, "mp: the link to the relay closed (%s): dialled again", why); n->rc_said_at = now; }
++        n->rc_fails++;
++        int64_t back = (int64_t)RELAY_RETRY_MS * n->rc_fails; if (back > 15000) back = 15000;
++        if (n->rc_next < now + back) n->rc_next = now + back;
++    }
++    cplat_close(c->s); conn_init(c, CSOCK_BAD, CONN_FREE);
++    n->rc_open = 0;
++}
++static void rc_msg(coop_node *n, const uint8_t *m) {
++    int64_t now = cplat_now_ms();
++    if (get32(m) != RLY_MAGIC) { n->bad_input++; n->rc.closing = 2; return; }
++    switch (m[4]) {
++    case RLY_OK:
++        if (!n->rc_open) {
++            n->rc_open = 1; n->rc_fails = 0; n->rc_said = 0;
++            coop_logf(n, "mp: the relay opened the room (id %02x%02x%02x%02x...): visitors with the room code reach this host through it", n->room_id[0], n->room_id[1],
++                      n->room_id[2], n->room_id[3]);
++        }
++        break;
++    case RLY_VISITOR: {   // a visitor asks for this room: a link of its own to the relay, which pairs the two
++        uint32_t id = get32(m + 8), cookie = get32(m + 12);
++        conn *slot = NULL;
++        for (int i = 0; i < HOST_CONNS && !slot; i++) if (n->hc[i].state == CONN_FREE) slot = &n->hc[i];
++        if (!slot) { n->rate_drops++; coop_logf(n, "mp: visitor %u through the relay not answered: every link slot is taken", id); break; }
++        csock s = cplat_tcp_connect(n->cfg.relay_ip, n->cfg.relay_port);
++        if (s == CSOCK_BAD) break;
++        conn_init(slot, s, CONN_CONNECTING);
++        slot->peer_ip = n->cfg.relay_ip; slot->peer_port = n->cfg.relay_port; slot->relay = 1; slot->rly_id = id; slot->rly_cookie = cookie;
++        break;
++    }
++    case RLY_ERR:
++        if (n->rc_said != m[5]) { coop_logf(n, "mp: the relay refused the room: %s", relay_err(m[5])); n->rc_said = m[5]; }
++        n->rc.closing = 2; n->rc_open = 0; n->rc_said_at = now;   // said: the close that follows adds no line
++        if (m[5] == RLY_E_TAKEN && n->rc_next < now + 10000) n->rc_next = now + 10000;
++        break;
++    default: break;   // RLY_GONE (the relay closes that visitor's link itself), RLY_PONG
 +    }
 +}
++static void rc_io(coop_node *n, csock s, int got) {
++    conn *c = &n->rc;
++    if (c->state == CONN_FREE || c->s != s) return;
++    if (c->state == CONN_CONNECTING) {
++        if (cplat_tcp_connected(c->s) != 1) { rc_close(n, "the relay cannot be reached", 0); return; }
++        c->state = CONN_READY; c->opened = c->last_rx = cplat_now_ms();
++        relay_hello(c, RLY_HOST, n->room_id, 0, 0);
++        return;
++    }
++    for (int round = 0; round < 16 && (got & (CP_IN | CP_ERR)) && !c->closing; round++) {
++        if (grow(&c->rx, &c->rxcap, 1024)) { c->closing = 2; break; }
++        int64_t k = cplat_recv(c->s, c->rx + c->rxn, 1024 - c->rxn);
++        if (k == 0 || k < -1) { c->closing = 3; break; }
++        if (k < 0) break;
++        c->rxn += (size_t)k; c->last_rx = cplat_now_ms();
++        size_t off = 0;
++        while (c->rxn - off >= RLY_MSG_LEN && !c->closing) { rc_msg(n, c->rx + off); off += RLY_MSG_LEN; }
++        memmove(c->rx, c->rx + off, c->rxn - off); c->rxn -= off;
++    }
++    if (c->state != CONN_FREE && (got & CP_OUT)) conn_flush(c);
++}
++static void rc_timers(coop_node *n, int64_t now) {
++    conn *c = &n->rc;
++    if (!n->hosting || !n->cfg.relay_ip) { if (c->state != CONN_FREE && !c->closing) c->closing = 1; }
++    else if (c->state == CONN_FREE) {
++        if (now >= n->rc_next) {
++            n->rc_next = now + RELAY_RETRY_MS;
++            csock s = cplat_tcp_connect(n->cfg.relay_ip, n->cfg.relay_port);
++            if (s != CSOCK_BAD) { conn_init(c, s, CONN_CONNECTING); c->peer_ip = n->cfg.relay_ip; c->peer_port = n->cfg.relay_port; }
++        }
++    } else if (c->state == CONN_CONNECTING && now - c->opened > CONNECT_TIMEOUT_MS) rc_close(n, "the relay does not answer", 0);
++    else if (c->state == CONN_READY && !c->closing) {
++        if (now - c->last_tx >= RELAY_PING_MS) { uint8_t m[RLY_MSG_LEN] = {0}; put32(m, RLY_MAGIC); m[4] = RLY_PING; conn_raw(c, m, sizeof m); c->last_tx = now; }
++        if (now - c->last_rx >= RELAY_TIMEOUT_MS) rc_close(n, "the relay went silent", 0);
++    }
++    if (c->state != CONN_FREE && c->closing) {
++        if (c->closing == 1 && !c->close_by) c->close_by = now + CLOSE_FLUSH_MS;
++        if (c->closing >= 2 || !c->txn || now >= c->close_by) rc_close(n, c->closing == 3 ? "closed by the relay" : "an error", c->closing == 1);
++    }
++}
++
 +static void timers(coop_node *n) {
 +    int64_t now = cplat_now_ms();
-+    if (!n->profile_said && n->cfg.scope == COOP_SCOPE_LAN && ((n->hosting && !n->cfg.bind_loopback) || n->browse || n->cfg.role == COOP_ROLE_JOIN)) {
++    if (!n->profile_said && (n->cfg.scope == COOP_SCOPE_LAN || (n->cfg.scope == COOP_SCOPE_INTERNET && !n->cfg.relay_ip)) &&
++        ((n->hosting && !n->cfg.bind_loopback) || n->browse || n->cfg.role == COOP_ROLE_JOIN)) {
 +        n->profile_said = 1;   // once per Initialize: a Public network keeps other devices out, silently
 +        if (cplat_network_public() == 1)
 +            coop_logf(n, "mp: this PC's network is set to Public: Windows Firewall keeps other devices out (visitors cannot reach a host here, DNS-SD answers may not "
@@ -6058,6 +6732,7 @@ index 0000000..ea3bd7b
 +    }
 +    if (n->cfg.role != COOP_ROLE_HOST) station_timers(n, now);
 +    if (n->hosting) cmp_host_accepts(n);
++    rc_timers(n, now);
 +    for (int i = 0; i < HOST_CONNS; i++) link_timers(n, &n->hc[i], NULL, now);
 +    for (int j = 0; j < PEERS; j++) if (n->pr[j].used) link_timers(n, &n->pr[j].c, &n->pr[j], now);
 +}
@@ -6065,9 +6740,13 @@ index 0000000..ea3bd7b
 +    if (c->state == CONN_FREE || c->s != s) return;   // closed or replaced since the poll set was made
 +    if (c->state == CONN_CONNECTING) {
 +        if (cplat_tcp_connected(c->s) != 1) { cplat_close(c->s); conn_init(c, CSOCK_BAD, CONN_FREE); if (p) peer_failed(n, p); return; }
-+        c->state = CONN_HELLO; c->opened = c->last_rx = cplat_now_ms();
-+        uint8_t h[MP_HELLO_LEN]; put32(h, MP_MAGIC); put16(h + 4, MP_PROTO); h[6] = n->cfg.platform; memcpy(h + 7, n->cfg.uid, 16);
-+        cmp_send_frame(n, c, M_HELLO, h, sizeof h);
++        c->opened = c->last_rx = cplat_now_ms();
++        if (!p) { c->state = CONN_HELLO; relay_hello(c, RLY_ATTACH, n->room_id, c->rly_id, c->rly_cookie); return; }   // the host's link for one visitor
++        if (p->relay) { c->state = CONN_RELAY; relay_hello(c, RLY_JOIN, n->room_id, 0, 0); return; }               // HELLO once the relay pairs it
++        c->state = CONN_HELLO;
++        uint8_t h[MP_HELLO3_LEN]; put32(h, MP_MAGIC); put16(h + 4, (uint32_t)n->proto); h[6] = n->cfg.platform; memcpy(h + 7, n->cfg.uid, 16);
++        if (n->cfg.auth) { memcpy(c->hello, h + 6, 17); cplat_random(c->ns, CAUTH_NONCE); memcpy(h + MP_HELLO_LEN, c->ns, CAUTH_NONCE); }
++        cmp_send_frame(n, c, M_HELLO, h, n->cfg.auth ? MP_HELLO3_LEN : MP_HELLO_LEN);
 +        return;
 +    }
 +    if (got & (CP_IN | CP_ERR)) conn_read(n, c, p);
@@ -6078,10 +6757,10 @@ index 0000000..ea3bd7b
 +    if (c->closing == 1 && !c->close_by) c->close_by = now + CLOSE_FLUSH_MS;
 +    if (c->closing >= 2 || !c->txn || now >= c->close_by) conn_close(n, c, p, c->closing == 3 ? "closed" : c->closing == 2 ? "error" : "done");
 +}
-+enum { PK_LISTEN = 1, PK_HUDP, PK_SUDP, PK_DISC, PK_HC, PK_PEER };
++enum { PK_LISTEN = 1, PK_HUDP, PK_SUDP, PK_DISC, PK_HC, PK_PEER, PK_RELAY };
 +static void io_main(void *arg) {
 +    coop_node *n = arg;
-+    enum { NF = 4 + HOST_CONNS + PEERS };
++    enum { NF = 5 + HOST_CONNS + PEERS };
 +    cpollfd f[NF]; int kind[NF], idx[NF];
 +    cnode_lock(n);
 +    for (;;) {
@@ -6105,6 +6784,7 @@ index 0000000..ea3bd7b
 +            if (!n->pr[i].used || c->state == CONN_FREE || (stopping && !c->txn)) continue;
 +            ADD(PK_PEER, i, c->s, (stopping ? 0 : CP_IN) | (c->state == CONN_CONNECTING || c->txn ? CP_OUT : 0)); pending |= c->txn != 0;
 +        }
++        if (n->rc.state != CONN_FREE && !stopping) ADD(PK_RELAY, 0, n->rc.s, CP_IN | (n->rc.state == CONN_CONNECTING || n->rc.txn ? CP_OUT : 0));
 +#undef ADD
 +        if (stopping && (!pending || now >= n->stop_until)) break;   // Finalize: queued goodbyes (KICK, LEAVE) had their moment
 +        cnode_unlock(n);
@@ -6119,6 +6799,7 @@ index 0000000..ea3bd7b
 +            case PK_DISC: if (f[i].s == cdisc_fd(n)) cdisc_process(n); break;
 +            case PK_HC: conn_io(n, &n->hc[idx[i]], NULL, f[i].s, f[i].got); break;
 +            case PK_PEER: if (n->pr[idx[i]].used) conn_io(n, &n->pr[idx[i]].c, &n->pr[idx[i]], f[i].s, f[i].got); break;
++            case PK_RELAY: rc_io(n, f[i].s, f[i].got); break;
 +            }
 +        }
 +        for (int i = 0; i < n->nzap; i++) cplat_close(n->zap[i]);   // sockets a game thread let go while the poll had them
@@ -6143,11 +6824,15 @@ index 0000000..ea3bd7b
 +    n->disc.adv_want = n->disc.browse_want = 0;
 +    for (int i = 0; i < HOST_CONNS; i++) conn_init(&n->hc[i], CSOCK_BAD, CONN_FREE);
 +    for (int i = 0; i < PEERS; i++) peer_free(n, &n->pr[i]);
++    conn_init(&n->rc, CSOCK_BAD, CONN_FREE); n->rc_open = 0; n->rc_next = 0; n->rc_fails = 0; n->rc_said = 0;
 +    char a[16]; ipstr(a, n->cfg.addr);
-+    if (n->cfg.role == COOP_ROLE_JOIN) { cmp_peer_cfg(n); coop_logf(n, "mp: joining %s:%u", a, n->cfg.port); }
++    if (n->cfg.role == COOP_ROLE_JOIN) { cmp_peer_cfg(n); coop_logf(n, "mp: joining %s:%u%s", a, n->cfg.port, n->cfg.auth ? " with the room code" : ""); }
 +    else if (n->cfg.role == COOP_ROLE_HOST) coop_logf(n, "mp: hosts on 127.0.0.1:%u while the game hosts", n->cfg.port);
-+    else coop_logf(n, "mp: auto: hosts on the LAN (port %u) while the game hosts%s", n->cfg.port,
-+                   n->cfg.discovery ? ", finds LAN hosts with DNS-SD while it scans" : "; DNS-SD off (DM_COOP_DISCOVERY=0)");
++    else if (n->cfg.relay_ip) {
++        cmp_peer_cfg(n); ipstr(a, n->cfg.relay_ip);
++        coop_logf(n, "mp: auto through the relay %s:%u: opens the room there while the game hosts, asks it for the room's host while the game scans", a, n->cfg.relay_port);
++    } else coop_logf(n, "mp: auto: hosts on %s (port %u) while the game hosts%s", n->cfg.scope == COOP_SCOPE_INTERNET ? "every interface for internet play" : "the LAN",
++                     n->cfg.port, n->cfg.discovery ? ", finds LAN hosts with DNS-SD while it scans" : "; DNS-SD off (DM_COOP_DISCOVERY=0)");
 +    if (cplat_thread_start(&n->io, io_main, n)) return -1;
 +    n->io_on = 1;
 +    return 0;
@@ -6161,6 +6846,7 @@ index 0000000..ea3bd7b
 +    cnode_lock(n);
 +    for (int i = 0; i < HOST_CONNS; i++) { cplat_close(n->hc[i].s); conn_init(&n->hc[i], CSOCK_BAD, CONN_FREE); }
 +    for (int i = 0; i < PEERS; i++) peer_free(n, &n->pr[i]);
++    cplat_close(n->rc.s); conn_init(&n->rc, CSOCK_BAD, CONN_FREE); n->rc_open = 0;
 +    for (int i = 0; i < n->nzap; i++) cplat_close(n->zap[i]);
 +    n->nzap = 0;
 +    cplat_close(n->lsock); cplat_close(n->husock); cplat_close(n->susock); n->lsock = n->husock = n->susock = CSOCK_BAD;
@@ -6174,6 +6860,7 @@ index 0000000..ea3bd7b
 +    for (int i = 0; i < PEERS; i++) if (n->pr[i].used && n->pr[i].c.state == CONN_READY) { s->links++; s->udp_links += i == n->upi && n->udp_ok; }
 +    s->udp_tx = n->st_udp_tx; s->udp_rx = n->st_udp_rx; s->tcp_tx = n->st_tcp_tx; s->tcp_rx = n->st_tcp_rx;
 +    s->refused_src = n->refused_src; s->refused_join = n->refused_join; s->bad_input = n->bad_input + n->udp_junk; s->rate_drops = n->rate_drops;
++    s->auth_ok = n->auth_ok; s->auth_fail = n->auth_fail; s->bad_tag = n->bad_tag; s->replays = n->replays; s->relay_up = n->rc_open;
 +    cplat_lock(&n->dlk);
 +    for (int i = 0; i < DISC_MAX; i++) s->discovered += n->disc.e[i].used;
 +    s->bad_input += n->disc.bad;
@@ -7405,6 +8092,60 @@ index a079d7f..f5d013a 100644
  
  // ---- Shapes ----
  static CGPathRef circlePath(CGPoint c, CGFloat r) { return CGPathCreateWithEllipseInRect(CGRectMake(c.x - r, c.y - r, 2 * r, 2 * r), NULL); }
+diff --git a/dm/ios/Sources/LauncherRow.swift b/dm/ios/Sources/LauncherRow.swift
+index 82fa3b3..720f299 100644
+--- a/dm/ios/Sources/LauncherRow.swift
++++ b/dm/ios/Sources/LauncherRow.swift
+@@ -1,4 +1,4 @@
+-// One launcher setting as a row (a menu, a slider with its percentage, a toggle), shared by the iOS launcher (Launcher.swift) and the Mac app's settings window (dm/mac/Launcher.swift).
++// One launcher setting as a row (a menu, a slider with its percentage, a toggle, a text field), shared by the iOS launcher (Launcher.swift) and the Mac app's settings window (dm/mac/Launcher.swift).
+ // A row whose setting is fixed by an env file or by the launch environment is shown but disabled.
+ import SwiftUI
+ 
+@@ -49,6 +49,18 @@ struct SettingRow: View {
+                         .accessibilityLabel(s.label)
+                         .accessibilityValue(percentage)
+                 }
++            case "text":   // printable ASCII up to the setting's length, as Setting.accepts
++                VStack(alignment: .leading, spacing: 8) {
++                    settingLabel
++                    TextField(s.label, text: Binding(get: { m.values[s.env] ?? s.def },
++                                                     set: { m.values[s.env] = String($0.filter { $0.asciiValue.map { $0 >= 0x20 && $0 < 0x7F } ?? false }.prefix(s.length ?? 64)) }))
++                        .textFieldStyle(.roundedBorder)
++                        .autocorrectionDisabled()
++#if os(iOS)
++                        .textInputAutocapitalization(.characters)
++                        .keyboardType(.asciiCapable)
++#endif
++                }
+             default:
+                 Toggle(isOn: Binding(get: { (m.values[s.env] ?? s.def) == s.onValue }, set: { m.values[s.env] = $0 ? s.onValue : s.offValue })) {
+                     settingLabel
+diff --git a/dm/ios/Sources/LauncherSettings.swift b/dm/ios/Sources/LauncherSettings.swift
+index d03c557..7e932c0 100644
+--- a/dm/ios/Sources/LauncherSettings.swift
++++ b/dm/ios/Sources/LauncherSettings.swift
+@@ -12,6 +12,7 @@ struct Setting: Decodable, Identifiable {
+     let options: [[String]]?   // choice: [value, label]
+     let min, max, step: Double?   // range
+     let on, off: String?   // toggle: the values the variable takes (1 / 0 when not given)
++    let length: Int?       // text: the longest value (schema 2)
+     var id: String { env }
+     var sectionTitle: String { section ?? "Game" }
+     var basic: Bool { level == "basic" }
+@@ -27,10 +28,11 @@ struct Setting: Decodable, Identifiable {
+             guard !v.contains(where: { $0 == "x" || $0 == "X" }), let n = Double(v), n.isFinite, let lo = min, let hi = max else { return false }   // no hex: launcher.c's check agrees
+             return n >= lo && n <= hi
+         case "toggle": return v == onValue || v == offValue
++        case "text": return v.count <= (length ?? 64) && v.unicodeScalars.allSatisfy { $0.value >= 0x20 && $0.value < 0x7F }   // as launcher.c
+         default: return true
+         }
+     }
+-    enum CodingKeys: String, CodingKey { case env, kind, label, note, def = "default", section, needs, level, base, options, min, max, step, on, off }
++    enum CodingKeys: String, CodingKey { case env, kind, label, note, def = "default", section, needs, level, base, options, min, max, step, on, off, length }
+ }
+ struct SettingsFile: Decodable { let settings: [Setting] }
+ 
 diff --git a/dm/ios/project.yml b/dm/ios/project.yml
 index 5be3a4c..2cc11e0 100644
 --- a/dm/ios/project.yml
@@ -7418,11 +8159,47 @@ index 5be3a4c..2cc11e0 100644
          UISupportedInterfaceOrientations:
            - UIInterfaceOrientationLandscapeRight
            - UIInterfaceOrientationLandscapeLeft
+diff --git a/dm/mac/launcher.c b/dm/mac/launcher.c
+index df4ade9..064885a 100644
+--- a/dm/mac/launcher.c
++++ b/dm/mac/launcher.c
+@@ -87,7 +87,7 @@ static void env_file(const char *path) {   // KEY=VALUE lines, # starts a commen
+     fclose(f);
+ }
+ 
+-static int saved_accepted(CFDictionaryRef rule, CFStringRef v, const char *s) {   // a saved choice this build still offers: one of its values, or a number in its range
++static int saved_accepted(CFDictionaryRef rule, CFStringRef v, const char *s) {   // a saved choice this build still offers: one of its values, a number in its range or a short text
+     CFTypeRef values = CFDictionaryGetValue(rule, CFSTR("values"));
+     if (values && CFGetTypeID(values) == CFArrayGetTypeID()) {
+         for (CFIndex i = 0; i < CFArrayGetCount(values); i++) {
+@@ -96,6 +96,14 @@ static int saved_accepted(CFDictionaryRef rule, CFStringRef v, const char *s) {
+         }
+         return 0;
+     }
++    CFTypeRef len = CFDictionaryGetValue(rule, CFSTR("length"));
++    if (len && CFGetTypeID(len) == CFNumberGetTypeID()) {   // text: printable ASCII of at most length characters, as Setting.accepts
++        long n = 0; CFNumberGetValue(len, kCFNumberLongType, &n);
++        size_t k = strlen(s);
++        if ((long)k > n) return 0;
++        for (size_t i = 0; i < k; i++) if ((unsigned char)s[i] < 0x20 || (unsigned char)s[i] > 0x7E) return 0;
++        return 1;
++    }
+     CFTypeRef lo = CFDictionaryGetValue(rule, CFSTR("min")), hi = CFDictionaryGetValue(rule, CFSTR("max")); double l, h;
+     if (!lo || !hi || CFGetTypeID(lo) != CFNumberGetTypeID() || CFGetTypeID(hi) != CFNumberGetTypeID()) return 0;
+     CFNumberGetValue(lo, kCFNumberDoubleType, &l); CFNumberGetValue(hi, kCFNumberDoubleType, &h);
 diff --git a/dm/mac/pack_app.py b/dm/mac/pack_app.py
-index 1a64ae6..6ea761c 100755
+index 1a64ae6..a0f340b 100755
 --- a/dm/mac/pack_app.py
 +++ b/dm/mac/pack_app.py
-@@ -115,7 +115,8 @@ def info_plist(a, minos, icon):
+@@ -108,6 +108,7 @@ def settings_rules(listed):   # DMSettings: what the launcher accepts as each se
+         if s['kind'] == 'range': rules.append({'env': s['env'], 'min': float(s['min']), 'max': float(s['max'])})
+         elif s['kind'] == 'choice': rules.append({'env': s['env'], 'values': [o[0] for o in s['options']]})
+         elif s['kind'] == 'toggle': rules.append({'env': s['env'], 'values': [s.get('on', '1'), s.get('off', '0')]})
++        elif s['kind'] == 'text': rules.append({'env': s['env'], 'length': int(s['length'])})
+     return rules
+ 
+ 
+@@ -115,7 +116,8 @@ def info_plist(a, minos, icon):
      p = {'CFBundleName': a.name, 'CFBundleDisplayName': a.name, 'CFBundleIdentifier': a.bundle_id or f'org.nxnative.{a.title_id.lower()}',
           'CFBundleVersion': a.version or '1.0', 'CFBundleShortVersionString': a.version or '1.0', 'CFBundlePackageType': 'APPL', 'CFBundleExecutable': EXE,
           'CFBundleInfoDictionaryVersion': '6.0', 'LSMinimumSystemVersion': minos, 'LSArchitecturePriority': ['arm64'], 'NSHighResolutionCapable': True,
@@ -7528,21 +8305,76 @@ index 154ed24..f7f6712 100644
                  Operand offset = context.IAdd(wordOffset, Const(index));
                  Operand value = EmitLoadConstant(context, slot, offset);
  
+diff --git a/dm/tools/tests/test_launcher_settings.py b/dm/tools/tests/test_launcher_settings.py
+index cd43d2d..67b11ff 100644
+--- a/dm/tools/tests/test_launcher_settings.py
++++ b/dm/tools/tests/test_launcher_settings.py
+@@ -94,7 +94,7 @@ class LauncherSettingsTests(unittest.TestCase):
+             (Path(tmp) / 'main.fixups.tsv').write_text('# RENDER_SCALE\t1\n')   # the render scale row's condition
+             listed = settings.build(BOTW, tmp, Path(tmp) / 'control.nacp')
+         rows = {s['env']: s for s in listed['settings']}
+-        self.assertEqual(listed['schema'], 1)
++        self.assertEqual(listed['schema'], 2)
+         self.assertEqual([e for e, s in rows.items() if s.get('level') == 'basic'], ['DM_FPS_TARGET', 'DM_RENDER_SCALE', 'DM_OPMODE', 'DM_LANG', 'DM_RUMBLE'])
+         self.assertEqual(rows['DM_RUMBLE_GAIN']['needs'], 'DM_RUMBLE=1')
+         self.assertFalse({'level', 'needs'} & set(rows['DM_METAL_HUD']), 'a row without meta has no optional fields')
+@@ -127,12 +127,24 @@ class LauncherSettingsTests(unittest.TestCase):
+                     patch.object(settings.nacp, 'languages', return_value=['en-US']), patch.dict(os.environ, {'GFXAPI': api, **({'SETTINGS_PLATFORM': platform} if platform else {})}):
+                 self.assertEqual(conforms(settings.build(gid, tmp, Path(tmp) / 'control.nacp'), schema, schema), [])
+ 
+-    def test_schema_1_takes_new_sections_but_not_new_kinds(self):
+-        """A section is a heading a reader draws by its name, so a new one stays schema 1; a new kind would not"""
++    def test_new_sections_keep_the_schema_but_new_kinds_do_not(self):
++        """A section is a heading a reader draws by its name, so a new one keeps the schema; a new kind would not (schema 2 added text)"""
+         schema = json.loads((ROOT / 'docs/launcher.schema.json').read_text(encoding='utf-8'))
+         row = {'env': 'DM_X', 'kind': 'toggle', 'section': 'Picture', 'label': 'X', 'note': '', 'default': '1', 'on': '1', 'off': '0'}
+-        self.assertEqual(conforms({'schema': 1, 'game': BOTW, 'settings': [row]}, schema, schema), [])
+-        self.assertNotEqual(conforms({'schema': 1, 'game': BOTW, 'settings': [{**row, 'kind': 'slider'}]}, schema, schema), [])
++        self.assertEqual(conforms({'schema': settings.SCHEMA, 'game': BOTW, 'settings': [row]}, schema, schema), [])
++        self.assertNotEqual(conforms({'schema': settings.SCHEMA, 'game': BOTW, 'settings': [{**row, 'kind': 'slider'}]}, schema, schema), [])
++        text = {'env': 'DM_X', 'kind': 'text', 'section': 'Game', 'label': 'X', 'note': '', 'default': ''}
++        self.assertEqual(conforms({'schema': settings.SCHEMA, 'game': BOTW, 'settings': [{**text, 'length': 19}]}, schema, schema), [])
++        self.assertNotEqual(conforms({'schema': settings.SCHEMA, 'game': BOTW, 'settings': [text]}, schema, schema), [], 'a text row has a length')
++
++    def test_link_play_rows(self):   # the co-op rows: Link Play, then internet play and its two text rows under it
++        rows = build(BOTW, 'nvn')
++        self.assertEqual((rows['DM_COOP']['kind'], rows['DM_COOP']['default']), ('toggle', 'off'))
++        self.assertEqual((rows['DM_COOP_INTERNET']['kind'], rows['DM_COOP_INTERNET']['default'], rows['DM_COOP_INTERNET']['needs']), ('toggle', '0', 'DM_COOP=auto'))
++        for env, length in (('DM_COOP_ROOM', 19), ('DM_COOP_RELAY', 21)):
++            self.assertEqual((rows[env]['kind'], rows[env]['default'], rows[env]['length'], rows[env]['needs']), ('text', '', length, 'DM_COOP_INTERNET=1'))
++        envs = list(rows)
++        self.assertEqual(envs[envs.index('DM_COOP'):envs.index('DM_COOP') + 4], ['DM_COOP', 'DM_COOP_INTERNET', 'DM_COOP_ROOM', 'DM_COOP_RELAY'])
+ 
+     def test_render_base_goes_into_the_render_scale_row(self):
+         schema = json.loads((ROOT / 'docs/launcher.schema.json').read_text(encoding='utf-8'))
+@@ -154,7 +166,8 @@ class LauncherSettingsTests(unittest.TestCase):
+                          ('DM_X\ttoggle\t-\t0\talways\tGame\tX\t\tneeds=DM_NOPE=1\n', 'no row sets'),
+                          ('DM_Y\ttoggle\t-\t0\talways\tGame\tY\t\tneeds=DM_X=on\n', 'never takes'),
+                          ('DM_X\ttoggle\t-\t0\talways\tX\n', 'columns'), ('DM_X\ttoggle\t-\t0\talways\tsecret\tX\n', 'section'),
+-                         ('DM_X\ttoggle\ton\t0\talways\tGame\tX\n', 'toggle values'), ('DM_X\ttoggle\t-\t2\talways\tGame\tX\n', 'defaults to 0 or 1')]:
++                         ('DM_X\ttoggle\ton\t0\talways\tGame\tX\n', 'toggle values'), ('DM_X\ttoggle\t-\t2\talways\tGame\tX\n', 'defaults to 0 or 1'),
++                         ('DM_Z\ttext\t0\t\talways\tGame\tZ\n', 'longest length'), ('DM_Z\ttext\t2\tabc\talways\tGame\tZ\n', 'at most 2')]:
+             with self.subTest(why=why), tempfile.TemporaryDirectory() as tmp:
+                 (Path(tmp) / 'settings.tsv').write_text('# header\n' + good + bad, encoding='utf-8')
+                 with patch.object(settings, 'HERE', Path(tmp)), \
 diff --git a/docs/env_switches.tsv b/docs/env_switches.tsv
-index 5fdc1af..cf3be0e 100644
+index 5fdc1af..1111ebd 100644
 --- a/docs/env_switches.tsv
 +++ b/docs/env_switches.tsv
-@@ -17,6 +17,9 @@ DM_CHEATS_ANY_BUILD	switch	`1` loads a cheat file written for another build of t
+@@ -17,6 +17,12 @@ DM_CHEATS_ANY_BUILD	switch	`1` loads a cheat file written for another build of t
  DM_CHEATS_DEBUG	diagnostic	Logs every memory write a cheat makes and the cheat file context the menu's "another version" rows come from
  DM_CHEATS_ON	switch	Comma-separated cheat names turned on at launch, besides the saved per-build enabled states
  DM_CHEATS_WINDOW	switch	`1` opens the Mac Cheats panel beside the game from the start
-+DM_COOP	player	Link Play between our builds (hle_coop_*.c): `auto` hosts on the LAN while the game hosts and finds LAN hosts with DNS-SD while it scans; `join:<IPv4>[:<port>]` joins one host by address (loopback, RFC 1918 or 169.254 only; port 47600 by default); `host:<port>` hosts on 127.0.0.1 only; `off` (the default) keeps Link Play offline. The launcher's "Link Play on this network" switch sets `auto` / `off`
++DM_COOP	player	Link Play between our builds (hle_coop_*.c): `auto` hosts on the LAN while the game hosts and finds LAN hosts with DNS-SD while it scans; `join:<IPv4>[:<port>]` joins one host by address (loopback, RFC 1918 or 169.254 only, any address with `DM_COOP_INTERNET=1`; port 47600 by default); `host:<port>` hosts on 127.0.0.1 only; `off` (the default) keeps Link Play offline. The launcher's "Link Play on this network" switch sets `auto` / `off`
 +DM_COOP_DISCOVERY	switch	`0` turns DNS-SD off under `DM_COOP=auto` (no advertising, no browsing): visitors join by address
++DM_COOP_INTERNET	player	`1` turns on internet play (the launcher's "Internet play"): links from any address, each proving `DM_COOP_ROOM`, every message tagged against changes (not encrypted); `join:` takes public addresses. Off by default
++DM_COOP_RELAY	player	`<IPv4>[:<port>]` (port 47610 by default): with `DM_COOP_INTERNET=1` and `DM_COOP=auto`, a relay players run themselves (windows-native tools/coop-relay): hosting opens the room there, scanning asks it for the room's host. The launcher's "Relay address"; empty by default
++DM_COOP_ROOM	player	The room code, `XXXX-XXXX-XXXX-XXXX` (16 letters and digits, 80 bits): with `DM_COOP_INTERNET=1` every link proves it. A visitor needs the host's; a host without one gets a new one each session (in the log). The launcher's "Room code"; empty by default
 +DM_COOP_TCP	switch	`1` sends the game's Link Play datagrams over the control link instead of UDP (a TCP-only path such as an SSH tunnel)
  DM_COPY_GAME_RESOURCES	switch	`NO` skips the Xcode build phase that copies the game's resources into the app (`stage_resources.sh`, on by default); `build_ipa.sh` sets it for its unsigned build, which packs them itself
  DM_COPY_ROMFS	switch	`NO` keeps the game files out of the app, in the Xcode build phase (`stage_resources.sh`) and in the unsigned IPA of `build_ipa.sh` (on by default): `main.m` takes the validated `Documents/romfs.img` copied by `scripts/push_romfs.sh`, then a `Documents/romfs` folder; the build writes the image's identity as `romfs.id` into the app, and `main.m` uses only a matching image (`--romfs separate` of the NSP script sets this)
  DM_CTL	diagnostic	`=<file>` (Mac): the host polls the file every 100 ms and runs each appended line: button presses, `shot`, `passdump`, `texdump`, `env KEY=VALUE`, `peek`, `memdump`, `drag` and more
-@@ -309,6 +312,7 @@ DM_TOUCH_LOG	diagnostic	`=1` logs each touch-screen read with touch points (samp
+@@ -309,6 +315,7 @@ DM_TOUCH_LOG	diagnostic	`=1` logs each touch-screen read with touch points (samp
  DM_UDC_SELFTEST	diagnostic	`=1` runs a start-up check of DontCare load and store on private depth-stencil and RGBA8 textures (clear, Load + DontCare, read back) and logs one result line
  DM_UE_SHADERS	path	Folder of the Unreal shader code archives decoded by `uepak.py`, for `shader_split.py` (default `ue_shaders` beside the RomFS); needed when the RomFS has Unreal paks
  DM_UE_TEXTURE_POOL	switch	Megabytes Unreal's texture streaming pool (`r.Streaming.PoolSize`) is raised to, overriding the profile's `ue_texture_pool`; `0` keeps the game's own pool. On iOS only this switch turns it on (`Documents/env.txt`)
@@ -7550,3 +8382,79 @@ index 5fdc1af..cf3be0e 100644
  DM_VK_CAPTURE	path	`=<dir>` (Mac) writes every SPIR-V module the game creates to `<dir>/<key>.spv`; the NSP script's Vulkan shader capture stage sets it
  DM_VK_LOG	diagnostic	`=1` logs Vulkan object creation in the Vulkan-on-Metal layer
  DM_VSYNC_HZ	switch	`=<Hz>`: rate at which a host thread fires the vi vsync event when the display link does not drive it (default 60)
+diff --git a/docs/frontends.md b/docs/frontends.md
+index e34359c..105571d 100644
+--- a/docs/frontends.md
++++ b/docs/frontends.md
+@@ -37,7 +37,7 @@ A built app carries the settings its game supports, as the iPhone app's settings
+ ]}
+ ```
+ 
+-- `env`: the environment switch the setting sets. `kind`: `choice` (one of `options`, each `[value, label]`), `range` (a number from `min` to `max` in `step`s) or `toggle` (`on` or `off`, the values the switch takes).
++- `env`: the environment switch the setting sets. `kind`: `choice` (one of `options`, each `[value, label]`), `range` (a number from `min` to `max` in `step`s), `toggle` (`on` or `off`, the values the switch takes) or `text` (a short free text of at most `length` printable ASCII characters, such as a code or an address; empty by default).
+ - `section`: the heading the row goes under, today `Game`, `Controls` or `Performance`. Sections come in the order of their first rows, and rows in the order to show them. A new section may appear in schema 1: a reader draws a section it does not know like the others, under its name, as the iPhone app does.
+ - `default`: the value for this app's platform ([Tested defaults](settings.md#tested-defaults)), with profile defaults resolved for its game. A front end that keeps only the choices that differ from it lets a newer build's tested defaults reach the player, as the iPhone app does.
+ - `base` (optional, render scale only): `{"docked": [w, h], "handheld": [w, h]}`, the 3D views' size that the scale multiplies, so a front end can show 0.75 as 1200×675 docked. It comes from the game's profile (`render_base`), and only some games have it.
+@@ -45,7 +45,7 @@ A built app carries the settings its game supports, as the iPhone app's settings
+ - `needs` (optional): `<VAR>=<value>` makes the row a sub-setting of the row that sets `<VAR>`, drawn only while that row has that value (Rumble strength only while rumble is on). A row naming a variable the list does not have stays drawn.
+ - An app without the file has no settings to offer: start it as it is.
+ 
+-**Compatibility.** [launcher.schema.json](launcher.schema.json) describes the file as a JSON Schema, so a front end can check it and generate its types from it. `schema` is 1, and schema 1 grows only by optional fields: a reader ignores fields it does not know, draws sections it does not know, and a field never changes its meaning. A new `kind` would be schema 2, since a reader cannot draw a kind it does not know. A list written before the field existed has no `schema` and is 1. In `settings.tsv`, the optional fields come from the last column, `meta` (`key=value` pairs separated by `;`); a new key is added in `settings.py`'s `META`, here and in the schema together, and `test_launcher_settings.py` fails when the three disagree.
++**Compatibility.** [launcher.schema.json](launcher.schema.json) describes the file as a JSON Schema, so a front end can check it and generate its types from it. `schema` is 2, and within a version the list grows only by optional fields: a reader ignores fields it does not know, draws sections it does not know, and a field never changes its meaning. A new `kind` is a new version, since a reader cannot draw a kind it does not know: schema 2 added `text`, and a schema 1 list is a schema 2 list without text rows. A list written before the field existed has no `schema` and is 1. In `settings.tsv`, the optional fields come from the last column, `meta` (`key=value` pairs separated by `;`); a new key is added in `settings.py`'s `META`, here and in the schema together, and `test_launcher_settings.py` fails when the three disagree.
+ 
+ ## Starting a game
+ 
+@@ -62,7 +62,7 @@ Settings a player chose in a front end and wants kept, also for a start from Fin
+ Each app keeps the player's choices in its own preferences domain, its bundle ID (`CFBundleIdentifier` in `Info.plist`, `org.nxnative.<title ID>` unless the app was packed with another): one string per setting, under the key `launcher.<env>` (`launcher.DM_FPS_TARGET` = `"30"`). The iPhone app's settings screen keeps them there, and a Mac app's launcher (`dm/mac/launcher.c`) reads them at every start, so a start from Finder or the Dock has them too. A front end writes the same keys (`CFPreferencesSetAppValue` with the app's bundle ID, or `defaults write org.nxnative.<title ID> launcher.DM_FPS_TARGET -string 30`), and a settings window inside the app would too: there is one set of choices, and every view of it agrees.
+ 
+ - **Only choices that differ from the tested default are kept.** A setting the player left at its default follows the defaults of a later build. Remove a key when the player picks the default again. For "Reset to tested defaults", remove the keys of the settings the player can change; the app's own screen does that when Play applies the defaults, and keeps the saved choice of a setting fixed for this start.
+-- **Checked when read.** The launcher uses a saved value only when this build still offers it: one of a `choice`'s options, a `toggle`'s `on` or `off`, or a number from a `range`'s `min` to `max`. It checks against the app's own list, which the packer copies into `Info.plist` as `DMSettings`. Any other value, a value that is not a string, or a key no setting has is ignored; it stays saved until the settings screen's Play replaces it with the player's choice. So a rebuild that stops offering a value falls back to its tested default.
++- **Checked when read.** The launcher uses a saved value only when this build still offers it: one of a `choice`'s options, a `toggle`'s `on` or `off`, a number from a `range`'s `min` to `max`, or printable ASCII of at most a `text`'s `length`. It checks against the app's own list, which the packer copies into `Info.plist` as `DMSettings`. Any other value, a value that is not a string, or a key no setting has is ignored; it stays saved until the settings screen's Play replaces it with the player's choice. So a rebuild that stops offering a value falls back to its tested default.
+ - **The order**, the first that sets a variable wins:
+   1. the launch environment (a front end's launch overrides, a terminal);
+   2. the player's `env.txt` (`~/Library/Application Support/nxnative/<title ID>/env.txt`; on the iPhone, `Documents/env.txt`);
+diff --git a/docs/launcher.schema.json b/docs/launcher.schema.json
+index 4bb97df..1a2d345 100644
+--- a/docs/launcher.schema.json
++++ b/docs/launcher.schema.json
+@@ -2,11 +2,11 @@
+   "$schema": "https://json-schema.org/draft/2020-12/schema",
+   "$id": "https://github.com/seedds/nxnative/blob/main/docs/launcher.schema.json",
+   "title": "launcher.json",
+-  "description": "A built app's settings list (dm/launcher.json in an IPA's app, Contents/Resources/dm/launcher.json in a Mac app), written by dm/games/settings.py from dm/games/settings.tsv. docs/frontends.md describes the fields. Schema 1 grows only by optional fields: a reader ignores fields it does not know, and a field keeps its meaning.",
++  "description": "A built app's settings list (dm/launcher.json in an IPA's app, Contents/Resources/dm/launcher.json in a Mac app), written by dm/games/settings.py from dm/games/settings.tsv. docs/frontends.md describes the fields. Within a version it grows only by optional fields: a reader ignores fields it does not know, and a field keeps its meaning. A new kind is a new version: 2 added text.",
+   "type": "object",
+   "required": ["game", "settings"],
+   "properties": {
+-    "schema": {"description": "The list's version; a list without it is schema 1 written before the field existed.", "type": "integer", "const": 1},
++    "schema": {"description": "The list's version; a list without it is schema 1 written before the field existed. 2 added the text kind; a schema 1 list is a schema 2 list without text rows.", "type": "integer", "const": 2},
+     "game": {"description": "The base game's title ID.", "type": "string", "pattern": "^[0-9A-F]{16}$"},
+     "settings": {"type": "array", "items": {"$ref": "#/$defs/setting"}}
+   },
+@@ -17,7 +17,7 @@
+       "required": ["env", "kind", "section", "label", "note", "default"],
+       "properties": {
+         "env": {"description": "The environment switch the setting sets.", "type": "string", "pattern": "^DM_[A-Z0-9_]+$"},
+-        "kind": {"enum": ["choice", "range", "toggle"]},
++        "kind": {"enum": ["choice", "range", "toggle", "text"]},
+         "section": {"description": "The heading it goes under (Game, Controls and Performance today); sections and rows come in the order to show them. A reader draws a section it does not know like the others, under its name.", "type": "string"},
+         "label": {"type": "string"},
+         "note": {"description": "The line under the label; empty for most settings.", "type": "string"},
+@@ -28,6 +28,7 @@
+         "step": {"description": "range: the step between values.", "type": "number"},
+         "on": {"description": "toggle: the value the switch takes when on.", "type": "string"},
+         "off": {"description": "toggle: the value the switch takes when off.", "type": "string"},
++        "length": {"description": "text: the longest value, in characters (printable ASCII); the default is empty or shorter.", "type": "integer"},
+         "base": {"description": "Render scale only: the 3D views' size the scale multiplies, docked and handheld, from the game's profile; absent for most games.", "type": "object", "required": ["docked", "handheld"],
+                  "properties": {"docked": {"$ref": "#/$defs/size"}, "handheld": {"$ref": "#/$defs/size"}}},
+         "level": {"description": "basic: a setting a front end shows first. Without it, the front end decides.", "const": "basic"},
+@@ -36,7 +37,8 @@
+       "allOf": [
+         {"if": {"properties": {"kind": {"const": "choice"}}}, "then": {"required": ["options"]}},
+         {"if": {"properties": {"kind": {"const": "range"}}}, "then": {"required": ["min", "max", "step"]}},
+-        {"if": {"properties": {"kind": {"const": "toggle"}}}, "then": {"required": ["on", "off"]}}
++        {"if": {"properties": {"kind": {"const": "toggle"}}}, "then": {"required": ["on", "off"]}},
++        {"if": {"properties": {"kind": {"const": "text"}}}, "then": {"required": ["length"]}}
+       ]
+     }
+   }

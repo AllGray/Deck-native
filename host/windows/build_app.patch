@@ -80,3 +80,71 @@
      t('pack IPA (already-compressed game files stored, everything else deflated)')
      r = subprocess.run([sys.executable, str(IOS / 'tools/pack_ipa.py'), str(out_ipa), '--store', ':'.join(gp('zip_store').split(':')),
                          '--exec', 'Payload/DmIOS.app/DmIOS', '--skip', 'Payload/DmIOS.app/msl', '--skip', 'Payload/DmIOS.app/aoc', '--skip', 'Payload/DmIOS.app/romfs', '--skip', 'Payload/DmIOS.app/romfs.img',
+--- a/ios/Launcher.m
++++ b/ios/Launcher.m
+@@ -4,7 +4,8 @@
+ // ranges as a slider with a percentage, toggles as switches; then "Reset to tested defaults" and the memory available. Same contract: dm_show_launcher(view controller, done)
+ // shows the screen over the root view controller, puts every setting into the environment when Play is pressed and then calls done; it returns false (done is not called)
+ // when there is no launcher (no dm/launcher.json, DM_LAUNCHER=0, or a file it cannot read). Settings come from the app's dm/launcher.json (dm/games/settings.py): kind "choice"
+-// (options [[value, label]]), "range" (min / max / step, shown as a percentage) or "toggle" (on / off: the two values the variable takes, "1" / "0" when absent).
++// (options [[value, label]]), "range" (min / max / step, shown as a percentage), "toggle" (on / off: the two values the variable takes, "1" / "0" when absent) or, from
++// launcher.json schema 2, "text" (length: the longest value; a text field of printable ASCII, as LauncherRow.swift's).
+ // A variable an env file set (DM_ENV_FILE_KEYS, main.m) is shown but kept. A row marked "disabled" (settings.tsv always/<condition>: listed for every game, but this one has
+ // nothing it acts on) is shown greyed out and never applied. Only a choice that differs from the game's default is kept, in NSUserDefaults under "launcher.<ENV>", as the Swift launcher does.
+ #import <UIKit/UIKit.h>
+@@ -18,6 +19,7 @@
+ @property (copy) NSString *env, *kind, *label, *note, *def, *section, *on, *off;
+ @property (copy) NSArray<NSArray<NSString *> *> *options;   // choice: [value, label]
+ @property double min, max, step; @property BOOL hasMin, hasMax, hasStep;
++@property NSInteger length;   // text: the longest value
+ @property BOOL disabled;
+ @end
+ @implementation DmSetting
+@@ -35,6 +37,11 @@
+         return [sc scanDouble:&d] && sc.isAtEnd && isfinite(d) && self.hasMin && self.hasMax && d >= self.min && d <= self.max;
+     }
+     if ([self.kind isEqualToString:@"toggle"]) return [v isEqualToString:self.onValue] || [v isEqualToString:self.offValue];
++    if ([self.kind isEqualToString:@"text"]) {   // printable ASCII of at most length characters, as Setting.accepts
++        if ((NSInteger)v.length > (self.length ?: 64)) return NO;
++        for (NSUInteger i = 0; i < v.length; i++) { unichar ch = [v characterAtIndex:i]; if (ch < 0x20 || ch > 0x7E) return NO; }
++        return YES;
++    }
+     return YES;
+ }
+ @end
+@@ -50,6 +57,7 @@ static NSArray<DmSetting *> *load_settings(NSData *data) {   // nil when the fil
+         DmSetting *s = [DmSetting new];
+         s.env = str(d, @"env"); s.kind = str(d, @"kind"); s.label = str(d, @"label"); s.note = str(d, @"note"); s.def = str(d, @"default");
+         s.section = str(d, @"section"); s.on = str(d, @"on"); s.off = str(d, @"off");
++        if ([d[@"length"] isKindOfClass:NSNumber.class]) s.length = [d[@"length"] integerValue];   // text
+         if (!s.env || !s.kind || !s.label || !s.note || !s.def) return nil;
+         if ([d[@"options"] isKindOfClass:NSArray.class]) {
+             NSMutableArray *opts = [NSMutableArray array];
+@@ -295,6 +303,14 @@ static int increased_memory_limit(void) {
+             b.showsMenuAsPrimaryAction = YES; b.changesSelectionAsPrimaryAction = NO; b.enabled = !locked;
+             b.menu = [self menuFor:s button:b];
+             ctl = b;
++        } else if ([s.kind isEqualToString:@"text"]) {   // a short free text (a room code, an address), as LauncherRow.swift's TextField
++            UITextField *tf = [UITextField new]; tf.text = [self.m value:s]; tf.placeholder = s.label; tf.enabled = !locked; tf.tag = tag; tf.accessibilityLabel = s.label;
++            tf.borderStyle = UITextBorderStyleRoundedRect; tf.autocapitalizationType = UITextAutocapitalizationTypeAllCharacters; tf.autocorrectionType = UITextAutocorrectionTypeNo;
++            tf.spellCheckingType = UITextSpellCheckingTypeNo; tf.keyboardType = UIKeyboardTypeASCIICapable; tf.returnKeyType = UIReturnKeyDone;
++            [tf addTarget:self action:@selector(typed:) forControlEvents:UIControlEventEditingChanged];
++            [tf addTarget:tf action:@selector(resignFirstResponder) forControlEvents:UIControlEventEditingDidEndOnExit];
++            [tf.widthAnchor constraintGreaterThanOrEqualToConstant:200].active = YES;
++            ctl = tf;
+         } else {
+             UISwitch *sw = [UISwitch new]; sw.on = [[self.m value:s] isEqualToString:s.onValue]; sw.enabled = !locked; sw.tag = tag;
+             [sw addTarget:self action:@selector(toggled:) forControlEvents:UIControlEventValueChanged];
+@@ -340,6 +356,12 @@ static int increased_memory_limit(void) {
+ }
+ - (void)slidEnd:(UISlider *)sl { [self refreshReset]; }
+ - (void)toggled:(UISwitch *)sw { DmSetting *s = self.m.settings[sw.tag]; self.m.values[s.env] = sw.on ? s.onValue : s.offValue; [self refreshReset]; }
++- (void)typed:(UITextField *)tf {   // printable ASCII up to the setting's length, as Setting.accepts
++    DmSetting *s = self.m.settings[tf.tag]; NSMutableString *v = [NSMutableString string];
++    for (NSUInteger i = 0; i < tf.text.length && (NSInteger)v.length < (s.length ?: 64); i++) { unichar ch = [tf.text characterAtIndex:i]; if (ch >= 0x20 && ch <= 0x7E) [v appendFormat:@"%C", ch]; }
++    if (![v isEqualToString:tf.text]) tf.text = v;
++    self.m.values[s.env] = v; [self refreshReset];
++}
+ @end
+ 
+ // ---- the screen: game card on the left third, settings on the right two thirds ----
