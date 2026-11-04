@@ -331,6 +331,12 @@ def doctor_windows(ok, bad):
     return bad
 
 
+def patch_adds(patch):
+    """The files a patch creates (its --- /dev/null entries)."""
+    lines = patch.read_text(encoding='utf-8', errors='replace').splitlines()
+    return [b[6:] for a, b in zip(lines, lines[1:]) if a == '--- /dev/null' and b.startswith('+++ b/')]
+
+
 def setup(args):
     """nxnative at the pinned commit with the Switch 2 patch and the rebuilt translator, and ampere-lower built."""
     bad = doctor(need_ios=not args.no_ios)
@@ -356,6 +362,8 @@ def setup(args):
             say('resetting nxnative to the pinned commit before applying the patch')
             run(['git', 'checkout', '-q', '--', '.'], HERE / 'setup-reset.log', cwd=NX)
             if (NX / 'dm/gfx/nvn/.windows-extras').exists(): (NX / 'dm/gfx/nvn/.windows-extras').unlink()
+        for f in patch_adds(patch):   # the patch's own new files (s2tex) from an earlier apply: the reset leaves them, and git apply will not create them over themselves
+            if (NX / f).is_file(): (NX / f).unlink()
         say('applying the Switch 2 host patch')
         run(['git', 'apply', '--whitespace=nowarn', patch], HERE / 'setup-patch.log', cwd=NX)
         marker.write_text(want + '\n')

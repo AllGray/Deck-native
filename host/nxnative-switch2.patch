@@ -52,38 +52,73 @@ index 9bbe8fb..7ab5b24 100644
 +HLE_FORCE("_ZN2nn2vi23SetDisplayVrrCapabilityEPNS0_7DisplayEb", "SWITCH2: variable refresh rate capability of the display; the host ignores it", Result, h_vi_SetVrr, void *disp, unsigned on) { (void)disp; (void)on; return 0; }
 +HLE_FORCE("_ZN2nn2vi52SetLayerNextHdrExtendedContentLuminanceRangeMetadataEPNS0_5LayerEtt", "SWITCH2: HDR extended luminance range metadata for the next frame; the host presents SDR", Result, h_vi_HdrExt, void *layer, unsigned lo, unsigned hi) { (void)layer; (void)lo; (void)hi; return 0; }
 +HLE_FORCE("_ZN2nn2vi52SetLayerNextHdrStandardContentLuminanceRangeMetadataEPNS0_5LayerEtt", "SWITCH2: HDR standard luminance range metadata for the next frame; the host presents SDR", Result, h_vi_HdrStd, void *layer, unsigned lo, unsigned hi) { (void)layer; (void)lo; (void)hi; return 0; }
-diff --git a/dm/gfx/msl/deswz.metal b/dm/gfx/msl/deswz.metal
-index 8beb8ff..9b45b21 100644
---- a/dm/gfx/msl/deswz.metal
-+++ b/dm/gfx/msl/deswz.metal
-@@ -1,20 +1,23 @@
- // Block-linear textures deswizzled on the GPU (nvn_deswizzle_gpu.m)
- #include <metal_stdlib>
- using namespace metal;
--struct P { ulong src_off, dst_off, base, pitch; uint row_bytes, rows, slices, th, td, gobs_x; };
-+struct P { ulong src_off, dst_off, base, pitch; uint row_bytes, rows, slices, th, td, gobs_x, native; };   // native: SWITCH2 in-GOB order (bits 5 and 6 swapped)
- kernel void deswz(device const uchar *src [[buffer(0)]], device uchar *dst [[buffer(1)]], constant P& p [[buffer(2)]], uint3 id [[thread_position_in_grid]]) {
-  uint bh = 1u << p.th, bd = 1u << p.td, gobs_x = p.gobs_x, blocks_y = (p.rows + (8u * bh) - 1u) >> (3u + p.th);
-- uint tid = id.x & 31u, gob_x = id.x >> 5, gob_y = id.y, z = id.z; uint xseg = ((tid >> 4) << 1) | ((tid >> 1) & 1u), y = (gob_y << 3) | (((tid >> 2) & 3u) << 1) | (tid & 1u), x = (gob_x << 6) | (xseg << 4);
-+ uint tid = id.x & 31u, gob_x = id.x >> 5, gob_y = id.y, z = id.z;
-+ uint xseg = p.native ? (((tid >> 4) << 1) | ((tid >> 2) & 1u)) : (((tid >> 4) << 1) | ((tid >> 1) & 1u));
-+ uint y = p.native ? ((gob_y << 3) | (((tid >> 3) & 1u) << 2) | (((tid >> 1) & 1u) << 1) | (tid & 1u)) : ((gob_y << 3) | (((tid >> 2) & 3u) << 1) | (tid & 1u));
-+ uint x = (gob_x << 6) | (xseg << 4);
-  if (x >= p.row_bytes || y >= p.rows || z >= p.slices) return;
-  uint n = min(16u, p.row_bytes - x); ulong block = 512ul * bh * bd; ulong gob_in_block = ((ulong)(z & (bd - 1u)) << p.th) + (gob_y & (bh - 1u)); ulong so = p.src_off + p.base + ((ulong)(z >> p.td) * gobs_x * blocks_y + (gob_y >> p.th) * gobs_x + gob_x) * block + gob_in_block * 512ul + (ulong)tid * 16ul; ulong doff = p.dst_off + ((ulong)z * p.rows + y) * p.pitch + x;
-  if (n == 16u && ((so | doff) & 15ul) == 0ul) *(device uint4 *)(dst + doff) = *(device const uint4 *)(src + so);
-  else for (uint i = 0; i < n; i++) dst[doff + i] = src[so + i];
- }
--struct D { ulong src_off, base, layer_stride; uint width,height,layers,level,th,gobs_x; };
-+struct D { ulong src_off, base, layer_stride; uint width,height,layers,level,th,gobs_x,native; };
- kernel void deswz_direct(device const uchar *src [[buffer(0)]], constant D& p [[buffer(2)]], texture2d_array<uint, access::write> dst [[texture(0)]], uint3 id [[thread_position_in_grid]]) {
-  if(id.x>=p.width||id.y>=p.height||id.z>=p.layers)return;
-  uint x=id.x*8u,y=id.y,bh=1u<<p.th,gy=y>>3;
-  ulong off=p.src_off+p.base+ulong(id.z)*p.layer_stride+((ulong)(gy>>p.th)*p.gobs_x+(x>>6))*(512ul*bh)+(ulong)(gy&(bh-1u))*512ul;
-- off+=((x&63u)>>5)*256u+((y&7u)>>1)*64u+((x&31u)>>4)*32u+(y&1u)*16u+(x&15u);
-+ off+=((x&63u)>>5)*256u+(p.native?(((y&7u)>>2)*128u+((x&31u)>>4)*64u+(((y&7u)>>1)&1u)*32u):(((y&7u)>>1)*64u+((x&31u)>>4)*32u))+(y&1u)*16u+(x&15u);
-  dst.write(uint4(*(device const ushort4*)(src+off)),id.xy,id.z,p.level);
- }
+diff --git a/dm/gfx/msl/s2tex.metal b/dm/gfx/msl/s2tex.metal
+new file mode 100644
+index 0000000..67c72ac
+--- /dev/null
++++ b/dm/gfx/msl/s2tex.metal
+@@ -0,0 +1,61 @@
++// s2tex.metal: block-linear <-> linear on the GPU, the same layout as s2tex.c (see s2tex.h, docs/s2tex.md). MIT licence, part of pokopia-native.
++// One thread per 16-byte segment of a row: grid (ceil(row_bytes / 16), rows, slices). Offsets are 32-bit: a surface stays below 4 GB.
++#include <metal_stdlib>
++using namespace metal;
++
++struct s2tex_params {
++    uint row_bytes;     // width in blocks x bytes per block
++    uint rows;          // height in block rows
++    uint slices;        // depth (1 for 2D)
++    uint block_height;  // log2 GOBs per block, vertically
++    uint block_depth;   // log2 GOBs per block, in depth
++    uint gobs_x;        // GOB columns as laid out (>= ceil(row_bytes / 64))
++    uint order;         // 0 Tegra X1, 1 Switch 2
++    uint row_pitch;     // linear side
++    uint slice_pitch;
++    uint bl_offset;     // where the surface starts in the block-linear buffer
++    uint lin_offset;    // and in the linear one
++    uint pad;
++};
++
++// Tegra X1: offset bits 8..0 = x5 y2 y1 x4 y0 x3 x2 x1 x0; Switch 2 exchanges bits 5 and 6
++static uint s2tex_gob_offset(uint x, uint y, uint order) {
++    x &= 63u; y &= 7u;
++    uint o = (x & 15u) | (y & 1u) << 4 | (x >> 4 & 1u) << 5 | (y >> 1 & 3u) << 6 | (x >> 5 & 1u) << 8;
++    if (order == 1u) o = (o & ~0x60u) | (o & 0x20u) << 1 | (o & 0x40u) >> 1;
++    return o;
++}
++
++static uint s2tex_address(constant s2tex_params &p, uint x, uint y, uint z) {
++    uint block = 512u << (p.block_height + p.block_depth);
++    uint row_of_blocks = p.gobs_x * block;
++    uint block_rows = (p.rows + (8u << p.block_height) - 1u) >> (3u + p.block_height);
++    return (z >> p.block_depth) * block_rows * row_of_blocks
++         + (y >> (3u + p.block_height)) * row_of_blocks
++         + ((z & ((1u << p.block_depth) - 1u)) << (9u + p.block_height))
++         + (((y >> 3) & ((1u << p.block_height) - 1u)) << 9)
++         + (x >> 6) * block
++         + s2tex_gob_offset(x, y, p.order);
++}
++
++kernel void s2tex_deswizzle(device const uchar *bl [[buffer(0)]], device uchar *lin [[buffer(1)]], constant s2tex_params &p [[buffer(2)]],
++                            uint3 id [[thread_position_in_grid]]) {
++    uint x = id.x << 4;
++    if (x >= p.row_bytes || id.y >= p.rows || id.z >= p.slices) return;
++    uint src = p.bl_offset + s2tex_address(p, x, id.y, id.z);
++    uint dst = p.lin_offset + id.z * p.slice_pitch + id.y * p.row_pitch + x;
++    uint n = min(16u, p.row_bytes - x);
++    if (n == 16u && ((src | dst) & 15u) == 0u) *(device uint4 *)(lin + dst) = *(device const uint4 *)(bl + src);
++    else for (uint i = 0; i < n; i++) lin[dst + i] = bl[src + i];
++}
++
++kernel void s2tex_swizzle(device const uchar *lin [[buffer(0)]], device uchar *bl [[buffer(1)]], constant s2tex_params &p [[buffer(2)]],
++                          uint3 id [[thread_position_in_grid]]) {
++    uint x = id.x << 4;
++    if (x >= p.row_bytes || id.y >= p.rows || id.z >= p.slices) return;
++    uint dst = p.bl_offset + s2tex_address(p, x, id.y, id.z);
++    uint src = p.lin_offset + id.z * p.slice_pitch + id.y * p.row_pitch + x;
++    uint n = min(16u, p.row_bytes - x);
++    if (n == 16u && ((src | dst) & 15u) == 0u) *(device uint4 *)(bl + dst) = *(device const uint4 *)(lin + src);
++    else for (uint i = 0; i < n; i++) bl[dst + i] = lin[src + i];
++}
 diff --git a/dm/gfx/nvn/dmsh_chain.h b/dm/gfx/nvn/dmsh_chain.h
 index 9bcce1a..ee7bcf2 100644
 --- a/dm/gfx/nvn/dmsh_chain.h
@@ -3246,85 +3281,417 @@ index b40e1a6..24a0984 100644
 +Ln731: .asciz "nvnDirtyTileMapParametersGetExpandFootprint"
 +Ln732: .asciz "nvnCommandBufferSetFloatBlendClamp"
 +Ln733: .asciz "nvnCommandBufferGetAccelerationStructureVisualizationData"
+diff --git a/dm/gfx/tests/Makefile b/dm/gfx/tests/Makefile
+index 754d4dc..890e335 100644
+--- a/dm/gfx/tests/Makefile
++++ b/dm/gfx/tests/Makefile
+@@ -69,8 +69,8 @@ t_tbuf_align: t_tbuf_align.m
+ 	clang -O1 -g -Wall -fobjc-arc -o $@ t_tbuf_align.m -framework Metal -framework Foundation
+ t_sparse_layout: t_sparse_layout.c ../nvn/nvn_tex.c ../nvn/nvn_tex.h
+ 	clang $(CFLAGS) -o $@ t_sparse_layout.c ../nvn/nvn_tex.c
+-t_deswz_gpu: t_deswz_gpu.m ../tex/nvn_deswizzle.c ../tex/nvn_deswizzle_gpu.m ../tex/nvn_deswizzle.h ../tex/nvn_deswizzle_gpu.h ../nvn/nvn_tex.c ../nvn/nvn_tex.h ../nvn/host_msl.m $(MSL_H)
+-	clang $(CFLAGS) -fobjc-arc -o $@ t_deswz_gpu.m ../tex/nvn_deswizzle.c ../tex/nvn_deswizzle_gpu.m ../nvn/nvn_tex.c ../nvn/host_msl.m -framework Metal -framework Foundation
++t_deswz_gpu: t_deswz_gpu.m ../tex/nvn_deswizzle.c ../tex/nvn_deswizzle_gpu.m ../tex/nvn_deswizzle.h ../tex/nvn_deswizzle_gpu.h ../tex/s2tex.c ../tex/s2tex.h ../nvn/nvn_tex.c ../nvn/nvn_tex.h ../nvn/host_msl.m $(MSL_H)
++	clang $(CFLAGS) -fobjc-arc -o $@ t_deswz_gpu.m ../tex/nvn_deswizzle.c ../tex/nvn_deswizzle_gpu.m ../tex/s2tex.c ../nvn/nvn_tex.c ../nvn/host_msl.m -framework Metal -framework Foundation
+ t_tex_layout: t_tex_layout.c ../nvn/nvn_tex.c ../nvn/nvn_tex.h
+ 	clang -O1 -Wall -o $@ t_tex_layout.c ../nvn/nvn_tex.c
+ t_refl: t_refl.m ../nvn/nvn_refl.m ../nvn/nvn_refl.h ../nvn/dmsh_chain.h
 diff --git a/dm/gfx/tex/nvn_deswizzle.c b/dm/gfx/tex/nvn_deswizzle.c
-index 8b5aefb..d29b34e 100644
+index 8b5aefb..b4c80bd 100644
 --- a/dm/gfx/tex/nvn_deswizzle.c
 +++ b/dm/gfx/tex/nvn_deswizzle.c
-@@ -6,8 +6,15 @@
+@@ -5,9 +5,18 @@
+ //   block = 1 GOB wide × 2^tileH GOBs high × 2^tileD GOBs deep, ordered y first then z within a block; blocks fill the level in x → y → z row-major order.
  // Level / layer start offsets and the actual block height and block depth of this level come from nvn_tex.c; here we only do intra-level addressing and copying.
  #include "nvn_deswizzle.h"
- #include <string.h>
 +#include <stdlib.h>
-+// SWITCH2 (private bring-up): the Switch 2 GPU swaps bits 5 and 6 of the in-GOB offset relative to the Tegra X1 layout
-+// (Eden-NS2 video_core/textures/decoders.cpp NativeGobOffset; confirmed on the UI sprites of Pokopia by brute force):
-+//   (x%64/32)*256 + (y%8/4)*128 + (x%32/16)*64 + (y%4/2)*32 + (y%2)*16 + x%16.  DM_S2_TILING=0 restores the Tegra X1 order; on by default in this build.
-+int nvn_native_tiling = -1;
-+int nvn_native_tiling_on(void) { if (nvn_native_tiling < 0) { const char *e = getenv("DM_S2_TILING"); nvn_native_tiling = e ? atoi(e) != 0 : 1; } return nvn_native_tiling; }
+ #include <string.h>
  
++// SWITCH2: Switch 2 textures use the Switch 2 in-GOB order, laid out by s2tex (s2tex.c, dm/gfx/msl/s2tex.metal); DM_S2_TILING=0 keeps the Tegra X1 order below
++s2tex_order nvn_gob_order(void) {
++    static int order = -1;
++    if (order < 0) { const char *e = getenv("DM_S2_TILING"); order = e && !atoi(e) ? S2TEX_TX1 : S2TEX_SWITCH2; }
++    return (s2tex_order)order;
++}
++
  static uint32_t gob_off(uint32_t x, uint32_t y) {
-+    if (nvn_native_tiling_on()) return (x % 64 / 32) * 256 + (y % 8 / 4) * 128 + (x % 32 / 16) * 64 + (y % 4 / 2) * 32 + (y % 2) * 16 + x % 16;   // SWITCH2
++    if (nvn_gob_order() == S2TEX_SWITCH2) return s2tex_gob_offset(x, y, S2TEX_SWITCH2);
      return (x % 64 / 32) * 256 + (y % 8 / 2) * 64 + (x % 32 / 16) * 32 + (y % 2) * 16 + x % 16;
  }
  
-@@ -50,8 +57,9 @@ static int move(const nvn_texdesc *d, unsigned level, unsigned layer, uint8_t *b
+@@ -47,6 +56,11 @@ static int move(const nvn_texdesc *d, unsigned level, unsigned layer, uint8_t *b
+     if (pitch < row_bytes) return -1;
+     bl += base; uint32_t lb = nvn_tex_level_gobs(d, level) * 64;   // the row as laid out (padded in a sparse texture's tiled levels)
+     if (lb < row_bytes) lb = row_bytes;
++    if (nvn_gob_order() == S2TEX_SWITCH2) {   // SWITCH2: the level through s2tex, rows pitch apart and slices rows * pitch apart as below
++        s2tex_surface s = {row_bytes / bpb, rows, slices, bpb, th, td, (lb + 63) >> 6, S2TEX_SWITCH2};
++        size_t n = (size_t)s2tex_size(&s);
++        return (to_linear ? s2tex_deswizzle(&s, bl, n, lin, pitch, 0) : s2tex_swizzle(&s, lin, pitch, 0, bl, n)) ? -1 : 0;
++    }
      // Hoist nvn_bl_offset's slice and row terms out of the segment loop. The block height and depth are powers of two,
      // so their division / remainder become shifts and masks. At x = 16*j the block column is j >> 2, and the segment
      // has one of four positions inside the GOB (x%64 = 0/16/32/48 -> 0/32/256/288); the y part depends only on y%8.
--    static const uint16_t kox[4] = {0, 32, 256, 288};                         // x%16 is always 0 here: segments start at multiples of 16
--    static const uint16_t koy[8] = {0, 16, 64, 80, 128, 144, 192, 208};       // (y%8/2)*64 + (y%2)*16
-+    static const uint16_t kox_x1[4] = {0, 32, 256, 288}, kox_s2[4] = {0, 64, 256, 320};                         // x%16 is always 0 here: segments start at multiples of 16
-+    static const uint16_t koy_x1[8] = {0, 16, 64, 80, 128, 144, 192, 208}, koy_s2[8] = {0, 16, 32, 48, 128, 144, 160, 176};   // (y%8/2)*64 + (y%2)*16; SWITCH2: (y%8/4)*128 + (y%4/2)*32 + (y%2)*16
-+    const uint16_t *kox = nvn_native_tiling_on() ? kox_s2 : kox_x1, *koy = nvn_native_tiling_on() ? koy_s2 : koy_x1;
-     uint32_t bh = 1u << th, bd = 1u << td;
-     uint64_t block = 512ull * bh * bd, gobs_x = (uint64_t)(lb + 63) >> 6, blocks_y = ((uint64_t)rows + 8 * bh - 1) >> (3 + th);
-     for (uint32_t z = 0; z < slices; z++) {
+diff --git a/dm/gfx/tex/nvn_deswizzle.h b/dm/gfx/tex/nvn_deswizzle.h
+index afdc4c0..77c94d9 100644
+--- a/dm/gfx/tex/nvn_deswizzle.h
++++ b/dm/gfx/tex/nvn_deswizzle.h
+@@ -3,6 +3,10 @@
+ #include <stddef.h>
+ #include <stdint.h>
+ #include "../nvn/nvn_tex.h"
++#include "s2tex.h"
++
++// SWITCH2: the in-GOB order of this build's textures, S2TEX_SWITCH2 unless DM_S2_TILING=0 (S2TEX_TX1); the GPU path follows it too
++s2tex_order nvn_gob_order(void);
+ 
+ // Decode level number level, layer number layer (layer of an array / cube; 0 for non-layered textures) from the whole-texture storage src_storage into linear dst_linear.
+ // dst is laid out by block rows: dst_pitch bytes per row (≥ width in blocks of this level × bytes per block); for compressed formats one row = one row of blocks.
 diff --git a/dm/gfx/tex/nvn_deswizzle_gpu.m b/dm/gfx/tex/nvn_deswizzle_gpu.m
-index 1443bbb..a24272c 100644
+index 1443bbb..84e3217 100644
 --- a/dm/gfx/tex/nvn_deswizzle_gpu.m
 +++ b/dm/gfx/tex/nvn_deswizzle_gpu.m
-@@ -1,5 +1,6 @@
+@@ -1,9 +1,30 @@
  #import "nvn_deswizzle_gpu.h"
  #import "../nvn/host_msl.h"
-+int nvn_native_tiling_on(void);   // SWITCH2 (nvn_deswizzle.c)
  
- static id<MTLComputePipelineState> g_nvn_deswz_pipeline, g_nvn_deswz_direct;
+-static id<MTLComputePipelineState> g_nvn_deswz_pipeline, g_nvn_deswz_direct;
++static id<MTLComputePipelineState> g_nvn_deswz_pipeline, g_nvn_deswz_direct, g_nvn_s2tex;
  
-@@ -35,8 +36,9 @@ int nvn_deswz_gpu_direct_m4(id<MTL4ComputeCommandEncoder> enc, id<MTL4ArgumentTa
-     uint32_t row,rows,slices,bpb;uint64_t base;unsigned th,td;
-     if (nvn_deswizzle_geom(d,level,0,&row,&rows,&slices,&base,&th,&td,&bpb) || bpb != 8 || slices != 1 || td ||
-         layout.size > src.length || src_off > src.length-layout.size || layout.layers != view.arrayLength) return -1;
--    struct {uint64_t src_off,base,layer_stride;uint32_t width,height,layers,level,th,gobs_x;} p = {
--        src_off,base,layout.layer_size,MAX(d->width>>level,1u),MAX(d->height>>level,1u),layout.layers,level,th,MAX(nvn_tex_level_gobs(d,level),(row+63u)/64u)};
-+    int nvn_native_tiling_on(void);
-+    struct {uint64_t src_off,base,layer_stride;uint32_t width,height,layers,level,th,gobs_x,native;} p = {
-+        src_off,base,layout.layer_size,MAX(d->width>>level,1u),MAX(d->height>>level,1u),layout.layers,level,th,MAX(nvn_tex_level_gobs(d,level),(row+63u)/64u),(uint32_t)nvn_native_tiling_on()};
-     memcpy((uint8_t*)params.contents+params_off,&p,sizeof p);
-     [enc setArgumentTable:table];[enc setComputePipelineState:g_nvn_deswz_direct];
-     [table setAddress:src.gpuAddress atIndex:0];[table setAddress:params.gpuAddress+params_off atIndex:2];[table setTexture:view.gpuResourceID atIndex:0];
-@@ -52,9 +54,9 @@ int nvn_deswz_gpu_encode(id<MTLComputeCommandEncoder> enc, id<MTLBuffer> src, ui
+-// The kernels deswz and deswz_direct: dm/gfx/msl/deswz.metal
++// The kernels deswz and deswz_direct: dm/gfx/msl/deswz.metal; SWITCH2: s2tex_deswizzle, dm/gfx/msl/s2tex.metal (the Switch 2 order, nvn_gob_order)
++
++// SWITCH2: the parameters of s2tex_deswizzle (struct s2tex_params in s2tex.metal)
++typedef struct { uint32_t row_bytes, rows, slices, block_height, block_depth, gobs_x, order, row_pitch, slice_pitch, bl_offset, lin_offset, pad; } s2tex_params;
++
++// SWITCH2: one level and layer for s2tex_deswizzle. Its offsets are 32-bit from where the buffers are bound, so each buffer is bound at the
++// 256-byte boundary below its offset (src_bind, dst_bind) and the rest goes in the parameters; -1 for a surface the kernel cannot address
++static int s2tex_params_for(const nvn_texdesc *d, unsigned level, unsigned layer, uint64_t src_off, uint64_t dst_off, size_t dst_pitch,
++                            s2tex_params *p, uint64_t *src_bind, uint64_t *dst_bind, MTLSize *groups) {
++    uint32_t row_bytes, rows, slices, bpb;
++    uint64_t base;
++    unsigned th, td;
++    if (!g_nvn_s2tex || nvn_deswizzle_geom(d, level, layer, &row_bytes, &rows, &slices, &base, &th, &td, &bpb) || dst_pitch < row_bytes) return -1;
++    s2tex_surface s = {row_bytes / bpb, rows, slices, bpb, th, td, MAX(nvn_tex_level_gobs(d, level), (row_bytes + 63u) >> 6), S2TEX_SWITCH2};   // GOB columns as laid out (nvn_tex_level_gobs)
++    uint64_t bl = src_off + base, bl_size = s2tex_size(&s), lin_size = (uint64_t)dst_pitch * rows * slices;
++    if (!bl_size || bl_size + 256 > UINT32_MAX || lin_size + 256 > UINT32_MAX) return -1;
++    *p = (s2tex_params){row_bytes, rows, slices, th, td, s.gobs_x, S2TEX_SWITCH2, (uint32_t)dst_pitch, (uint32_t)(dst_pitch * rows), (uint32_t)(bl & 255u), (uint32_t)(dst_off & 255u), 0};
++    *src_bind = bl & ~255ull;
++    *dst_bind = dst_off & ~255ull;
++    *groups = MTLSizeMake(((row_bytes + 15u) / 16u + 31u) / 32u, rows, slices);   // one thread per 16 bytes of a row
++    return 0;
++}
+ 
+ int nvn_deswz_gpu_init(id<MTLDevice> dev) {
+     if (g_nvn_deswz_pipeline) return 0;
+@@ -16,13 +37,16 @@ int nvn_deswz_gpu_init(id<MTLDevice> dev) {
+     g_nvn_deswz_pipeline = [dev newComputePipelineStateWithFunction:function error:&error];
+     id<MTLFunction> direct = [library newFunctionWithName:@"deswz_direct"];
+     if (direct) g_nvn_deswz_direct = [dev newComputePipelineStateWithFunction:direct error:&error];
+-    return g_nvn_deswz_pipeline ? 0 : -1;
++    id<MTLFunction> s2 = [host_msl_lib(dev, nil, "s2tex", &error) newFunctionWithName:@"s2tex_deswizzle"];   // SWITCH2: dm/gfx/msl/s2tex.metal
++    if (s2) g_nvn_s2tex = [dev newComputePipelineStateWithFunction:s2 error:&error];
++    return g_nvn_deswz_pipeline && (g_nvn_s2tex || nvn_gob_order() != S2TEX_SWITCH2) ? 0 : -1;
+ }
+ 
+ int nvn_deswz_gpu_direct_supported(const nvn_texdesc *d) {
+     // Prefer retained compression for large images. This path targets many
+     // small array layers where per-face dispatch/copy overhead dominates.
+-    return g_nvn_deswz_direct && d && d->format == 0x29 && (d->target == 4 || d->target == 9) &&
++    // SWITCH2: deswz_direct reads the Tegra X1 order; Switch 2 textures take the staged path (s2tex_deswizzle)
++    return g_nvn_deswz_direct && nvn_gob_order() == S2TEX_TX1 && d && d->format == 0x29 && (d->target == 4 || d->target == 9) &&
+         !(d->flags & 0x38) && d->samples <= 1 && d->width && d->height && d->width <= 64 && d->height <= 64 && d->depth >= 32;
+ }
+ int nvn_deswz_gpu_direct_m4(id<MTL4ComputeCommandEncoder> enc, id<MTL4ArgumentTable> table,
+@@ -48,6 +72,16 @@ int nvn_deswz_gpu_encode(id<MTLComputeCommandEncoder> enc, id<MTLBuffer> src, ui
+                          const nvn_texdesc *d, unsigned level, unsigned layer,
+                          id<MTLBuffer> dst, uint64_t dst_off, size_t dst_pitch) {
+     if (!g_nvn_deswz_pipeline || !enc || !src || !dst || !d) return -1;
++    if (nvn_gob_order() == S2TEX_SWITCH2) {   // SWITCH2
++        s2tex_params p; uint64_t sb, db; MTLSize groups;
++        if (s2tex_params_for(d, level, layer, src_off, dst_off, dst_pitch, &p, &sb, &db, &groups)) return -1;
++        [enc setComputePipelineState:g_nvn_s2tex];
++        [enc setBuffer:src offset:sb atIndex:0];
++        [enc setBuffer:dst offset:db atIndex:1];
++        [enc setBytes:&p length:sizeof p atIndex:2];
++        [enc dispatchThreadgroups:groups threadsPerThreadgroup:MTLSizeMake(32, 1, 1)];
++        return 0;
++    }
+     uint32_t row_bytes, rows, slices, bpb;
      uint64_t base;
      unsigned th, td;
-     if (nvn_deswizzle_geom(d, level, layer, &row_bytes, &rows, &slices, &base, &th, &td, &bpb) || dst_pitch < row_bytes) return -1;
--    struct { uint64_t src_off, dst_off, base, pitch; uint32_t row_bytes, rows, slices, th, td, gobs_x; } p = {
-+    struct { uint64_t src_off, dst_off, base, pitch; uint32_t row_bytes, rows, slices, th, td, gobs_x, native; } p = {
-         src_off, dst_off, base, dst_pitch, row_bytes, rows, slices, th, td, MAX(nvn_tex_level_gobs(d, level), (row_bytes + 63u) >> 6)   // GOB columns as laid out (nvn_tex_level_gobs)
--    };
-+    , (uint32_t)nvn_native_tiling_on()};
-     [enc setComputePipelineState:g_nvn_deswz_pipeline];
-     [enc setBuffer:src offset:0 atIndex:0];
-     [enc setBuffer:dst offset:0 atIndex:1];
-@@ -74,9 +76,9 @@ int nvn_deswz_gpu_encode_m4(id<MTL4ComputeCommandEncoder> enc, id<MTL4ArgumentTa
+@@ -70,6 +104,18 @@ int nvn_deswz_gpu_encode_m4(id<MTL4ComputeCommandEncoder> enc, id<MTL4ArgumentTa
+                             const nvn_texdesc *d, unsigned level, unsigned layer,
+                             id<MTLBuffer> dst, uint64_t dst_off, size_t dst_pitch) {
+     if (!g_nvn_deswz_pipeline || !enc || !table || !params || !src || !dst || !d) return -1;
++    if (nvn_gob_order() == S2TEX_SWITCH2) {   // SWITCH2
++        s2tex_params p; uint64_t sb, db; MTLSize groups;
++        if (s2tex_params_for(d, level, layer, src_off, dst_off, dst_pitch, &p, &sb, &db, &groups)) return -1;
++        memcpy((uint8_t *)params.contents + params_off, &p, sizeof p);
++        [enc setArgumentTable:table];
++        [enc setComputePipelineState:g_nvn_s2tex];
++        [table setAddress:src.gpuAddress + sb atIndex:0];
++        [table setAddress:dst.gpuAddress + db atIndex:1];
++        [table setAddress:params.gpuAddress + params_off atIndex:2];
++        [enc dispatchThreadgroups:groups threadsPerThreadgroup:MTLSizeMake(32, 1, 1)];
++        return 0;
++    }
+     uint32_t row_bytes, rows, slices, bpb;
      uint64_t base;
      unsigned th, td;
-     if (nvn_deswizzle_geom(d, level, layer, &row_bytes, &rows, &slices, &base, &th, &td, &bpb) || dst_pitch < row_bytes) return -1;
--    struct { uint64_t src_off, dst_off, base, pitch; uint32_t row_bytes, rows, slices, th, td, gobs_x; } p = {
-+    struct { uint64_t src_off, dst_off, base, pitch; uint32_t row_bytes, rows, slices, th, td, gobs_x, native; } p = {
-         src_off, dst_off, base, dst_pitch, row_bytes, rows, slices, th, td, MAX(nvn_tex_level_gobs(d, level), (row_bytes + 63u) >> 6)   // GOB columns as laid out (nvn_tex_level_gobs)
--    };
-+    , (uint32_t)nvn_native_tiling_on()};
-     memcpy((uint8_t *)params.contents + params_off, &p, sizeof p);
-     [enc setArgumentTable:table];
-     [enc setComputePipelineState:g_nvn_deswz_pipeline];
+diff --git a/dm/gfx/tex/s2tex.c b/dm/gfx/tex/s2tex.c
+new file mode 100644
+index 0000000..94097ea
+--- /dev/null
++++ b/dm/gfx/tex/s2tex.c
+@@ -0,0 +1,152 @@
++/* s2tex: block-linear <-> linear (see s2tex.h and docs/s2tex.md). MIT licence, part of pokopia-native. */
++#include "s2tex.h"
++#include <string.h>
++
++/* Tegra X1 GOB: byte offset bits 8..0 = x5 y2 y1 x4 y0 x3 x2 x1 x0 (x = byte in the GOB's 64-byte row, y = row 0..7).
++ * Switch 2: the same with offset bits 5 and 6 exchanged, i.e. x5 y2 x4 y1 y0 x3 x2 x1 x0. */
++uint32_t s2tex_gob_offset(uint32_t x_byte, uint32_t y, s2tex_order order) {
++    uint32_t x = x_byte & 63, r = y & 7;
++    uint32_t o = (x & 15) | (r & 1) << 4 | (x >> 4 & 1) << 5 | (r >> 1 & 3) << 6 | (x >> 5 & 1) << 8;
++    if (order == S2TEX_SWITCH2) o = (o & ~0x60u) | (o & 0x20u) << 1 | (o & 0x40u) >> 1;
++    return o;
++}
++
++typedef struct {
++    uint32_t row_bytes, rows, slices, bh, bd, gobs_x;
++    uint64_t block, row_of_blocks, layer_of_blocks;
++} geom;
++
++static int geom_of(const s2tex_surface *s, geom *g) {
++    if (!s || !s->width || !s->height || !s->bytes_per_block || s->bytes_per_block > 16 || s->block_height > 5 || s->block_depth > 5) return S2TEX_EINVAL;
++    if (s->order != S2TEX_TX1 && s->order != S2TEX_SWITCH2) return S2TEX_EINVAL;
++    uint64_t rb = (uint64_t)s->width * s->bytes_per_block;
++    if (rb > UINT32_MAX) return S2TEX_EINVAL;
++    g->row_bytes = (uint32_t)rb;
++    g->rows = s->height;
++    g->slices = s->depth ? s->depth : 1;
++    g->bh = s->block_height;
++    g->bd = s->block_depth;
++    uint32_t need = (uint32_t)((rb + 63) / 64);
++    g->gobs_x = s->gobs_x ? s->gobs_x : need;
++    if (g->gobs_x < need) return S2TEX_EINVAL;
++    g->block = (uint64_t)S2TEX_GOB_BYTES << (g->bh + g->bd);
++    g->row_of_blocks = g->gobs_x * g->block;
++    uint64_t block_rows = ((uint64_t)g->rows + (8u << g->bh) - 1) >> (3 + g->bh);
++    g->layer_of_blocks = block_rows * g->row_of_blocks;
++    return S2TEX_OK;
++}
++
++static uint64_t geom_size(const geom *g) {
++    uint64_t layers = ((uint64_t)g->slices + (1u << g->bd) - 1) >> g->bd;
++    return layers * g->layer_of_blocks;
++}
++
++uint64_t s2tex_size(const s2tex_surface *s) {
++    geom g;
++    return geom_of(s, &g) ? 0 : geom_size(&g);
++}
++
++/* Start of the GOB row holding (y, z): the block layer, block row and GOB inside the block, plus y's in-GOB term. */
++static uint64_t row_base(const geom *g, uint32_t y, uint32_t z, s2tex_order order) {
++    return (uint64_t)(z >> g->bd) * g->layer_of_blocks
++         + (uint64_t)(y >> (3 + g->bh)) * g->row_of_blocks
++         + ((uint64_t)(z & ((1u << g->bd) - 1)) << (9 + g->bh))
++         + ((uint64_t)((y >> 3) & ((1u << g->bh) - 1)) << 9)
++         + s2tex_gob_offset(0, y, order);
++}
++
++uint64_t s2tex_offset(const s2tex_surface *s, uint32_t x_byte, uint32_t y, uint32_t z) {
++    geom g;
++    if (geom_of(s, &g)) return 0;
++    return row_base(&g, y, z, s->order) + (uint64_t)(x_byte >> 6) * g.block + s2tex_gob_offset(x_byte, 0, s->order);
++}
++
++/* The in-GOB order is a bit permutation, so a GOB offset is the sum of an x part and a y part; a row is copied in 16-byte
++ * segments (bits 0..3 are x0..x3 in both orders), one of four positions per GOB. */
++static int move(const s2tex_surface *s, uint8_t *bl, size_t bl_size, uint8_t *lin, size_t row_pitch, size_t slice_pitch, int to_linear) {
++    geom g;
++    int e = geom_of(s, &g);
++    if (e) return e;
++    if (!bl || !lin || row_pitch < g.row_bytes) return S2TEX_EINVAL;
++    if (!slice_pitch) slice_pitch = (size_t)g.rows * row_pitch;
++    if (slice_pitch < (size_t)(g.rows - 1) * row_pitch + g.row_bytes) return S2TEX_EINVAL;
++    if (bl_size < geom_size(&g)) return S2TEX_ESIZE;
++    uint32_t seg[4];
++    for (uint32_t c = 0; c < 4; c++) seg[c] = s2tex_gob_offset(c * 16, 0, s->order);
++    uint32_t nfull = g.row_bytes >> 4, tail = g.row_bytes & 15;
++    for (uint32_t z = 0; z < g.slices; z++) {
++        for (uint32_t y = 0; y < g.rows; y++) {
++            uint8_t *row = lin + (size_t)z * slice_pitch + (size_t)y * row_pitch;
++            uint8_t *gob_row = bl + row_base(&g, y, z, s->order);
++            for (uint32_t j = 0; j < nfull; j++) {
++                uint8_t *p = gob_row + (uint64_t)(j >> 2) * g.block + seg[j & 3];
++                if (to_linear) memcpy(row + ((size_t)j << 4), p, 16);
++                else memcpy(p, row + ((size_t)j << 4), 16);
++            }
++            if (tail) {
++                uint8_t *p = gob_row + (uint64_t)(nfull >> 2) * g.block + seg[nfull & 3];
++                if (to_linear) memcpy(row + ((size_t)nfull << 4), p, tail);
++                else memcpy(p, row + ((size_t)nfull << 4), tail);
++            }
++        }
++    }
++    return S2TEX_OK;
++}
++
++int s2tex_deswizzle(const s2tex_surface *s, const void *bl, size_t bl_size, void *linear, size_t row_pitch, size_t slice_pitch) {
++    return move(s, (uint8_t *)(uintptr_t)bl, bl_size, (uint8_t *)linear, row_pitch, slice_pitch, 1);
++}
++
++int s2tex_swizzle(const s2tex_surface *s, const void *linear, size_t row_pitch, size_t slice_pitch, void *bl, size_t bl_size) {
++    return move(s, (uint8_t *)bl, bl_size, (uint8_t *)(uintptr_t)linear, row_pitch, slice_pitch, 0);
++}
++
++static uint32_t mip(uint32_t v, unsigned level) { v = level < 32 ? v >> level : 0; return v ? v : 1; }
++
++/* A level keeps the block height while its rows exceed half a block (8 << (n - 1) rows), else halves it; the same for depth with 1-slice GOBs. */
++static uint32_t clamp_log2(uint32_t n, uint32_t unit, uint32_t extent) {
++    while (n && ((uint64_t)unit << (n - 1)) >= extent) n--;
++    return n;
++}
++
++static int level_surface(const s2tex_texture *t, unsigned level, s2tex_surface *s) {
++    if (!t || !t->width || !t->height || !t->block_w || !t->block_h || !t->bytes_per_block || t->bytes_per_block > 16) return S2TEX_EINVAL;
++    if (t->block_height > 5 || t->block_depth > 5 || level >= (t->levels ? t->levels : 1)) return S2TEX_EINVAL;
++    uint32_t w = mip(t->width, level), h = mip(t->height, level), d = mip(t->depth ? t->depth : 1, level);
++    s->width = (w + t->block_w - 1) / t->block_w;
++    s->height = (h + t->block_h - 1) / t->block_h;
++    s->depth = d;
++    s->bytes_per_block = t->bytes_per_block;
++    s->block_height = clamp_log2(t->block_height, 8, s->height);
++    s->block_depth = clamp_log2(t->block_depth, 1, d);
++    s->gobs_x = 0;
++    s->order = t->order;
++    return S2TEX_OK;
++}
++
++uint64_t s2tex_level(const s2tex_texture *t, unsigned level, s2tex_surface *out) {
++    uint64_t off = 0;
++    s2tex_surface s;
++    for (unsigned i = 0; i <= level; i++) {
++        if (level_surface(t, i, &s)) return UINT64_MAX;
++        if (i == level) break;
++        off += s2tex_size(&s);
++    }
++    if (out) *out = s;
++    return off;
++}
++
++uint64_t s2tex_layer_size(const s2tex_texture *t) {
++    unsigned n = t && t->levels ? t->levels : 1;
++    s2tex_surface s;
++    uint64_t off = s2tex_level(t, n - 1, &s);
++    return off == UINT64_MAX ? 0 : off + s2tex_size(&s);
++}
++
++uint64_t s2tex_layer_stride(const s2tex_texture *t) {
++    s2tex_surface s0;
++    uint64_t size = s2tex_layer_size(t);
++    if (!size || s2tex_level(t, 0, &s0) == UINT64_MAX) return 0;
++    uint64_t align = (uint64_t)S2TEX_GOB_BYTES << (s0.block_height + s0.block_depth);
++    return (size + align - 1) / align * align;
++}
+diff --git a/dm/gfx/tex/s2tex.h b/dm/gfx/tex/s2tex.h
+new file mode 100644
+index 0000000..e98abb6
+--- /dev/null
++++ b/dm/gfx/tex/s2tex.h
+@@ -0,0 +1,75 @@
++/* s2tex: NVIDIA block-linear <-> linear texture layout for the Tegra X1 (Switch) and the Switch 2.
++ * MIT licence, part of pokopia-native. Written from public descriptions of the block-linear (GOB) layout; see docs/s2tex.md.
++ *
++ * A GOB is 512 bytes covering 64 bytes x 8 rows. Blocks are 1 GOB wide, 2^block_height GOBs high and 2^block_depth GOBs deep
++ * (GOBs ordered y first, then z, inside a block); blocks fill the surface in x, then y, then z order. The two GPUs differ only in
++ * the byte order inside a GOB (s2tex_gob_offset). Plain C99, no dependencies. */
++#ifndef S2TEX_H
++#define S2TEX_H
++
++#include <stddef.h>
++#include <stdint.h>
++
++#ifdef __cplusplus
++extern "C" {
++#endif
++
++typedef enum {
++    S2TEX_TX1 = 0,      /* Tegra X1 (Maxwell) GOB order */
++    S2TEX_SWITCH2 = 1   /* Switch 2: the Tegra X1 order with address bits 5 and 6 exchanged */
++} s2tex_order;
++
++enum { S2TEX_GOB_BYTES = 512, S2TEX_GOB_WIDTH = 64, S2TEX_GOB_ROWS = 8 };
++enum { S2TEX_OK = 0, S2TEX_EINVAL = -1, S2TEX_ESIZE = -2 };
++
++/* One block-linear surface: a mip level of a 2D texture, a 2D array layer, or all slices of one 3D level.
++ * Sizes count format blocks: texels for uncompressed formats, 4x4 (or ASTC) blocks for compressed ones. */
++typedef struct {
++    uint32_t width;           /* in blocks */
++    uint32_t height;          /* in block rows */
++    uint32_t depth;           /* slices (3D); 0 or 1 for 2D */
++    uint32_t bytes_per_block; /* 1..16, any value (3, 6 and 12 included) */
++    uint32_t block_height;    /* log2 of the GOBs per block, vertically (0..5) */
++    uint32_t block_depth;     /* log2 of the GOBs per block, in depth (0..5) */
++    uint32_t gobs_x;          /* GOB columns as laid out; 0 = ceil(width * bytes_per_block / 64). Larger for padded rows */
++    s2tex_order order;
++} s2tex_surface;
++
++/* Byte offset of (x_byte % 64, y % 8) inside its GOB. */
++uint32_t s2tex_gob_offset(uint32_t x_byte, uint32_t y, s2tex_order order);
++
++/* Byte offset of byte x_byte of row y, slice z, from the start of the surface. No bounds check. */
++uint64_t s2tex_offset(const s2tex_surface *s, uint32_t x_byte, uint32_t y, uint32_t z);
++
++/* Block-linear bytes the surface occupies: whole blocks, slices rounded up to whole block depths. 0 for invalid parameters. */
++uint64_t s2tex_size(const s2tex_surface *s);
++
++/* Block-linear -> linear. Row y of slice z lands at linear + z * slice_pitch + y * row_pitch; row_pitch >= width * bytes_per_block,
++ * slice_pitch 0 = height * row_pitch. Bytes between rows are not touched. bl_size is checked against s2tex_size. */
++int s2tex_deswizzle(const s2tex_surface *s, const void *bl, size_t bl_size, void *linear, size_t row_pitch, size_t slice_pitch);
++
++/* Linear -> block-linear, the reverse. Storage bytes outside the surface's texels (row and block padding) are not touched. */
++int s2tex_swizzle(const s2tex_surface *s, const void *linear, size_t row_pitch, size_t slice_pitch, void *bl, size_t bl_size);
++
++/* Mip chains. A texture's levels lie one after another in its storage, each in whole blocks of its own block height and depth;
++ * a level keeps the texture's block height / depth until it is no taller (deeper) than half of a block, then halves it. */
++typedef struct {
++    uint32_t width, height, depth;    /* level 0 in texels (depth 1 for 2D) */
++    uint32_t block_w, block_h;        /* texels per format block (1x1 uncompressed, 4x4 BC, ASTC footprints) */
++    uint32_t bytes_per_block;
++    uint32_t block_height, block_depth; /* level 0's, log2 GOBs (the texture's layout) */
++    uint32_t levels;                  /* 0 counts as 1 */
++    s2tex_order order;
++} s2tex_texture;
++
++/* Fills *out with level `level`'s surface and returns its byte offset from the start of the texture (one layer). Returns UINT64_MAX for an invalid level. */
++uint64_t s2tex_level(const s2tex_texture *t, unsigned level, s2tex_surface *out);
++
++/* Bytes of one layer: all levels. An array texture's layers are this far apart once aligned to level 0's block (s2tex_layer_stride). */
++uint64_t s2tex_layer_size(const s2tex_texture *t);
++uint64_t s2tex_layer_stride(const s2tex_texture *t);
++
++#ifdef __cplusplus
++}
++#endif
++#endif
+diff --git a/dm/gfx/tex/tests/Makefile b/dm/gfx/tex/tests/Makefile
+index feed9f8..9ef78a2 100644
+--- a/dm/gfx/tex/tests/Makefile
++++ b/dm/gfx/tex/tests/Makefile
+@@ -4,8 +4,8 @@ CFLAGS = -O2 -g -Wall -Wextra
+ SAN ?=
+ O ?=
+ CLANG = clang $(SAN)
+-$(O)t_tex: t_tex.c ../nvn_deswizzle.c ../nvn_deswizzle.h ../../nvn/nvn_tex.c ../../nvn/nvn_tex.h
+-	$(CLANG) $(CFLAGS) -o $@ t_tex.c ../nvn_deswizzle.c ../../nvn/nvn_tex.c -lm
++$(O)t_tex: t_tex.c ../nvn_deswizzle.c ../nvn_deswizzle.h ../s2tex.c ../s2tex.h ../../nvn/nvn_tex.c ../../nvn/nvn_tex.h
++	$(CLANG) $(CFLAGS) -o $@ t_tex.c ../nvn_deswizzle.c ../s2tex.c ../../nvn/nvn_tex.c -lm
+ $(O)t_fmt_mtl: t_fmt_mtl.m ../nvn_fmt_mtl.c ../nvn_fmt_mtl.h
+ 	$(CLANG) $(CFLAGS) -fobjc-arc -o $@ t_fmt_mtl.m ../nvn_fmt_mtl.c -framework Metal -framework Foundation
+ run: t_tex t_fmt_mtl
 diff --git a/dm/gfx/tools/dmsh_build.py b/dm/gfx/tools/dmsh_build.py
 index 3b843c9..bf34594 100644
 --- a/dm/gfx/tools/dmsh_build.py
