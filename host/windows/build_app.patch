@@ -23,7 +23,16 @@
          for i, (f, r) in enumerate(ex.map(one, jobs), 1):
              if r.returncode: bad.append((f, r.stderr))
              if i % 50 == 0 or i == len(jobs): t(f'compile: {i}/{len(jobs)}')
-@@ -314,6 +314,8 @@
+@@ -155,6 +155,8 @@
+         'MinimumOSVersion': tc.setting('ios_deployment', tc.IOS_DEPLOYMENT), 'LSRequiresIPhoneOS': True, 'UIDeviceFamily': [1, 2], 'UIRequiredDeviceCapabilities': ['arm64'],
+         # dm/ios/project.yml info.properties
+         'UILaunchStoryboardName': '', 'UIFileSharingEnabled': True, 'LSSupportsOpeningDocumentsInPlace': True,
++        # Link Play (pokopia-native's co-op, hle_coop_*.c): the local network permission's reason and the DNS-SD type it advertises and browses
++        'NSLocalNetworkUsageDescription': "Link Play uses your local network to find and visit other players' towns.", 'NSBonjourServices': ['_pokopia-ldn._udp'],
+         'UISupportedInterfaceOrientations': ['UIInterfaceOrientationLandscapeRight', 'UIInterfaceOrientationLandscapeLeft'],
+         'UISupportedInterfaceOrientations~ipad': ['UIInterfaceOrientationLandscapeRight', 'UIInterfaceOrientationLandscapeLeft'],
+         'UIRequiresFullScreen': True, 'UIStatusBarHidden': True, 'UIViewControllerBasedStatusBarAppearance': False, 'LSApplicationCategoryType': category,
+@@ -314,6 +316,8 @@
      (gen / 'profile').mkdir(parents=True); app.mkdir(parents=True)
      t('generate Gen/ (profile header, embedded modules, tables)')
      py(DM / 'games/game.py', 'header', game, gen / 'profile/game_profile.h')
@@ -32,7 +41,7 @@
      flags = py(IOS / 'tools/gen_embed.py', patched, gen / 'embed.S', *mods)
      es = gen / 'embed.S'
      es.write_text(re.sub(r'\.incbin "([^"]*)"', lambda m: '.incbin "' + m.group(1).replace('\\', '/') + '"', es.read_text(encoding='utf-8')), encoding='utf-8')   # assembler strings take \ as an escape
-@@ -351,7 +353,8 @@
+@@ -351,7 +355,8 @@
      py(DM / 'tools/make_ext_font.py', dmres / 'font/nintendo_ext.ttf', tc.letter_font() or die('no bold TTF for the button icons: set LETTER_FONT'))
  
      files, incs = host_sources(gen / 'profile')
@@ -42,7 +51,7 @@
      fws = frameworks(sdk, files)
      rt = compat_rt_needed(clang)
      if rt:
-@@ -367,6 +370,7 @@
+@@ -367,6 +372,7 @@
      if env.get('NXW_ENTITLEMENTS', '1') != '0':
        import macho_sign
        ents = {'com.apple.developer.kernel.increased-memory-limit': True}
@@ -50,7 +59,7 @@
        t(f'entitlements asked for: {", ".join(ents)} (' + str(macho_sign.sign(str(app / 'DmIOS'), bundle_id, ents)) + '-byte ad-hoc signature)')
  
      icon = Path(env.get('DM_ICON') or romfs.parent / 'icon.jpg')
-@@ -375,6 +379,8 @@
+@@ -375,6 +381,8 @@
      with open(app / 'Info.plist', 'wb') as f:
          pl = info_plist(bundle_id, name, version, gp('app_category'), show_fps, lang, sdk_ver, sdk_build, icons)
          if env.get('DM_METAL_CAPTURE') == '1': pl['MetalCaptureEnabled'] = True; t('Metal frame capture: enabled (DM_METAL_CAPTURE=1)')   # the host's DM_GPU_CAPTURE switch
@@ -59,7 +68,7 @@
          sp = env.get('NXW_SPLIT_DATA', '')
          if sp and sp != '0':   # a split build: the app's "game data needed" screen (win/ios/DataHelp.m) names the data folder and its size
              dname = Path(sp).name if sp not in ('1', 'YES') else out_ipa.stem + '-data'
-@@ -401,7 +407,10 @@
+@@ -401,7 +409,10 @@
      else:
          maps.append(f'Payload/DmIOS.app/msl/{msldir}={msl_ios / msldir}')
          if has_aoc: maps.append(f'Payload/DmIOS.app/aoc={aoc}')
