@@ -1147,7 +1147,7 @@ def build(args):
     apple = not WIN or args.ipa   # the Apple stages: the code rewritten for Apple's kernel, the Metal shader libraries
     if apple: st_rewrite(b)
     if not WIN: st_host(b, jobs); st_font(b)   # the Mac host and its fonts: on Windows the iPhone app's fonts come from win/toolchain.py
-    st_corpus(b, romfs, args.dumps or [])
+    st_corpus(b, romfs, args.dumps or default_dump_dirs(b))   # the dumps refresh would take: a new version's rebuilt corpus keeps the run-time shaders
     st_lower(b, jobs)
     st_package(b)
     if apple: st_chain(b, need_ios)
