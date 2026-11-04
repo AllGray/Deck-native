@@ -114,6 +114,8 @@ through a relay you trust.
 - **The first time**, Windows Firewall asks whether the game may use networks: allow **Private networks**. Your network
   must be Private (Settings → Network & internet → your connection → Network profile type: Private): on a Public network
   Windows keeps the other devices out, and the game's log says so.
+- **Host and visitors choose the same way**: "on this network" with the iPhone's and Mac's Internet play off, "over the
+  internet" with it on. A device with Internet play on does not see a host on the same Wi-Fi without it.
 - **Several network adapters** (Wi-Fi and Ethernet, an iPhone plugged in by USB, a virtual machine's adapter) are fine: the
   game tells the others all its home-network addresses, and they pick the one they can reach.
 - The log (the folder the console window names) has a `[coop]` line for everything Link Play does: who connected, a wrong

@@ -296,6 +296,9 @@ host has reached the point in the game where Link Play opens.
 
 Good to know:
 
+- **Internet play must match on every device.** With Internet play on, a device only sees hosts that have it on too
+  (with the same room code). For players on the same Wi-Fi, turn **Internet play off** everywhere; otherwise the game
+  says the destination cannot be found.
 - The iPhone app reads its settings when it starts. After changing them, **close the app completely** (swipe it away in
   the app switcher) and open it again.
 - Every connection must prove the room code, and every message is protected against changes, but the traffic **is not

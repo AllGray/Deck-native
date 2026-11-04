@@ -83,6 +83,8 @@ players, without Nintendo's servers. ("Online connection" in the same menu is Ni
 - Link Play over the internet needs the host's router to forward a port; there is no matchmaking server. Hosting from an
   iPhone over the internet is untested, as are Tailscale-style virtual networks.
 - The iPhone app reads its settings when it starts: after changing Link Play settings, close it fully and open it again.
+- **Internet play must match on every device**: a device with Internet play on does not see a host on the same Wi-Fi
+  that has it off ("destination not found"). For play on one network, leave it off everywhere.
 
 ## Upgrading
 
