@@ -30,7 +30,8 @@ Every release has one download per computer. Take the one for the computer you b
   [**Pokopia Native for Macs**](https://github.com/xFractals/pokopia-native/releases/latest/download/Pokopia-Native-for-Mac.zip) (the same download).
   Tick "iPhone IPA", and read [the Apple developer thing](#the-apple-developer-thing-iphone-only-read-this) first.
 
-Playing together (Link Play):
+Playing together (Link Play) works between Windows, Mac and iPhone, on the same Wi-Fi or over the internet:
+[Playing together](#playing-together-link-play). Two rules:
 
 - **Co-op needs the same pokopia-native version on every device** (the builder window's title shows it).
 - **Each player needs their own save**: the game refuses two copies of the same save, so a save copied to a second device cannot play with itself.
@@ -254,6 +255,55 @@ I tested the whole Windows route on my iPhone: built and signed on my PC, it pla
 difference is that a PC cannot run the game, so it cannot record the shaders the game makes while it runs (next
 section). Your first run on the phone does that: the title screen is black apart from its text until you have played a
 few minutes, pulled the recordings over and refreshed once. docs/WINDOWS.md has the exact steps.
+
+## Playing together (Link Play)
+
+New in 1.1.0. The game's **Link Play → Local connection** works between our builds: Windows, Mac and iPhone in any mix,
+up to four players, at home or over the internet. It never touches Nintendo's servers. (**"Online connection"** in the
+same menu is Nintendo's own service: here it just goes back to the menu. Always pick **Local connection**.)
+
+Before you start: every device runs **the same pokopia-native version**, every player has **their own save**, and the
+host has reached the point in the game where Link Play opens.
+
+**On the same Wi-Fi**
+
+- **iPhone and Mac:** in the launcher (the settings shown before the game starts) turn on **Link Play on this network**
+  and allow local network access when asked. With the switch off, the game's Link Play does nothing.
+- **Windows:** start the game with **`Play Pokopia <version> - Link Play.cmd`** (beside the usual launcher in the build
+  folder's `out`). When Windows Firewall asks, allow **Private networks**, and make sure your network is Private:
+  Settings → Network & internet → your connection → Network profile type: **Private**. On a Public network Windows keeps
+  the other devices out.
+- In the game: **Link Play → Local connection**. One player hosts; the others look for towns, and the host's appears in a
+  few seconds.
+
+**Over the internet** (tested: a PC hosting at home, an iPhone visiting on mobile data)
+
+1. **The host's router** must let visitors in: forward port **47600, TCP and UDP**, to the computer that hosts (the
+   router's "Port forwarding", "NAT" or "NAT/Gaming" page; check it points at the right device).
+2. **The host** needs a room code, a 16-character password for the session:
+   - **Windows:** start **`Play Pokopia <version> - Host online.cmd`**. Its window shows the room code.
+   - **Mac:** in the launcher turn on Link Play on this network and **Internet play**, leave Room code empty and start the
+     game once: the log (`~/Library/Logs/nxnative`) says "this session's room code is …". Type it into **Room code** to
+     keep it.
+   - Give the visitors the room code and your internet address (search "what is my IP" on the host's network).
+3. **The visitors:**
+   - **iPhone and Mac:** turn on Link Play on this network, type the host's internet address into **Join address**, turn on
+     **Internet play** and type the room code.
+   - **Windows:** start **`Play Pokopia <version> - Visit online.cmd`**: it asks for the address and the code.
+4. In the game: **Link Play → Local connection**, then look for towns.
+
+Good to know:
+
+- The iPhone app reads its settings when it starts. After changing them, **close the app completely** (swipe it away in
+  the app switcher) and open it again.
+- Every connection must prove the room code, and every message is protected against changes, but the traffic **is not
+  encrypted**. Remove the port forward when you are done hosting.
+- **No access to the router?** An app like Tailscale (free for personal use, on Windows, Mac and iPhone) puts your
+  devices on one private network across the internet, encrypted, with no port forwarding: install it on both devices,
+  then use the host's Tailscale address (100.x.y.z) as the Join address, with Internet play and a room code. (Not tested
+  yet; tell me how it goes.)
+- Something not working? The logs say what happened, in the lines about `coop` (Windows: the folder its console window
+  names; Mac: `~/Library/Logs/nxnative`; iPhone: the Files app → On My iPhone → the app → `log.txt`).
 
 ## The shaders, and what "refresh" is for (read this too)
 

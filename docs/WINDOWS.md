@@ -90,9 +90,29 @@ folder: Windows saves load on the Mac and the iPhone.
 
 ### Link Play (co-op) between our builds
 
-*Filled in for 1.1.0 when co-op lands: how to host and join on the local network.* Two rules already hold: every device
-needs **the same pokopia-native version**, and **each player needs their own save** (the game refuses a second copy of the
-host's save, so a save copied from one device to another cannot join itself).
+Link Play → **Local connection** in the game works with the Mac and iPhone apps and other Windows PCs (the README's
+[Playing together](../README.md#playing-together-link-play) has the whole picture). Every device needs **the same
+pokopia-native version**, and **each player needs their own save** (the game refuses a second copy of the host's save, so
+a save copied from one device to another cannot join itself). The build makes three more launchers beside the usual one
+in `<build folder>\out`:
+
+| Launcher | What it does |
+|---|---|
+| `Play Pokopia <version> - Link Play.cmd` | Hosts, or finds hosts, on your home network |
+| `Play Pokopia <version> - Host online.cmd` | Hosts over the internet: the window shows this session's **room code**. Your router forwards port **47600, TCP and UDP**, to this PC |
+| `Play Pokopia <version> - Visit online.cmd` | Visits a host over the internet: asks for its address and room code |
+
+The same as switches after the usual launcher's name: `-LinkPlay`; `-Join <address>[:<port>]` visits one host by address;
+`-Internet` with `-Room <code>` (a host without one gets a new code); `-Relay <address>[:<port>]` goes through a relay you
+trust. `ask` for `-Join` or `-Room` asks in the window.
+
+- **The first time**, Windows Firewall asks whether the game may use networks: allow **Private networks**. Your network
+  must be Private (Settings → Network & internet → your connection → Network profile type: Private): on a Public network
+  Windows keeps the other devices out, and the game's log says so.
+- **Several network adapters** (Wi-Fi and Ethernet, an iPhone plugged in by USB, a virtual machine's adapter) are fine: the
+  game tells the others all its home-network addresses, and they pick the one they can reach.
+- The log (the folder the console window names) has a `[coop]` line for everything Link Play does: who connected, a wrong
+  room code, a different pokopia-native version on the other side.
 
 ### Problems
 

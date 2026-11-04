@@ -44,9 +44,21 @@ PC (our own recompiler, through LLVM) and runs on our own runtime with a Vulkan 
 
 ### Link Play between our builds
 
-*To be written when co-op lands (status on 2026-11-04: Mac and iPhone apps in the patch, Windows hosts and joins; local
-network play in progress). Cover: how to host and join on the local network, which devices were tested together, the
-firewall / local-network prompts, the limits (no Nintendo servers, no internet play through anyone's relay).*
+The game's **Link Play → Local connection** now works between our builds: Windows, Mac and iPhone in any mix, up to four
+players, without Nintendo's servers. ("Online connection" in the same menu is Nintendo's service and does nothing here.)
+
+- **On the same Wi-Fi:** turn on **Link Play on this network** in the iPhone or Mac launcher; on Windows start
+  `Play Pokopia <version> - Link Play.cmd`. Hosts find each other by themselves.
+- **Over the internet** (opt-in): the host forwards port **47600 (TCP and UDP)** on its router and shares its address and
+  a **room code**; visitors type both in (iPhone / Mac: **Join address**, **Internet play**, **Room code** in the launcher;
+  Windows: `Play Pokopia <version> - Visit online.cmd`, while `- Host online.cmd` shows the host's code). Every connection
+  proves the room code and every message is protected against changes; the traffic is not encrypted.
+- **Tested:** a Windows PC hosting with an iPhone visiting over home Wi-Fi, and over the internet with the phone on mobile
+  data; Windows and Mac together; four players; players leaving and coming back.
+- Windows asks once to allow the game on networks (allow **Private**), and the network must be Private; the iPhone and
+  the Mac ask once for local network access.
+- Steps and tips (Tailscale when you cannot open a port): the README's
+  [Playing together](https://github.com/xFractals/pokopia-native#playing-together-link-play).
 
 ### Builder
 
@@ -57,6 +69,9 @@ firewall / local-network prompts, the limits (no Nintendo servers, no internet p
 - The Windows game's recordings of the run-time shaders also finish the iPhone app of the same build folder
   (`nxs2.py refresh` picks them up).
 - `nxs2.py --version`; the window's title shows the version.
+- **Windows: when the builder window does not open**, `Pokopia Native Builder.cmd` now says why and waits (no Python, a
+  Python older than 3.12, the Microsoft Store's "python" placeholder, Python without Tk), and writes `builder-log.txt`
+  beside itself for a report.
 
 ## Known issues
 
@@ -64,7 +79,9 @@ firewall / local-network prompts, the limits (no Nintendo servers, no internet p
   report how it runs.
 - Physical controllers on Windows were tested with SDL's virtual pads only; `-PadCheck` logs everything for a report.
 - The first start on Windows draws some effects late while the run-time shaders are translated (about 150, once).
-- *(co-op: to fill)*
+- Link Play over the internet needs the host's router to forward a port; there is no matchmaking server. Hosting from an
+  iPhone over the internet is untested, as are Tailscale-style virtual networks.
+- The iPhone app reads its settings when it starts: after changing Link Play settings, close it fully and open it again.
 
 ## Upgrading
 
