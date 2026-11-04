@@ -3,7 +3,7 @@
 in the window. Everything is done by nxs2.py underneath (the same commands the README lists), so a build started here
 can be continued from Terminal and the other way round.
 
-Mac: double-click "Pokopia Native Builder.app" (or: python3.12 nxs2_gui.py). Windows: "Pokopia Native Builder.cmd".
+Mac: double-click "Pokopia Native Builder.app" (or: python3.12 nxs2_gui.py). Windows: "Pokopia Native Builder.cmd" (the Windows game and the iPhone app).
 Needs Python 3.12+ with Tk (macOS Homebrew: brew install python-tk@3.12; python.org installers have it).
 """
 import json, os, pathlib, queue, re, subprocess, sys, threading, time
@@ -19,6 +19,11 @@ WIN = sys.platform == 'win32'
 SETTINGS = pathlib.Path.home() / ('.nxs2_gui.json')
 
 
+def tool_version():
+    m = re.search(r"^TOOL_VERSION = '([^']+)'", NXS2.read_text(encoding='utf-8'), re.M) if NXS2.is_file() else None
+    return m.group(1) if m else '?'
+
+
 def build_dir_for(dump):
     d = pathlib.Path(dump).expanduser()
     return d.parent / f'{d.name}_native' if dump else None
@@ -27,7 +32,7 @@ def build_dir_for(dump):
 class App(tk.Tk):
     def __init__(self):
         super().__init__()
-        self.title('Pokémon Pokopia native builder')
+        self.title(f'Pokémon Pokopia native builder {tool_version()}')
         self.minsize(760, 560)
         self.proc = None; self.q = queue.Queue(); self.t0 = None; self.running = None
         self.settings = self.load_settings()
@@ -42,7 +47,7 @@ class App(tk.Tk):
 
     def save_settings(self):
         s = {'dump': self.dump.get(), 'out': self.out.get(), 'mac_app': self.mac_app.get(), 'ipa': self.ipa.get(), 'xcode': self.xcode.get(),
-             'team': self.team.get(), 'no_ios': self.no_ios.get()}
+             'team': self.team.get(), 'no_ios': self.no_ios.get(), 'windows': self.windows.get()}
         try: SETTINGS.write_text(json.dumps(s))
         except Exception: pass
 
@@ -68,11 +73,13 @@ class App(tk.Tk):
 
         ttk.Label(f, text='Outputs', font=('', 12, 'bold')).grid(row=6, column=0, sticky='w', **pad)
         o = ttk.Frame(f); o.grid(row=7, column=0, columnspan=3, sticky='w', padx=8)
-        self.mac_app = tk.BooleanVar(value=s.get('mac_app', MAC)); self.ipa = tk.BooleanVar(value=s.get('ipa', True))
+        self.mac_app = tk.BooleanVar(value=s.get('mac_app', MAC)); self.ipa = tk.BooleanVar(value=s.get('ipa', not WIN))
+        self.windows = tk.BooleanVar(value=s.get('windows', WIN))
         self.xcode = tk.BooleanVar(value=s.get('xcode', False)); self.team = tk.StringVar(value=s.get('team', ''))
         self.no_ios = tk.BooleanVar(value=s.get('no_ios', False))
         self.full_speed = tk.BooleanVar(value=False)   # never remembered: every session starts gentle
         if MAC: ttk.Checkbutton(o, text='Mac app', variable=self.mac_app).pack(side='left', padx=(0, 14))
+        if WIN: ttk.Checkbutton(o, text='Windows: play on this PC', variable=self.windows).pack(side='left', padx=(0, 14))
         ttk.Checkbutton(o, text='iPhone IPA (unsigned)', variable=self.ipa).pack(side='left', padx=(0, 14))
         if MAC:
             ttk.Checkbutton(o, text='Xcode project, team ID:', variable=self.xcode).pack(side='left')
@@ -87,7 +94,8 @@ class App(tk.Tk):
         b = ttk.Frame(f); b.grid(row=9, column=0, columnspan=3, sticky='ew', padx=8, pady=(10, 4))
         self.buttons = {}
         for key, text, cmd in (('doctor', 'Check tools', self.do_doctor), ('setup', 'Setup', self.do_setup), ('build', 'Build', self.do_build),
-                               ('refresh', 'Refresh shaders', self.do_refresh), ('sign', 'Sign IPA', self.do_sign)):
+                               ('refresh', 'Refresh shaders', self.do_refresh), ('sign', 'Sign IPA', self.do_sign)) + \
+                              ((('play', 'Play', self.do_play), ('import', 'Import save…', self.do_import)) if WIN else ()):
             self.buttons[key] = ttk.Button(b, text=text, command=cmd); self.buttons[key].pack(side='left', padx=(0, 6))
         self.stop_btn = ttk.Button(b, text='Stop', command=self.do_stop, state='disabled'); self.stop_btn.pack(side='left', padx=(0, 6))
         ttk.Button(b, text='Open build folder', command=self.open_out).pack(side='right')
@@ -126,7 +134,8 @@ class App(tk.Tk):
     def check_setup(self):
         nx = pathlib.Path(os.environ.get('NXNATIVE') or HERE / 'nxnative')
         if not (nx / 'dm' / 'host' / 'Makefile').is_file():
-            self.status.set('First time here: press Setup (fetches nxnative and builds the shader tool, about a minute).')
+            self.status.set('First time here: press Setup (fetches nxnative and builds the shader tool, about a minute).' +
+                            (' Untick "iPhone IPA" first if you only want the Windows game: Setup then needs no Apple tools.' if WIN else ''))
         else:
             self.status.set('Ready. Choose your dump folder and press Build.')
 
@@ -171,7 +180,8 @@ class App(tk.Tk):
         self.write(line)
         m = re.match(r'^\[\d+:\d\d(?::\d\d)?\] (.*)', line)
         if m: self.last_stage = m.group(1)[:90]
-        for key, pat in (('app', r'Mac app: (.*)'), ('ipa', r'IPA: (.*?) \('), ('xcode', r'Xcode project: (.*)'), ('signed', r'signed IPA: (.*?)  ')):
+        for key, pat in (('app', r'Mac app: (.*)'), ('ipa', r'IPA: (.*?) \('), ('xcode', r'Xcode project: (.*)'), ('signed', r'signed IPA: (.*?)  '),
+                         ('windows', r'Windows game: (.*?)  \(save')):
             m = re.search(pat, line)
             if m: self.result[key] = m.group(1)
         if line.startswith('[FAIL]'): self.result['fail'] = line[7:]
@@ -214,11 +224,15 @@ class App(tk.Tk):
     def common(self):
         return ['--out', self.out.get().strip()] if self.out.get().strip() else []
 
+    def skip_ios(self):   # Windows: no iPhone toolchain unless the IPA is ticked; Mac: the "Mac only" box
+        return (WIN and not self.ipa.get()) or (MAC and self.no_ios.get())
+
     def do_doctor(self):
-        self.last_stage = ''; self.start('Check tools', ['doctor'] + (['--no-ios'] if self.no_ios.get() else []))
+        self.last_stage = ''
+        self.start('Check tools', ['doctor'] + (['--no-ios'] if self.skip_ios() else []) + (['--no-windows'] if WIN and not self.windows.get() else []))
 
     def do_setup(self):
-        self.last_stage = ''; self.start('Setup', ['setup'] + (['--no-ios'] if self.no_ios.get() else []))
+        self.last_stage = ''; self.start('Setup', ['setup'] + (['--no-ios'] if self.skip_ios() else []))
 
     def do_build(self):
         d = self.need_dump()
@@ -226,13 +240,14 @@ class App(tk.Tk):
         self.save_settings()
         args = ['build', d] + self.common()
         if MAC and self.mac_app.get(): args.append('--mac-app')
+        if WIN and self.windows.get(): args.append('--windows')
         if self.ipa.get(): args.append('--ipa')
         if MAC and self.xcode.get():
             if not re.fullmatch(r'[A-Z0-9]{10}', self.team.get().strip()): return messagebox.showwarning('Team ID', 'The Xcode project needs your Apple developer team ID (10 characters).')
             args += ['--xcode', '--team-id', self.team.get().strip()]
         if MAC and self.no_ios.get(): args.append('--no-ios')
         if self.full_speed.get(): args.append('--full-speed')
-        if not any(a in args for a in ('--mac-app', '--ipa', '--xcode')): return messagebox.showwarning('Outputs', 'Tick at least one output.')
+        if not any(a in args for a in ('--mac-app', '--ipa', '--xcode', '--windows')): return messagebox.showwarning('Outputs', 'Tick at least one output.')
         self.last_stage = 'starting'; self.start('Build', args)
 
     def do_refresh(self):
@@ -262,6 +277,32 @@ class App(tk.Tk):
         pw = simpledialog.askstring('Certificate password', f'Password of {pathlib.Path(p12).name}:', show='*', parent=self)
         if pw is None: return
         self.last_stage = 'starting'; self.start('Sign', ['sign', str(b), '--p12', p12, '--profile', prof, '--password-stdin'], secret=pw)
+
+
+    def win_launcher(self):
+        b = self.build_dir(); out = b / 'out' if b else None
+        hits = sorted(out.glob('Play Pokopia *.cmd')) if out and out.is_dir() else []
+        return hits[-1] if hits else None
+
+    def do_play(self):   # the launcher in its own console window: this window stays free
+        cmd = self.win_launcher()
+        if not cmd: return messagebox.showwarning('Play', 'No Windows game yet: tick "Windows: play on this PC" and press Build first.')
+        subprocess.Popen(['cmd', '/c', str(cmd)], creationflags=subprocess.CREATE_NEW_CONSOLE, cwd=str(cmd.parent))
+        self.status.set(f'Started {cmd.name}. Its console window shows the controls and where the log is.')
+
+    def do_import(self):
+        b = self.build_dir()
+        if not b or not (b / 'windows' / 'play.json').is_file(): return messagebox.showwarning('Import save', 'Build the Windows game first: the save goes beside it.')
+        eden = messagebox.askyesnocancel('Import save', "Take the save from Eden on this PC?\n\nYes: Eden's own save of Pokopia (read, never changed).\n"
+                                         'No: choose a folder (one holding B00, G00 and S00: a phone or Mac save, or a copy).\n\n'
+                                         'The save the Windows game has now is kept beside it, not deleted.')
+        if eden is None: return
+        if eden: args = ['import-save', str(b), '--eden']
+        else:
+            d = filedialog.askdirectory(title='The save folder (B00, G00, S00 inside)')
+            if not d: return
+            args = ['import-save', str(b), d]
+        self.last_stage = 'starting'; self.start('Import save', args)
 
 
 def _self_shot(app, path):   # NXS2_GUI_SHOT=<png>: save a picture of the window and quit (the project's own layout check; needs Pillow)

@@ -1,14 +1,16 @@
 # What this repository contains, and what it never contains
 
-This project lets you run a game you own natively on your own Mac or iPhone. It ships **tools only**. It
+This project lets you run a game you own natively on your own Mac, iPhone or Windows PC. It ships **tools only**. It
 does not contain, and must never be made to contain, any part of the game.
 
 ## Never in this repository, never in a release
 
-- The game's executable (`main`, `sdk`, the other ExeFS modules), in original or rewritten form.
+- The game's executable (`main`, `sdk`, the other ExeFS modules), in original, rewritten or recompiled form (the
+  Windows build's `game.dll`, its objects and its `program.db` included).
 - The game's data (`RomFS`, `romfs.img`, any file extracted from it).
 - The game's shaders in any form: the shader containers from the game files, runtime shader dumps, lowered
-  (Maxwell) programs, translated Metal source, compiled Metal libraries, or shader packages built from them.
+  (Maxwell) programs, translated Metal source, compiled Metal libraries, Vulkan SPIR-V, pipeline caches, or shader
+  packages built from them.
 - Console firmware files such as the system fonts.
 - Keys, tickets, certificates, saves, screenshots of other people's content, or logs that name your files.
 
@@ -24,7 +26,22 @@ the recipe is for, and refuses any other. Never share a build folder: it holds t
   (GPL-3.0-or-later; its own `LICENSE` and `NOTICE.md` are in that folder).
 - The build scripts and the per-game recipe: tables that describe *where* to patch and *how* to treat each
   shader (hashes, slot kinds, formats). They contain no game code.
+- `windows/`: the Windows port's source (our own recompiler and runtime, MIT; its third-party code keeps its own
+  licence, listed in `windows/docs/PROVENANCE.md`), where it is published.
 - Documentation.
+
+## What the downloads contain
+
+Each release has one download per computer, made by `tools/package_release.py` from this repository's files:
+
+- **for Macs**: the repository's tools for a Mac.
+- **for Windows PCs**: the repository's tools for Windows, plus `windows/bin`: the Windows game's tools built from
+  `windows/` (`nxanalyze`, `nxlift` with LLVM, `nxrt`, SDL3), LLVM's `lld-link`, SPIRV-Tools from the Vulkan SDK and the
+  Visual C++ runtime files those two need. `windows/bin/MANIFEST.txt` lists every file with its checksum and origin,
+  `windows/bin/THIRD-PARTY-NOTICES.txt` their licences.
+
+Neither contains anything of the game. On Windows the game's code is recompiled, and its shaders translated, on your
+PC from your own dump, into your build folder, as the Mac and iPhone builds do.
 
 ## What the tool does not do
 
@@ -40,6 +57,9 @@ tool cannot read it and will not try.
   `dm/gfx/tex/s2tex.h`, `dm/gfx/msl/s2tex.metal`) is this project's own MIT code, written clean-room from a functional
   specification of the layout and verified bit for bit against the game's textures. It replaces the earlier code,
   which followed Eden-NS2's GPL-3.0-or-later code; none of that remains in the patch.
+- `windows/`: MIT; the components it builds in or ships beside it are listed with their licences in
+  `windows/bin/THIRD-PARTY-NOTICES.txt` of the Windows download (LLVM: Apache-2.0 with LLVM exception; SDL3: zlib;
+  astc-encoder and SPIRV-Tools: Apache-2.0; bc7enc_rdo: MIT; nxnative: MIT).
 - Everything else here: MIT (`LICENSE`), the same licence as nxnative.
 
 ## Trademarks and affiliation

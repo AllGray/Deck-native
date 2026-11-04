@@ -5,3 +5,8 @@ __pycache__/
 ampere-lower/ampere-lower
 ampere-lower/ampere-lower.exe
 tools-bin/
+dist/
+windows/bin/
+windows/build/
+windows/_local/
+toolchains/
