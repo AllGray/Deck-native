@@ -1,16 +1,17 @@
 #!/usr/bin/env python3
-"""nxs2.py: build Pokemon Pokopia (Nintendo Switch 2) for your own Mac and iPhone, from your own dump.
+"""nxs2.py: build Pokemon Pokopia (Nintendo Switch 2) for your own Mac, iPhone and Windows PC, from your own dump.
 
 Everything derived from the game is made here, on your machine, from the dump you give; nothing of the
 game is in this repository (see LEGAL.md). The build goes through nxnative (the native host for Switch
 games on Apple systems, with this project's Switch 2 changes), the game's shaders through ampere-lower
 (Eden-NS2's Switch 2 shader lowering) and nxnative's Metal shader chain.
 
-  nxs2.py setup                             fetch nxnative at the pinned commit, apply the Switch 2 patch, build ampere-lower
-  nxs2.py doctor                            check the tools this Mac has (what setup and build need)
+  nxs2.py setup [--no-ios]                  fetch nxnative at the pinned commit, apply the Switch 2 patch, build ampere-lower
+  nxs2.py doctor                            check the tools this computer has (what setup and build need)
   nxs2.py build <dump> [options]            the whole build into <dump folder>/<title>_native (or --out)
        --mac-app         a double-clickable Mac app (the game files cloned inside it)
        --ipa             an unsigned IPA with the entitlements the game needs (sign it with your own team)
+       --windows         Windows: the game recompiled for this PC, with a launcher (out/Play Pokopia <version>.cmd)
        --xcode --team-id ID   an Xcode project signed with your Apple developer team (then: nxs2.py sign)
        --dumps DIR...    shader dumps from an earlier run (DM_NVN_SHDUMP folders) to include from the start
        --no-ios          Mac libraries only (faster; --ipa / --xcode need the iOS ones)
@@ -18,13 +19,16 @@ games on Apple systems, with this project's Switch 2 changes), the game's shader
   nxs2.py refresh <build dir> [DIR...]      add the shaders recorded while playing (Mac run, Mac app, iPhone) and rebuild the outputs
   nxs2.py sign <build dir> --team-id ID     archive and export the development IPA from the prepared Xcode project
   nxs2.py status <build dir>                what the build folder holds and what it still lacks
+  nxs2.py import-save <build dir> <folder>  Windows: a save from Eden, the phone or a Mac (a folder with B00, G00, S00) becomes the one the game plays
 
 Needs: a Mac with Apple silicon, Xcode (27.x) with its command line tools (an iPhone build also needs the iOS
 platform), Python 3.12 or newer with capstone (5.x), lz4 and fontTools, the .NET 10 runtime (the shader
-translator), xcodegen for the iPhone build. `nxs2.py doctor` lists what is missing and how to get it.
+translator), xcodegen for the iPhone build. On Windows the iPhone build needs the toolchain in docs/WINDOWS.md and the
+Windows game the tools of the "for Windows PCs" download (windows/bin). `nxs2.py doctor` lists what is missing.
 """
 import argparse, concurrent.futures as cf, hashlib, json, os, pathlib, platform, re, shutil, struct, subprocess, sys, time
 
+TOOL_VERSION = '1.1.0'   # this tool's release (co-op needs the same one on every device); the game's own version is separate
 TITLE = '0400A3A01EE4C000'
 NAME = 'Pokemon Pokopia'
 UPSTREAM = 'https://github.com/seedds/nxnative'
@@ -38,6 +42,7 @@ TOOLS = HERE / 'tools'
 AMPERE = HERE / 'ampere-lower' / ('windows/ampere-lower.exe' if WIN else 'ampere-lower')
 NX = pathlib.Path(os.environ.get('NXNATIVE') or HERE / 'nxnative')
 PY = sys.executable
+WIN_KIT = HERE / 'windows' / 'bin'   # the Windows game's tools as the "for Windows PCs" download ships them (tools/package_release.py makes it)
 T0 = time.time()
 
 # the shader tables a profile has before the package is made (as nxnative's NSP script writes them for a provisional profile)
@@ -136,6 +141,29 @@ def llvm_tool(name):
     return None
 
 
+# ---- Windows: the Windows game's own tools (the recompiler and runtime from windows/: nxanalyze, nxlift, nxrt; lld-link; SPIRV-Tools for nxshader)
+WIN_KIT_FILES = ('nxanalyze.exe', 'nxlift.exe', 'nxrt.exe', 'SDL3.dll', 'nxrt.lib', 'lld-link.exe', 'spirv-opt.exe', 'spirv-val.exe', 'hle_inventory.tsv',
+                 'play.ps1', 'nxshader/nxshader.py', 'nxshader/dmsh_abi.h')
+
+
+def win_tools():
+    """{file: path} of the Windows game's tools, plus 'dir' and 'missing': the download's kit (windows\\bin, or NXW_TOOLS=<a folder laid out the same way),
+    else a source checkout's own build (windows\\build\\Release, with lld-link from LLVM for Windows and SPIRV-Tools from the Vulkan SDK)."""
+    kit = pathlib.Path(os.environ['NXW_TOOLS']) if os.environ.get('NXW_TOOLS') else WIN_KIT
+    if (kit / 'nxrt.exe').is_file():
+        t = {n: kit / n for n in WIN_KIT_FILES}; t['dir'] = kit
+    else:
+        src = HERE / 'windows'; rel = src / 'build' / 'Release'
+        t = {n: rel / 'bin' / n for n in ('nxanalyze.exe', 'nxlift.exe', 'nxrt.exe', 'SDL3.dll')}
+        t.update({'nxrt.lib': rel / 'lib' / 'nxrt.lib', 'hle_inventory.tsv': src / 'src/nxrt/gen/out/hle_inventory.tsv', 'play.ps1': src / 'scripts/play.ps1',
+                  'nxshader/nxshader.py': src / 'src/nxshader/nxshader.py', 'nxshader/dmsh_abi.h': src / 'src/nxrt/gfx/dmsh_abi.h',
+                  'lld-link.exe': llvm_tool('lld-link'), 'dir': rel / 'bin'})
+        vk = [pathlib.Path(v) / 'Bin' for v in (os.environ.get('VULKAN_SDK'),) if v] + sorted(pathlib.Path('C:/VulkanSDK').glob('*/Bin'))[-1:]
+        for n in ('spirv-opt.exe', 'spirv-val.exe'): t[n] = next((d / n for d in vk if (d / n).is_file()), None)
+    t['missing'] = [n for n in WIN_KIT_FILES if not (t.get(n) and pathlib.Path(t[n]).is_file())]
+    return t
+
+
 def fingerprint(*parts):
     h = hashlib.sha256()
     for p in parts:
@@ -144,6 +172,14 @@ def fingerprint(*parts):
             h.update(f'{p}:{st.st_size if st else -1}:{int(st.st_mtime) if st else 0}\n'.encode())
         else: h.update(repr(p).encode() + b'\n')
     return h.hexdigest()[:16]
+
+
+def digest(p):
+    """A file's content as a fingerprint part: for the Windows tools, which an unzipped download gives new times without changing them"""
+    h = hashlib.sha256()
+    with open(p, 'rb') as f:
+        for chunk in iter(lambda: f.read(1 << 20), b''): h.update(chunk)
+    return f'{pathlib.Path(p).name}:{h.hexdigest()[:16]}'
 
 
 class Build:
@@ -157,6 +193,7 @@ class Build:
         self.maxwell = self.shader / 'maxwell'; self.pkg = self.shader / 'pkg'; self.tables = self.shader / 'tables'
         self.cache = self.shader / 'cache'; self.ios = self.shader / 'ios'
         self.outputs = self.out / 'out'; self.rundir = self.out / 'run'; self.phone = self.out / 'phone'
+        self.win = self.out / 'windows'   # the Windows game: program.db, game.dll, the Vulkan shaders, the runtime, play.json
         self.icon = self.out / 'icon.png'   # the apps' icon, made by nxs2.py icon from your own game; none = the blank default
         vf = self.out / 'version.txt'   # the game version the apps carry, from the dump's build line (build writes it, refresh reads it)
         self.version = vf.read_text().strip() if vf.is_file() else '1.0.5'
@@ -244,13 +281,15 @@ def windows_env():
 
 
 # ---------------------------------------------------------------- environment
-def doctor(need_ios=True, quiet=False):
-    """What this machine has of what the build needs. Returns the list of problems (empty = ready)."""
+def doctor(need_ios=True, quiet=False, need_windows=True):
+    """What this machine has of what the build needs. Returns the list of problems (empty = ready). On Windows need_ios is the iPhone IPA's toolchain
+    and need_windows the Windows game's tools."""
     bad = []
     def ok(name, cond, hint):
         if not quiet: print(f'  {"ok     " if cond else "MISSING"}  {name}' + ('' if cond else f'   -> {hint}'))
         if not cond: bad.append(name)
-    if WIN: return doctor_windows(ok, bad)
+    if not quiet: print(f'pokopia-native {TOOL_VERSION}')
+    if WIN: return doctor_windows(ok, bad, need_ios, need_windows)
     ok('macOS on Apple silicon', sys.platform == 'darwin' and platform.machine() == 'arm64', 'the host runs the game\'s arm64 code natively: an Apple silicon Mac is required')
     ok(f'Python 3.12+ (running {platform.python_version()})', sys.version_info >= (3, 12), 'brew install python@3.12, then run nxs2.py with python3.12')
     for mod, pip in (('capstone', 'capstone>=5,<6'), ('lz4', 'lz4'), ('fontTools', 'fonttools')):
@@ -296,19 +335,20 @@ def intel_microcode_warning():
             'or long full loads can crash Windows. The build\'s default load is gentle; avoid --full-speed until the BIOS is updated')
 
 
-def doctor_windows(ok, bad):
-    """The Windows build (the iPhone IPA only; a Mac app needs a Mac): the toolchain nxnative's Windows port documents."""
+def doctor_windows(ok, bad, need_ios=True, need_windows=True):
+    """Windows builds the iPhone IPA (the toolchain nxnative's Windows port documents) and the Windows game (our own tools in windows\\bin)."""
     w = intel_microcode_warning()
     if w: print(f'  WARNING  {w}')
     ok('Windows on x64', platform.machine().lower() in ('amd64', 'x86_64'), 'the Windows tools are x64 builds')
     ok(f'Python 3.12+ (running {platform.python_version()})', sys.version_info >= (3, 12), 'https://www.python.org/downloads/ (tick "Add python.exe to PATH")')
-    for mod, pip in (('capstone', 'capstone>=5,<6'), ('lz4', 'lz4'), ('fontTools', 'fonttools'), ('PIL', 'pillow')):
+    for mod, pip in ((('capstone', 'capstone>=5,<6'),) if need_ios else ()) + (('lz4', 'lz4'), ('fontTools', 'fonttools'), ('PIL', 'pillow')):
         try: __import__(mod); have = True
         except ImportError: have = False
         ok(f'python module {mod}', have, f'{PY} -m pip install "{pip}"')
-    try:
-        import capstone; ok('capstone 5.x', capstone.__version__.startswith('5.'), f'{PY} -m pip install "capstone>=5,<6"')
-    except ImportError: pass
+    if need_ios:
+        try:
+            import capstone; ok('capstone 5.x', capstone.__version__.startswith('5.'), f'{PY} -m pip install "capstone>=5,<6"')
+        except ImportError: pass
     try: import tkinter; ok('Tk (the window)', True, '')
     except ImportError: ok('Tk (the window)', False, 'reinstall Python from python.org with "tcl/tk and IDLE" ticked (the command line works without it)')
     dn = shutil.which('dotnet'); have_rt = False
@@ -316,19 +356,38 @@ def doctor_windows(ok, bad):
         r = subprocess.run([dn, '--list-runtimes'], capture_output=True, text=True)
         have_rt = any(l.startswith('Microsoft.NETCore.App 10.') for l in r.stdout.splitlines())
     ok('.NET 10 runtime (the shader translator)', have_rt, 'https://dotnet.microsoft.com/download/dotnet/10.0 (the .NET Runtime is enough)')
-    ok('LLVM for Windows: clang', llvm_tool('clang') is not None, 'https://github.com/llvm/llvm-project/releases (LLVM-<version>-win64.exe)')
-    ok('LLVM for Windows: ld64.lld', llvm_tool('ld64.lld') is not None, 'comes with LLVM for Windows')
-    mt = metal_tools()   # 4.x: ios/bin and macos/bin toolchains; 5.x and 6.x: one bin/ for every target
-    ok('Metal Developer Tools for Windows (metal.exe)', mt is not None and any(mt.glob(p) for p in ('bin/metal.exe', 'ios/bin/metal.exe', 'ios/*/bin/metal.exe')),
-       'https://developer.apple.com/download/all/?q=Metal%20Developer%20Tools (sign in with an Apple ID)')
-    sdk = ios_sdk()
-    ok(f'iPhoneOS SDK{f" ({sdk.name})" if sdk else ""}', sdk is not None, 'after setup: python nxnative\\win\\sdk\\extract_xip.py <Xcode.xip> (the SDK is taken from Xcode, downloaded from developer.apple.com), or NXW_IOS_SDK=<path>')
-    ok('SPIRV-Cross (spirv-cross.exe)', spirv_cross() is not None, 'the Vulkan SDK from https://vulkan.lunarg.com (its Bin folder has it), or SPIRV_CROSS=<path>')
+    if need_ios:
+        ok('LLVM for Windows: clang', llvm_tool('clang') is not None, 'https://github.com/llvm/llvm-project/releases (LLVM-<version>-win64.exe)')
+        ok('LLVM for Windows: ld64.lld', llvm_tool('ld64.lld') is not None, 'comes with LLVM for Windows')
+        mt = metal_tools()   # 4.x: ios/bin and macos/bin toolchains; 5.x and 6.x: one bin/ for every target
+        ok('Metal Developer Tools for Windows (metal.exe)', mt is not None and any(mt.glob(p) for p in ('bin/metal.exe', 'ios/bin/metal.exe', 'ios/*/bin/metal.exe')),
+           'https://developer.apple.com/download/all/?q=Metal%20Developer%20Tools (sign in with an Apple ID)')
+        sdk = ios_sdk()
+        ok(f'iPhoneOS SDK{f" ({sdk.name})" if sdk else ""}', sdk is not None, 'after setup: python nxnative\\win\\sdk\\extract_xip.py <Xcode.xip> (the SDK is taken from Xcode, downloaded from developer.apple.com), or NXW_IOS_SDK=<path>')
+        ok('SPIRV-Cross (spirv-cross.exe)', spirv_cross() is not None, 'the Vulkan SDK from https://vulkan.lunarg.com (its Bin folder has it), or SPIRV_CROSS=<path>')
     ok('git', shutil.which('git') is not None, 'https://git-scm.com/download/win')
     fonts = pathlib.Path(os.environ.get('WINDIR', r'C:\Windows')) / 'Fonts'
     ok('a standard font (Arial Unicode or Arial)', any((fonts / n).is_file() for n in ('ARIALUNI.TTF', 'arial.ttf')) or bool(os.environ.get('STD_FONT')), 'STD_FONT=<a Unicode TTF>')
-    ok('a bold font for the button icons (Arial Bold)', any((fonts / n).is_file() for n in ('ARLRDBD.TTF', 'arialbd.ttf')) or bool(os.environ.get('LETTER_FONT')), 'LETTER_FONT=<a bold TTF>')
+    if need_ios:
+        ok('a bold font for the button icons (Arial Bold)', any((fonts / n).is_file() for n in ('ARLRDBD.TTF', 'arialbd.ttf')) or bool(os.environ.get('LETTER_FONT')), 'LETTER_FONT=<a bold TTF>')
+    if need_windows:
+        ok('a CPU with AVX2 and FMA3 (the recompiled game needs them)', cpu_avx2(), 'Intel Haswell (2013) or AMD Excavator (2015) and newer')
+        sysdir = pathlib.Path(os.environ.get('WINDIR', r'C:\Windows')) / 'System32'
+        ok('Vulkan (vulkan-1.dll, installed with the graphics driver)', (sysdir / 'vulkan-1.dll').is_file(),
+           'install the current driver for your graphics card (NVIDIA, AMD or Intel); the game needs a Vulkan 1.3 GPU')
+        t = win_tools()
+        ok(f'the Windows game tools ({t.get("dir") or "windows\\bin"})', not t.get('missing'),
+           f'missing {", ".join(t.get("missing", []))}: they come with the "for Windows PCs" download (windows\\bin); a source checkout builds them with '
+           'windows\\scripts\\build.cmd, or NXW_TOOLS=<folder> names them')
     return bad
+
+
+def cpu_avx2():
+    """x86-64-v3, the recompiled code's minimum: AVX2 (PF_AVX2_INSTRUCTIONS_AVAILABLE); every CPU with AVX2 that Windows runs on has FMA3 too"""
+    try:
+        import ctypes
+        return bool(ctypes.windll.kernel32.IsProcessorFeaturePresent(40))
+    except Exception: return False
 
 
 def patch_adds(patch):
@@ -339,7 +398,7 @@ def patch_adds(patch):
 
 def setup(args):
     """nxnative at the pinned commit with the Switch 2 patch and the rebuilt translator, and ampere-lower built."""
-    bad = doctor(need_ios=not args.no_ios)
+    bad = doctor(need_ios=not args.no_ios, need_windows=False)
     if bad: raise Fail('install the missing tools above, then run setup again')
     if not (NX / '.git').is_dir():
         say(f'fetching nxnative ({UPSTREAM} at {UPSTREAM_COMMIT}) into {NX}')
@@ -373,7 +432,8 @@ def setup(args):
         if not dst.is_file() or dst.read_bytes() != f.read_bytes():
             shutil.copy2(f, dst); say(f'translator: {f.name} installed')
     if not WIN: (bin_dst / 'dmsh_xlate').chmod(0o755)
-    if WIN: setup_windows(want)
+    if WIN and not args.no_ios: setup_windows(want)
+    elif WIN: say('the iPhone toolchain is skipped (--no-ios): this setup builds the Windows game; run setup without --no-ios for the iPhone app')
     elif not AMPERE.is_file() or AMPERE.stat().st_mtime < (HERE / 'ampere-lower/main.cpp').stat().st_mtime:
         say('building ampere-lower (the Switch 2 shader lowering)')
         run(['sh', HERE / 'ampere-lower/build.sh'], HERE / 'setup-ampere.log')
@@ -833,6 +893,177 @@ def sign(args):
     say(f'signed IPA: {out}  (install: pymobiledevice3 apps install "{out}"; then docs/IPHONE.md for romfs.img)')
 
 
+# ---------------------------------------------------------------- the Windows game (windows/: our recompiler and runtime, docs/WINDOWS.md)
+SAVES_ROOT = r'%APPDATA%\Pokopia Native'       # the Windows game's saves, one per game version: <root>\<version>\save
+WORK_ROOT = r'%LOCALAPPDATA%\Pokopia Native'   # its pipeline cache, temp files and logs: <root>\<version>
+RUNTIME_INSTALLER = ('tools/s2_dumps.py', 'tools/lower_corpus.py', 'tools/s2_pkg.py', f'profile/{TITLE}/runtime_keys.tsv')   # the on-demand path's steps
+
+
+def win_env(t):
+    """nxshader's environment: the translator through dotnet, ampere-lower, and SPIRV-Tools from the kit (NXSHADER_TOOLS) before any Vulkan SDK"""
+    return {'NXSHADER_TOOLS': str(pathlib.Path(t['spirv-opt.exe']).parent), 'AMPERE_LOWER': str(AMPERE), 'PYTHONDONTWRITEBYTECODE': '1', 'PYTHONUTF8': '1'}
+
+
+def st_win_analyze(b, t):
+    """program.db (nxanalyze): the game's functions, control flow, jump tables and bindings, bound to exactly the take-overs of the runtime this build ships
+    (its registry, hle_inventory.tsv), then checked against that registry. Seconds."""
+    db = b.win / 'analyze' / 'program.db'
+    key = fingerprint(*(b.exefs / m for m in b.modules), digest(t['nxanalyze.exe']), digest(t['hle_inventory.tsv']))
+    if b.fresh('win_analyze', key) and db.is_file(): return say('analysis: up to date')
+    say('analysing the game\'s code (nxanalyze)')
+    run([t['nxanalyze.exe'], b.exefs, '--out', db.parent, '--hle', t['hle_inventory.tsv'], '--no-defaults'], b.logs / 'win_analyze.log', show=r'functions|HLE binding')
+    run([t['nxanalyze.exe'], '--check-takeovers', db, t['hle_inventory.tsv']], b.logs / 'win_takeovers.log', show=r'^takeover check')
+    b.stamp('win_analyze', key)
+
+
+def st_win_shaders(b, t, jobs):
+    """The game's shaders as Vulkan SPIR-V in windows/shaders, the cache the runtime reads (nxshader: the translator's SPIR-V, the Vulkan edits, reflection,
+    spirv-val). Shaders already there are kept, so a rebuild translates only new ones. The run-time shaders are not in the game's files: the runtime
+    records each the first time the game makes it (windows/shaders/dumps) and translates it there and then."""
+    n = max(1, min(4, jobs)); rep = b.logs / 'win_shaders.txt'
+    say(f'translating the shaders for Vulkan (nxshader, {n} worker{"s" if n > 1 else ""})')
+    if rep.is_file(): rep.unlink()
+    run([PY, '-I', t['nxshader/nxshader.py'], '--cache', b.win / 'shaders', '--installer', HERE, 'build', b.out, '--jobs', n, '--report', rep],
+        b.logs / 'win_shaders.log', env=win_env(t), ok=(0, 1), heartbeat=60, show=r'^shaders |^spirv-val')
+    m = re.search(r'spirv-val \(vulkan1\.3\): (\d+) pass, (\d+) fail', rep.read_text(encoding='utf-8') if rep.is_file() else '')
+    if not m or not int(m.group(1)): raise Fail(f'no shader was translated; see {b.logs / "win_shaders.log"}')
+    if int(m.group(2)): say(f'  {m.group(2)} shaders failed validation: their draws are skipped and logged ({rep})')
+
+
+def st_win_fonts(b):
+    """Stand-ins for the console's shared fonts from this PC's own fonts (nothing from the console), as the Mac build makes them: the standard font a copy
+    of Arial Unicode or Arial (STD_FONT names another), the button icons drawn by nxnative's make_ext_font.py with Arial Rounded Bold or Arial Bold (LETTER_FONT)."""
+    d = b.win / 'fonts'; d.mkdir(parents=True, exist_ok=True)
+    fonts = pathlib.Path(os.environ.get('WINDIR', r'C:\Windows')) / 'Fonts'
+    std = next((p for p in [pathlib.Path(os.environ['STD_FONT'])] if p.is_file()), None) if os.environ.get('STD_FONT') else \
+        next((fonts / n for n in ('ARIALUNI.TTF', 'arial.ttf') if (fonts / n).is_file()), None)
+    if not std: raise Fail(f'no standard font (Arial) in {fonts}: set STD_FONT=<a Unicode TTF>')
+    if not (d / 'standard.ttf').is_file(): shutil.copyfile(std, d / 'standard.ttf')
+    letter = os.environ.get('LETTER_FONT') or next((str(fonts / n) for n in ('ARLRDBD.TTF', 'arialbd.ttf') if (fonts / n).is_file()), None)
+    if not (d / 'nintendo_ext.ttf').is_file() and letter:
+        run([PY, NX / 'dm/tools/make_ext_font.py', d / 'nintendo_ext.ttf', letter], b.logs / 'make_ext_font.log', env=b.env())
+
+
+def st_win_lift(b, t, jobs):
+    """game.dll: every function of the game's code recompiled for x86-64 (nxlift: LLVM, one object per ~1,000 functions, cached by their IR in
+    windows/objcache), linked by lld-link against the runtime's import library. Idle priority, at most 4 workers: about 10 minutes at 4, 20 at 2."""
+    dll = b.win / 'game.dll'; db = b.win / 'analyze' / 'program.db'
+    key = fingerprint(db, digest(t['nxlift.exe']), digest(t['nxrt.lib']), digest(t['lld-link.exe']))
+    if b.fresh('win_lift', key) and dll.is_file(): return say('game.dll: up to date')
+    n = max(1, min(4, jobs))
+    say(f'recompiling the game\'s code for this PC (nxlift, {n} worker{"s" if n > 1 else ""} at idle priority: about {40 // n} minutes)')
+    run([t['nxlift.exe'], b.exefs, '--db', db, '--out', b.win / 'lift', '--cache', b.win / 'objcache', '--jobs', n, '--dll', dll,
+         '--nxrt-lib', t['nxrt.lib'], '--lld', t['lld-link.exe']], b.logs / 'win_lift.log', heartbeat=60, show=r'^nxlift:')
+    if not dll.is_file(): raise Fail(f'nxlift wrote no {dll}; see {b.logs / "win_lift.log"}')
+    b.stamp('win_lift', key)
+
+
+def copy_if_changed(src, dst):
+    dst = pathlib.Path(dst); dst.parent.mkdir(parents=True, exist_ok=True)
+    if dst.is_file() and dst.stat().st_size == pathlib.Path(src).stat().st_size and dst.read_bytes() == pathlib.Path(src).read_bytes(): return
+    try: shutil.copy2(src, dst)
+    except PermissionError: raise Fail(f'{dst} is in use: close the game, then build again')
+
+
+def win_save_dir(b):
+    """The save the Windows game plays, from the build's play.json (the default: %APPDATA%\\Pokopia Native\\<version>\\save)"""
+    cfg = b.win / 'play.json'
+    raw = json.loads(cfg.read_text(encoding='utf-8')).get('save') if cfg.is_file() else None
+    return pathlib.Path(os.path.expandvars(raw or rf'{SAVES_ROOT}\{b.version}\save'))
+
+
+def st_win_play(b, t):
+    """The runtime beside the game (windows/runtime: nxrt.exe, SDL3.dll, play.ps1, and for the run-time shaders nxshader with SPIRV-Tools, ampere-lower,
+    the translator and the installer's three lowering steps), windows/play.json, and the launcher out/Play Pokopia <version>.cmd. The save it plays is
+    %APPDATA%\\Pokopia Native\\<version>\\save, created empty the first time (nxs2.py import-save brings an existing one)."""
+    rt = b.win / 'runtime'
+    for n in ('nxrt.exe', 'SDL3.dll', 'play.ps1', 'spirv-opt.exe', 'spirv-val.exe'): copy_if_changed(t[n], rt / n)
+    nxs = pathlib.Path(t['nxshader/nxshader.py']).parent
+    for f in sorted(nxs.glob('*.py')): copy_if_changed(f, rt / 'nxshader' / f.name)
+    copy_if_changed(next(p for p in (nxs / 'dmsh_abi.h', nxs.parent / 'nxrt/gfx/dmsh_abi.h') if p.is_file()), rt / 'nxshader' / 'dmsh_abi.h')
+    for n in ('msvcp140.dll', 'vcruntime140.dll', 'vcruntime140_1.dll'):   # the kit's SPIRV-Tools are built with the DLL runtime: its app-local copies
+        if (pathlib.Path(t['spirv-opt.exe']).parent / n).is_file(): copy_if_changed(pathlib.Path(t['spirv-opt.exe']).parent / n, rt / n)
+    for rel in RUNTIME_INSTALLER: copy_if_changed(HERE / rel, rt / 'installer' / rel)
+    copy_if_changed(AMPERE, rt / 'installer/ampere-lower/windows/ampere-lower.exe')
+    for f in sorted((HERE / 'host/windows/dmsh_xlate_bin').iterdir()): copy_if_changed(f, rt / 'installer/host/windows/dmsh_xlate_bin' / f.name)
+    seed = pathlib.Path(os.environ['NXW_PIPELINE_SEED']) if os.environ.get('NXW_PIPELINE_SEED') else PROFILE_SRC / f'pipelines.{b.version}.tsv'
+    if seed.is_file(): copy_if_changed(seed, b.win / 'pipelines-seed.tsv')
+    cfg = {'pokopia_native': TOOL_VERSION, 'game_version': b.version, 'exe': r'runtime\nxrt.exe', 'exefs': r'..\extract\ExeFS', 'dll': 'game.dll',
+           'romfs': r'..\extract\RomFS.img', 'save': rf'{SAVES_ROOT}\{b.version}\save', 'work': rf'{WORK_ROOT}\{b.version}', 'shaders': 'shaders',
+           'shader_build': '..', 'fonts': 'fonts', 'pipeline_seed': 'pipelines-seed.tsv' if seed.is_file() else '', 'python': PY,
+           'shader_tool': r'runtime\nxshader\nxshader.py', 'installer': r'runtime\installer', 'spirv_tools': 'runtime'}
+    old = b.win / 'play.json'
+    if old.is_file():   # a save or work folder the player chose stays
+        prev = json.loads(old.read_text(encoding='utf-8')); cfg.update({k: prev[k] for k in ('save', 'work') if prev.get(k)})
+    old.write_text(json.dumps(cfg, indent=1) + '\n', encoding='utf-8')
+    b.outputs.mkdir(parents=True, exist_ok=True)
+    cmd = b.outputs / f'Play Pokopia {b.version}.cmd'
+    cmd.write_text(f'''@echo off
+rem Pokemon Pokopia {b.version} on Windows, built from your own dump by pokopia-native {TOOL_VERSION} (nxs2.py build --windows). Double-click to play.
+rem The save is in {cfg["save"]} (windows\\play.json names it; nxs2.py import-save brings one from Eden, the phone or a Mac).
+rem play.ps1's switches can follow: -Fullscreen, -Window 1600x900, -Silent, -PadCheck; -Save and -Work with other folders for a second player
+rem on this PC; -CoopHost and -CoopJoin for Link Play between our builds (docs/WINDOWS.md).
+powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0..\\windows\\runtime\\play.ps1" -Config "%~dp0..\\windows\\play.json" %*
+exit /b %ERRORLEVEL%
+''', encoding='ascii')
+    say(f'Windows game: {cmd}  (save: {win_save_dir(b)})')
+    return cmd
+
+
+def st_windows(b, jobs):
+    """The Windows game from the extracted dump and the shader package: analysis, shaders, fonts, the recompiled game.dll, the runtime and the launcher."""
+    t = win_tools()
+    if t['missing']: raise Fail(f'the Windows game tools are incomplete in {t.get("dir")}: missing {", ".join(t["missing"])} (nxs2.py doctor)')
+    say(f'Windows tools: {t["dir"]}')
+    st_win_analyze(b, t); st_win_shaders(b, t, jobs); st_win_fonts(b); st_win_lift(b, t, jobs)
+    return st_win_play(b, t)
+
+
+def eden_saves():
+    """Eden's saves of this game, newest first (read, never written): <Eden data>\\nand\\user\\save\\0000000000000000\\<user>\\<title id>, or the title-0
+    folder Eden files it under when it cannot read the title ID from an extracted dump. EDEN_DIR names the data folder (default %APPDATA%\\eden)."""
+    root = pathlib.Path(os.environ.get('EDEN_DIR') or pathlib.Path(os.environ.get('APPDATA', '')) / 'eden') / 'nand/user/save/0000000000000000'
+    c = [d for u in sorted(root.glob('*')) if u.is_dir() for d in (u / TITLE, u / '0000000000000000')
+         if (d / 'G00' / 'CMNDAT.BIN').is_file() and (d / 'S00' / 'SYDAT.BIN').is_file()]
+    return sorted(c, key=lambda d: max(f.stat().st_mtime for f in d.rglob('*') if f.is_file()), reverse=True)
+
+
+def import_save(args):
+    """A save from elsewhere becomes the one the Windows game plays: a folder holding the game's B00, G00 and S00 (Eden's save folder, the phone's
+    Documents/save as tools/phone_pull.py brings it, a Mac's Application Support/nxnative/<title>/save) or one holding such a save/ folder; --eden finds
+    Eden's own. The source is only read. What the save folder held before (with the game's commit leftovers) is kept in <save>.before-<time>."""
+    b = Build(args.build); dst = win_save_dir(b)
+    if args.eden:
+        found = eden_saves()
+        if not found: raise Fail('no Pokopia save in Eden\'s folder (%APPDATA%\\eden\\nand\\user\\save); give the folder instead')
+        src = found[0]; say(f'Eden\'s save: {src}' + (f' (newest of {len(found)})' if len(found) > 1 else ''))
+    elif args.folder:
+        src = pathlib.Path(args.folder).expanduser().resolve()
+        if not (src / 'G00').is_dir() and (src / 'save' / 'G00').is_dir(): src = src / 'save'
+    else: raise Fail('give the save folder (it holds B00, G00 and S00), or --eden')
+    if not ((src / 'G00').is_dir() and (src / 'S00').is_dir()): raise Fail(f'{src} holds no Pokopia save (no G00 and S00 folders)')
+    if src == dst or dst in src.parents: raise Fail(f'{src} is the save the game plays already')
+    if WIN and 'nxrt.exe' in subprocess.run(['tasklist', '/FI', 'IMAGENAME eq nxrt.exe'], capture_output=True, text=True).stdout and not args.force:
+        raise Fail('the game is running: close it first (or --force)')
+    pieces = [p for p in (dst, *(dst.with_name(dst.name + s) for s in ('.work', '.new', '.old', '.commit'))) if p.exists()]
+    if pieces:
+        keep = dst.with_name(f'{dst.name}.before-{time.strftime("%Y%m%d-%H%M%S")}'); keep.mkdir(parents=True)
+        for p in pieces: shutil.move(str(p), str(keep / p.name))
+        say(f'the save that was there: {keep}')
+    dst.mkdir(parents=True)
+    for d in ('B00', 'G00', 'S00'):
+        if (src / d).is_dir(): shutil.copytree(src / d, dst / d)
+    n = sum(1 for f in dst.rglob('*') if f.is_file())
+    say(f'imported {src} -> {dst} ({n} files). Each player needs a save of their own for Link Play: the game refuses a second copy of the host\'s save.')
+
+
+def run_windows(args):
+    b = Build(args.build); cmd = b.outputs / f'Play Pokopia {b.version}.cmd'
+    if not cmd.is_file(): raise Fail(f'{b.out} has no Windows game yet: nxs2.py build <dump> --windows')
+    say(f'starting {cmd.name}')
+    sys.exit(subprocess.call(['cmd', '/c', str(cmd)] + list(args.env)))
+
+
 # ---------------------------------------------------------------- report
 def coverage(b):
     """(file shaders in the map, runtime shaders known for this build's version, runtime shaders present)"""
@@ -862,60 +1093,79 @@ def report(b):
 
 def status(args):
     b = Build(args.build)
+    apple = not (WIN and (b.win / 'play.json').is_file() and not b.patched.is_dir())   # a Windows-game-only folder has no Apple stages to report
     for name, p in (('ExeFS', b.exefs / 'main'), ('RomFS image', b.romfs_img), ('rewritten modules', b.patched / 'main.patched.bin'), ('Mac host', b.host),
                     ('fonts', b.font / 'nintendo_ext.ttf'), ('shader corpus', b.ctl / 'hostkeys.tsv'), ('lowered shaders', b.maxwell / 'results.tsv'),
                     ('shader package', b.pkg), ('shader map', b.profile / 'shader_map.tsv')):
-        print(f'  {"ok     " if p.exists() else "missing"}  {name}')
+        if apple or name not in ('rewritten modules', 'Mac host', 'fonts'): print(f'  {"ok     " if p.exists() else "missing"}  {name}')
     try:
-        lib = b.lib(); print(f'  {"ok     " if (lib / "inputs.tsv").is_file() else "missing"}  Mac shader libraries ({lib.name})')
-        print(f'  {"ok     " if (b.ios / lib.name / "inputs.tsv").is_file() else "missing"}  iPhone shader libraries')
+        if apple:
+            lib = b.lib(); print(f'  {"ok     " if (lib / "inputs.tsv").is_file() else "missing"}  Mac shader libraries ({lib.name})')
+            print(f'  {"ok     " if (b.ios / lib.name / "inputs.tsv").is_file() else "missing"}  iPhone shader libraries')
     except Fail as e: print(f'  ?        shader libraries: {e}')
+    if (b.win / 'play.json').is_file():
+        for name, p in (('Windows: program.db', b.win / 'analyze/program.db'), ('Windows: game.dll', b.win / 'game.dll'), ('Windows: runtime', b.win / 'runtime/nxrt.exe')):
+            print(f'  {"ok     " if p.exists() else "missing"}  {name}')
+        vk = b.win / 'shaders' / 'vk'
+        print(f'  {"ok     " if vk.is_dir() else "missing"}  Windows: Vulkan shaders ({sum(1 for _ in vk.glob("*.spv")) if vk.is_dir() else 0} modules)')
+        dumps = b.win / 'shaders' / 'dumps'
+        print(f'  save     {win_save_dir(b)}\n  Windows: {sum(1 for _ in dumps.glob("*.ctl")) if dumps.is_dir() else 0} run-time shaders recorded and translated so far')
     for p in sorted(b.outputs.glob('*')) if b.outputs.is_dir() else []: print(f'  output   {p}')
-    if (b.profile / 'shader_map.tsv').is_file(): report(b)
+    if apple and (b.profile / 'shader_map.tsv').is_file(): report(b)
 
 
 # ---------------------------------------------------------------- commands
-def need_setup():
+def need_setup(ipa=True):
     """Setup's tools live in this copy of the repository: a fresh download or a copy in another folder has none until setup runs there."""
-    if not (NX / 'dm/host/Makefile').is_file() or not AMPERE.is_file() or (WIN and not (NX / 'win/build_app.py').is_file()):
+    if not (NX / 'dm/host/Makefile').is_file() or not AMPERE.is_file():
         raise Fail(f'this copy of {HERE.name} is not set up yet (nxnative at {NX}, ampere-lower at {AMPERE}): run nxs2.py setup here once '
                    '(or Setup in the window). A new download or a copy in another folder needs it too; your build folders keep working.')
+    if WIN and ipa and not (NX / 'win/build_app.py').is_file():
+        raise Fail('the iPhone toolchain is not set up in this copy (setup ran with --no-ios): run nxs2.py setup without --no-ios once')
 
 
 def build(args):
-    need_ios = True if WIN else not args.no_ios
-    if WIN and (args.mac_app or args.xcode): raise Fail('the Mac app and the Xcode project need a Mac; on Windows the output is the iPhone IPA (--ipa)')
-    bad = doctor(need_ios=need_ios, quiet=True)
-    if bad: doctor(need_ios=need_ios); raise Fail('install the missing tools above (nxs2.py doctor), then build again')
-    need_setup()
+    if args.windows and not WIN: raise Fail('the Windows game is built on Windows (the "for Windows PCs" download): its recompiler and runtime are Windows programs')
+    if WIN and (args.mac_app or args.xcode): raise Fail('the Mac app and the Xcode project need a Mac; on Windows the outputs are the Windows game (--windows) and the iPhone IPA (--ipa)')
+    if WIN and not (args.ipa or args.windows): raise Fail('on Windows the outputs are the Windows game (--windows) and the iPhone IPA (--ipa): give one or both')
+    need_ios = bool(args.ipa) if WIN else not args.no_ios
+    bad = doctor(need_ios=need_ios, quiet=True, need_windows=bool(args.windows))
+    if bad: doctor(need_ios=need_ios, need_windows=bool(args.windows)); raise Fail('install the missing tools above (nxs2.py doctor), then build again')
+    need_setup(ipa=bool(args.ipa))
     exefs, romfs, ver, disp = find_dump(args)
     if args.out: out = pathlib.Path(args.out).expanduser()
     elif args.dump: d = pathlib.Path(args.dump).expanduser().resolve(); out = d.parent / f'{d.name}_native'   # beside the dump, never inside it
     else: raise Fail('--exefs/--romfs need --out <build folder>')
     b = Build(out); jobs = JOBS
     b.set_version(disp)
-    say(f'{NAME} {ver}: dump {exefs.parent}, build folder {b.out}')
+    say(f'pokopia-native {TOOL_VERSION}: {NAME} {ver}: dump {exefs.parent}, build folder {b.out}')
     say(f'load: {jobs} worker(s) of {os.cpu_count()} CPU threads, low priority' + ('' if args.full_speed or args.jobs else ' (gentle default; --full-speed uses them all)'))
+    free = shutil.disk_usage(b.out).free / (1 << 30)
+    if free < 15 and not b.romfs_img.is_file(): say(f'WARNING: {free:.0f} GB free where the build folder is; one game version needs about 12 GB')
     st_profile(b)
     st_extract(b, exefs, romfs)
-    st_rewrite(b)
-    if not WIN: st_host(b, jobs); st_font(b)   # the Mac host and its fonts: the Windows build makes the iPhone app only (its fonts come from win/toolchain.py)
+    apple = not WIN or args.ipa   # the Apple stages: the code rewritten for Apple's kernel, the Metal shader libraries
+    if apple: st_rewrite(b)
+    if not WIN: st_host(b, jobs); st_font(b)   # the Mac host and its fonts: on Windows the iPhone app's fonts come from win/toolchain.py
     st_corpus(b, romfs, args.dumps or [])
     st_lower(b, jobs)
     st_package(b)
-    st_chain(b, need_ios)
+    if apple: st_chain(b, need_ios)
+    if args.windows: st_windows(b, jobs)
     if args.mac_app: st_mac_app(b)
     if args.ipa: st_ipa_windows(b) if WIN else st_ipa(b)
     if args.xcode:
         if not args.team_id: raise Fail('--xcode needs --team-id <your Apple developer team ID>')
         st_xcode(b, args.team_id)
-    if not (args.mac_app or args.ipa or args.xcode): say('no output asked for (--mac-app, --ipa, --xcode); the build folder is complete for nxs2.py run')
-    report(b)
+    if not (args.mac_app or args.ipa or args.xcode or args.windows): say('no output asked for (--mac-app, --ipa, --xcode); the build folder is complete for nxs2.py run')
+    if apple: report(b)
+    if args.windows: say(f'the Windows game: double-click "{b.outputs / f"Play Pokopia {b.version}.cmd"}" (or nxs2.py run "{b.out}")')
     say('done')
 
 
 def default_dump_dirs(b):
-    dirs = [b.rundir / 'shdump', pathlib.Path.home() / 'Library/Application Support/nxnative' / TITLE / 'shdump']
+    dirs = [b.rundir / 'shdump', pathlib.Path.home() / 'Library/Application Support/nxnative' / TITLE / 'shdump',
+            b.win / 'shaders' / 'dumps']   # the Windows game records the run-time shaders in the same form (and translates them for itself on the spot)
     if b.phone.is_dir(): dirs += sorted(p for p in b.phone.glob('*/shdump') if p.is_dir())
     return [d for d in dirs if d.is_dir()]
 
@@ -1060,19 +1310,27 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__.split('\n\n')[0], formatter_class=argparse.RawDescriptionHelpFormatter, epilog=__doc__)
     ap.add_argument('-v', '--verbose', action='store_true', help='show every line the tools print (default: a heartbeat and the important lines; everything goes to <build>/logs)')
     sub = ap.add_subparsers(dest='cmd', required=True)
-    s = sub.add_parser('setup'); s.add_argument('--no-ios', action='store_true'); s.set_defaults(f=setup)
-    s = sub.add_parser('doctor'); s.add_argument('--no-ios', action='store_true'); s.set_defaults(f=lambda a: sys.exit(1 if doctor(not a.no_ios) else 0))
+    ap.add_argument('--version', action='version', version=f'pokopia-native {TOOL_VERSION}')
+    s = sub.add_parser('setup'); s.add_argument('--no-ios', action='store_true', help='without the iPhone toolchain (on Windows: for the Windows game only)'); s.set_defaults(f=setup)
+    s = sub.add_parser('doctor'); s.add_argument('--no-ios', action='store_true'); s.add_argument('--no-windows', action='store_true', help="Windows: not the Windows game's tools")
+    s.set_defaults(f=lambda a: sys.exit(1 if doctor(not a.no_ios, need_windows=not a.no_windows) else 0))
     s = sub.add_parser('build')
     s.add_argument('dump', nargs='?', help='the dump folder (<game>/updates/<version>/{exefs,romfs} inside, or exefs/ and romfs/ directly)')
     s.add_argument('--exefs'); s.add_argument('--romfs'); s.add_argument('--out', help=f'the build folder (default: <dump>/../{TITLE}_native)')
     s.add_argument('--mac-app', action='store_true'); s.add_argument('--ipa', action='store_true'); s.add_argument('--xcode', action='store_true')
+    s.add_argument('--windows', action='store_true', help='Windows: the game recompiled for this PC, with its launcher (out/Play Pokopia <version>.cmd)')
     s.add_argument('--team-id'); s.add_argument('--dumps', nargs='*', default=[]); s.add_argument('--no-ios', action='store_true')
     s.add_argument('-j', '--jobs', type=int, help='worker processes at once (default: all cores on a Mac, a quarter of them, at most 8, on a PC)')
     s.add_argument('--full-speed', action='store_true', help='every CPU thread (fastest; a long all-core load, see docs/WINDOWS.md)')
     s.set_defaults(f=build)
     s = sub.add_parser('refresh'); s.add_argument('build'); s.add_argument('dumps', nargs='*'); s.add_argument('--team-id')
     s.add_argument('-j', '--jobs', type=int); s.add_argument('--full-speed', action='store_true'); s.set_defaults(f=refresh)
-    s = sub.add_parser('run'); s.add_argument('build'); s.add_argument('--lang', default='en-US'); s.add_argument('env', nargs='*', help='extra DM_* switches, KEY=VALUE'); s.set_defaults(f=run_mac)
+    s = sub.add_parser('run'); s.add_argument('build'); s.add_argument('--lang', default='en-US')
+    s.add_argument('env', nargs='*', help='Mac: extra DM_* switches, KEY=VALUE; Windows: switches for play.ps1'); s.set_defaults(f=run_windows if WIN else run_mac)
+    s = sub.add_parser('import-save', help='Windows: a save from Eden, the phone or a Mac becomes the one the Windows game plays (the old one is kept)')
+    s.add_argument('build'); s.add_argument('folder', nargs='?', help='a folder holding B00, G00 and S00 (or a save/ folder with them)')
+    s.add_argument('--eden', action='store_true', help="Eden's own save of this game (read only)"); s.add_argument('--force', action='store_true')
+    s.set_defaults(f=import_save)
     s = sub.add_parser('sign'); s.add_argument('build'); s.add_argument('--team-id', help='Xcode signing: your Apple developer team ID')
     s.add_argument('--method', default='debugging', help='Xcode export method: debugging (default), ad-hoc, release-testing')
     s.add_argument('--p12', help='without Xcode: your Apple Development certificate and key (.p12)'); s.add_argument('--profile', help='without Xcode: the development provisioning profile (.mobileprovision)')

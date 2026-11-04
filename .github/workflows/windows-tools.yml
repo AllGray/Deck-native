@@ -1,0 +1,94 @@
+# The Windows game's tools (windows/: nxanalyze, nxlift, nxrt and their tests) built from source on a clean Windows runner, the tests that need no
+# game files run, and the "for Windows PCs" download packaged as a build artifact. Nothing of the game is involved: the tests that need a dump or a GPU
+# skip themselves (exit 77). The release itself is made by hand (docs/RELEASE-NOTES-1.1.0.md); this workflow publishes nothing.
+name: Windows tools
+
+on:
+  push:
+    paths: ['windows/**', 'tools/package_release.py', 'nxs2.py', '.github/workflows/windows-tools.yml']
+  pull_request:
+    paths: ['windows/**', 'tools/package_release.py', 'nxs2.py', '.github/workflows/windows-tools.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-test:
+    runs-on: windows-2025
+    timeout-minutes: 120
+    env:
+      LLVM_VERSION: 23.1.4          # the development build nxlift links against (headers, static libraries, clang, lld-link)
+      SDL3_VERSION: 3.4.18
+      VULKAN_SDK_VERSION: 1.4.363.0 # headers and glslangValidator for the build; SPIRV-Tools for the download
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - uses: actions/setup-dotnet@v4   # the shader translator nxs2.py setup installs runs on .NET 10
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Python modules (nxs2.py)
+        run: python -m pip install lz4 fonttools pillow
+
+      - name: Cache the toolchains
+        id: cache
+        uses: actions/cache@v4
+        with:
+          path: toolchains
+          key: toolchains-llvm${{ env.LLVM_VERSION }}-sdl${{ env.SDL3_VERSION }}
+
+      - name: LLVM and SDL3 (official release packages)
+        if: steps.cache.outputs.cache-hit != 'true'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force toolchains | Out-Null
+          $llvm = "clang+llvm-$env:LLVM_VERSION-x86_64-pc-windows-msvc"
+          Invoke-WebRequest "https://github.com/llvm/llvm-project/releases/download/llvmorg-$env:LLVM_VERSION/$llvm.tar.xz" -OutFile "toolchains/$llvm.tar.xz"
+          7z x "toolchains/$llvm.tar.xz" -otoolchains -y | Out-Null
+          7z x "toolchains/$llvm.tar" -otoolchains -y | Out-Null
+          Rename-Item "toolchains/$llvm" "llvm-$env:LLVM_VERSION"
+          Remove-Item "toolchains/$llvm.tar.xz", "toolchains/$llvm.tar"
+          $sdl = "SDL3-devel-$env:SDL3_VERSION-VC.zip"
+          Invoke-WebRequest "https://github.com/libsdl-org/SDL/releases/download/release-$env:SDL3_VERSION/$sdl" -OutFile "toolchains/$sdl"
+          Expand-Archive "toolchains/$sdl" -DestinationPath toolchains
+          Remove-Item "toolchains/$sdl"
+
+      - name: Vulkan SDK (LunarG)
+        shell: pwsh
+        run: |
+          $v = $env:VULKAN_SDK_VERSION
+          Invoke-WebRequest "https://sdk.lunarg.com/sdk/download/$v/windows/vulkansdk-windows-X64-$v.exe" -OutFile vulkansdk.exe
+          Start-Process -Wait -FilePath .\vulkansdk.exe -ArgumentList "--root", "C:\VulkanSDK\$v", "--accept-licenses", "--default-answer", "--confirm-command", "install"
+          Remove-Item vulkansdk.exe
+
+      - name: nxnative for the registry check (nxs2.py setup, without the iPhone toolchain)
+        run: python nxs2.py setup --no-ios
+
+      - name: Build and test
+        shell: cmd
+        run: |
+          for /f "usebackq delims=" %%i in (`"%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" -latest -property installationPath`) do set "VS=%%i"
+          call "%VS%\VC\Auxiliary\Build\vcvars64.bat" || exit /b 1
+          set "T=%GITHUB_WORKSPACE%\toolchains"
+          cmake -S windows -B windows\build\Release -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_COMPILER="%T%\llvm-%LLVM_VERSION%\bin\clang.exe" ^
+            -DCMAKE_CXX_COMPILER="%T%\llvm-%LLVM_VERSION%\bin\clang++.exe" -DNXW_LLVM_DIR="%T%\llvm-%LLVM_VERSION%" ^
+            -DNXRT_SDL3_DIR="%T%\SDL3-%SDL3_VERSION%" -DNXRT_VULKAN_SDK=C:\VulkanSDK\%VULKAN_SDK_VERSION% || exit /b 1
+          cmake --build windows\build\Release -j 4 || exit /b 1
+          ctest --test-dir windows\build\Release --output-on-failure --timeout 600
+
+      - name: Package the downloads (dist/<version>; not published)
+        shell: pwsh
+        run: |
+          python tools/package_release.py --windows-src windows --windows-build windows/build/Release --sdl3 "toolchains/SDL3-$env:SDL3_VERSION" `
+            --lld "toolchains/llvm-$env:LLVM_VERSION/bin/lld-link.exe" --spirv-tools "C:/VulkanSDK/$env:VULKAN_SDK_VERSION/Bin"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pokopia-native-downloads
+          path: dist/
+          retention-days: 14

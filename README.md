@@ -1,4 +1,4 @@
-# Pokémon Pokopia, running natively on your Mac and iPhone
+# Pokémon Pokopia, running natively on your Mac, iPhone and Windows PC
 
 I got Pokémon Pokopia (the Switch 2 game) running natively on my Mac and on my iPhone. Not through an emulator: the
 game's own code runs on the Apple chip, and the graphics go through Metal. After a lot of work on the shaders it looks
@@ -6,12 +6,36 @@ exactly like the Switch 2. I lined up screenshots from the Switch 2 against the 
 them apart. Shadows, clouds, time of day, the lot.
 
 This repository is the tool that lets you do the same with **your own copy of the game**. It takes your dump, and on
-your Mac it builds a Mac app and an iPhone app. Everything that comes from the game is created on your machine and stays
-in your build folder. Nothing from the game is in here.
+your Mac it builds a Mac app and an iPhone app. On a Windows PC it builds the game for Windows itself, recompiled for your
+PC, and the iPhone app too. Everything that comes from the game is created on your machine and stays in your build
+folder. Nothing from the game is in here.
 
-This works for both versions 2.0.0 (v327680) and 2.0.1 (v655360) as of 11/3/2026
+This works for both versions 2.0.0 (v327680) and 2.0.1 (v655360) as of 11/3/2026. The tool is version **1.1.0**.
 
-Also, if you do not have a Mac to build the app with, no worries; there is a Windows Builder as well. It will create the IPA the same way a Mac would.
+## Which download do I need?
+
+Every release has one download per computer. Take the one for the computer you build on:
+
+- **I have a Windows PC and want to play on Windows** →
+  [**Pokopia Native for Windows PCs**](https://github.com/xFractals/pokopia-native/releases/latest/download/Pokopia-Native-for-Windows.zip).
+  Unzip it, double-click `Pokopia Native Builder.cmd` and tick "Windows: play on this PC". The steps:
+  [Windows: play on your PC](#windows-play-on-your-pc).
+- **I have a Windows PC and want to build for iPhone** →
+  [**Pokopia Native for Windows PCs**](https://github.com/xFractals/pokopia-native/releases/latest/download/Pokopia-Native-for-Windows.zip) (the same download).
+  Tick "iPhone IPA"; it needs Apple's tools and a paid developer team: [docs/WINDOWS.md](docs/WINDOWS.md#the-iphone-app).
+- **I have a Mac and want to play on Mac** →
+  [**Pokopia Native for Macs**](https://github.com/xFractals/pokopia-native/releases/latest/download/Pokopia-Native-for-Mac.zip).
+  A Mac with Apple silicon (M1 or newer); tick "Mac app". The steps: [How to build](#how-to-build).
+- **I have a Mac and want to build for iPhone** →
+  [**Pokopia Native for Macs**](https://github.com/xFractals/pokopia-native/releases/latest/download/Pokopia-Native-for-Mac.zip) (the same download).
+  Tick "iPhone IPA", and read [the Apple developer thing](#the-apple-developer-thing-iphone-only-read-this) first.
+
+Playing together (Link Play):
+
+- **Co-op needs the same pokopia-native version on every device** (the builder window's title shows it).
+- **Each player needs their own save**: the game refuses two copies of the same save, so a save copied to a second device cannot play with itself.
+
+Older versions and the release notes: [all releases](https://github.com/xFractals/pokopia-native/releases).
 
 Before anything else:
 
@@ -51,6 +75,8 @@ https://github.com/user-attachments/assets/1fde210a-48bf-44a9-a100-3989711f7366
 - **A Mac app.** Double-click, press Play, it runs. Saves live in your Library folder like any Mac game.
 - **An iPhone app.** The game runs natively on the phone, full quality, 30 fps (the Switch 2 runs this game at 30 in
   handheld too). There is a catch about Apple developer accounts, explained below. Read it before you get excited.
+- **A Windows game.** On a Windows PC the game's code is recompiled for your PC and drawn with Vulkan: 60 fps, mouse look,
+  controllers with rumble, your save from Eden, the phone or the Mac. [Windows: play on your PC](#windows-play-on-your-pc).
 
 Both are built from your dump by one script, `nxs2.py`. The first build takes about an hour, nearly all of it the
 Mac compiling 3,800 shaders. After that, rebuilds take a couple of minutes.
@@ -159,6 +185,29 @@ takes a picture of the title screen and cuts the Pokopia logo out of it. It need
 (play a little with `nxs2.py run` or the Mac app first, or point it at one with `--save <folder>`). If you prefer, give
 it a screenshot of the title screen from your Switch 2 (Capture button):
 `nxs2.py icon "<build folder>" title.jpg`. Then build again with the same command; it only repacks the apps.
+
+## Windows: play on your PC
+
+New in 1.1.0. The "for Windows PCs" download recompiles the game for your PC from your dump: our own recompiler turns the
+game's arm64 code into x86-64 (through LLVM), and our own runtime runs it, with the Switch services ported from nxnative,
+the graphics replayed on Vulkan and SDL3 for the window, input and sound. No emulator. As on the Mac, nothing of the game
+is in the download; the recompiled game and its shaders are made on your PC and stay in your build folder.
+
+You need Windows 10 or 11 (64-bit) with an AVX2 CPU (2013 or newer), a Vulkan 1.3 graphics card, about 12 GB of disk,
+Python 3.12 with `lz4 fonttools pillow`, the .NET 10 runtime and git. No compiler and no installer: the download brings
+its own tools. Then:
+
+```
+python nxs2.py setup --no-ios
+python nxs2.py build "C:\path\to\your dump folder" --windows
+```
+
+(or the window: **Setup**, then **Build** with "Windows: play on this PC" ticked). It took 20 minutes on my PC (longer on a smaller one), most of it
+the recompile, at idle priority. Then double-click `<build folder>\out\Play Pokopia <version>.cmd`. Keyboard and mouse
+as on the Mac below, controllers as Switch controllers. Your save lives in `%APPDATA%\Pokopia Native\<version>\save`;
+**Import save…** in the window (or `nxs2.py import-save`) brings the one you have from Eden, the phone or the Mac. The
+first start draws a few things late while the game's run-time shaders are translated once. Everything else, including
+the save and the controller check: [docs/WINDOWS.md](docs/WINDOWS.md).
 
 ## No Mac? Windows builds the iPhone app
 
@@ -282,7 +331,8 @@ warm. `DM_RENDER_SCALE=0.8` is the first thing to try if that bothers you.
 ## Licences and credits
 
 Everything here is MIT except `ampere-lower/`, which is Eden-NS2 code and stays GPL-3.0-or-later (its own `LICENSE` and
-`NOTICE.md` are in that folder). The nxnative and Ryujinx code that `host/` modifies and builds keeps their MIT notices,
+`NOTICE.md` are in that folder). The Windows download's prebuilt tools carry LLVM, SDL3, astc-encoder, bc7enc_rdo and
+SPIRV-Tools under their own licences, listed in its `windows/bin/THIRD-PARTY-NOTICES.txt`. The nxnative and Ryujinx code that `host/` modifies and builds keeps their MIT notices,
 reproduced in [host/NOTICE.md](host/NOTICE.md). [LEGAL.md](LEGAL.md) is the full statement of what this repository
 contains and never will, what the tool does not do (no decryption, no keys), and the trademark note: Pokémon and
 Pokémon Pokopia belong to their owners, this is an independent fan project with no affiliation to Nintendo, The Pokémon
