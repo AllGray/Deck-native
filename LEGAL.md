@@ -36,7 +36,10 @@ tool cannot read it and will not try.
 
 - `ampere-lower/`: GPL-3.0-or-later (Eden-NS2 code; its `LICENSE` and `NOTICE.md` are in that folder).
 - `host/`: the changes are MIT; the nxnative and Ryujinx code they modify or build is MIT under their own notices,
-  reproduced in `host/NOTICE.md`.
+  reproduced in `host/NOTICE.md`. **Exception:** the Switch 2 texture layout in `nxnative-switch2.patch` (the in-GOB
+  bit order in `dm/gfx/tex/nvn_deswizzle.c` and `dm/gfx/msl/deswz.metal`) follows Eden-NS2's code, which is
+  GPL-3.0-or-later, so until that part is replaced the patch as distributed is GPL-3.0-or-later. A clean MIT
+  implementation is being written to replace it.
 - Everything else here: MIT (`LICENSE`), the same licence as nxnative.
 
 ## Trademarks and affiliation

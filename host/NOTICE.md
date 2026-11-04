@@ -8,6 +8,13 @@ patch). Both projects are MIT-licensed; their notices follow and apply to those 
 [d2r-mobile](https://github.com/jhaizhou-ops/d2r-mobile) (MIT) and lists its other third-party components, with their
 licences, in its `dm/third_party/README.md`.
 
+## Eden-NS2 (GPL-3.0-or-later)
+
+The Switch 2 texture layout in `nxnative-switch2.patch` (the in-GOB bit order in `dm/gfx/tex/nvn_deswizzle.c` and
+`dm/gfx/msl/deswz.metal`) follows code from the Eden-NS2 emulator, which is GPL-3.0-or-later (the full text is in
+`ampere-lower/LICENSE`). While that part is in the patch, the patch as distributed is GPL-3.0-or-later. It is being
+replaced with a clean MIT implementation.
+
 ## nxnative
 
 ```
