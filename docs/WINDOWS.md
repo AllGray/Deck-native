@@ -71,7 +71,10 @@ Double-click **`<build folder>\out\Play Pokopia <version>.cmd`** (or **Play** in
 title screen alone). The Windows game records each one the first time the game asks for it and translates it on the
 spot, so a few things appear a little late on the first title screen and in the first minutes of play; after that they
 are there from the start. Nothing to do for you, and nothing is skipped for long. (The same recordings also finish the
-iPhone app of this build folder: `nxs2.py refresh` takes them, see the README's shader section.)
+iPhone app of this build folder: `nxs2.py refresh` takes them, see the README's shader section.) The graphics pipelines
+of the title, a new game and the first towns (2.0.1) are built on background threads while the game starts, from a list
+the builder ships (`profile/0400A3A01EE4C000/pipelines.2.0.1.tsv`), so those areas play without first-time freezes;
+places further on build theirs the first time you visit, once.
 
 ### Your save
 
