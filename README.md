@@ -1,4 +1,4 @@
-# Pokémon Pokopia, running natively on your Mac, iPhone and Windows PC
+# Pokémon Pokopia, running natively on your Mac, iPhone and Windows PC with Cross-Device Saves and Multiplayer
 
 I got Pokémon Pokopia (the Switch 2 game) running natively on my Mac and on my iPhone. Not through an emulator: the
 game's own code runs on the Apple chip, and the graphics go through Metal. After a lot of work on the shaders it looks
