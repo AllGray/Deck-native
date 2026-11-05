@@ -21,8 +21,11 @@ stay in your build folder.
 - **Windows 10 or 11, 64-bit**, with a CPU that has **AVX2 and FMA3** (Intel Haswell from 2013 or AMD Excavator from
   2015, and anything newer), and **16 GB of memory** to be comfortable (the game itself took about 5 GB on the test PC).
 - A **graphics card with Vulkan 1.3** and a current driver (NVIDIA, AMD or Intel).
-- **Python 3.12 or newer** from python.org (tick "Add python.exe to PATH"), then
-  `python -m pip install lz4 fonttools pillow` (add `zstandard` if your dump is a `.nup` file).
+- **Python 3.12, 3.13 or 3.14** from python.org (tick "Add python.exe to PATH"), then
+  `python -m pip install lz4 fonttools pillow` (add `zstandard` if your dump is a `.nup` file). Python 3.15 is too new
+  for now: lz4 and zstandard have no ready-made packages for it yet, so pip tries to compile them and stops with
+  "Microsoft Visual C++ 14.0 or greater is required" (the Visual C++ Redistributable does not help). Install 3.14
+  beside it and use `py -3.14 -m pip install …`; `Pokopia Native Builder.cmd` then picks 3.14 by itself.
 - The **.NET 10 runtime** (the shader translator) from dotnet.microsoft.com, and **git** (git-scm.com: setup fetches nxnative).
 - About **12 GB** free where the build folder goes, per game version.
 - Your dump, as for the other builds (the README's "What you need").
@@ -162,7 +165,7 @@ recordings do the same job: `nxs2.py refresh` picks them up.)
 
 | Tool | Where | Why |
 |---|---|---|
-| Python 3.12 or newer | python.org, tick "Add python.exe to PATH" (Tk comes with it) | the build script and the window |
+| Python 3.12, 3.13 or 3.14 (3.15 lacks lz4 packages so far) | python.org, tick "Add python.exe to PATH" (Tk comes with it) | the build script and the window |
 | `python -m pip install "capstone>=5,<6" lz4 fonttools pillow` | | the code rewriter, the shader tools, the fonts, the app icon |
 | .NET 10 runtime | dotnet.microsoft.com | the shader translator |
 | LLVM for Windows | github.com/llvm/llvm-project/releases, `LLVM-<version>-win64.exe` | compiles and links the iPhone app (`clang`, `ld64.lld`) |
