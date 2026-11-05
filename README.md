@@ -67,7 +67,7 @@ when I have captures from my own console they will go up next to these.
 
 ![Day, the first area](docs/images/iphone-day.png)
 
-![Opening, meeting Professor Tangrowth](docs/images/iphone-intro-12.png)
+<img width="1007" height="485" alt="Screenshot 2026-11-04 205343" src="https://github.com/user-attachments/assets/238eb6b2-a815-4ac7-aeea-7c4d99479f19" />
 
 ![Opening, the workbench at night](docs/images/iphone-intro-18.png)
 
