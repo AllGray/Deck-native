@@ -153,8 +153,8 @@ through a relay you trust; `-Interact` turns on Interact everywhere.
 - `nxs2.py status "<build folder>"` lists what the build folder has.
 - A black or flickering window right after the start, with the music playing: the first-start shaders above; give it a
   minute.
-- Open an issue with the stage or the log's last lines, your GPU and Windows version. Never attach the build folder,
-  `game.dll`, shader files or saves.
+- Ask in the [Discord](https://discord.gg/Aj9GqxZj8V), or open an issue with the stage or the log's last lines, your GPU
+  and Windows version. Never attach the build folder, `game.dll`, shader files or saves.
 
 ## The iPhone app
 

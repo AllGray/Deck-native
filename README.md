@@ -1,5 +1,7 @@
 # Pokémon Pokopia, running natively on your Mac, iPhone and Windows PC with Cross-Device Saves and Multiplayer
 
+**Join the community on [Discord](https://discord.gg/Aj9GqxZj8V)**: help with installing, bug reports, finding co-op partners and news of every release.
+
 I got Pokémon Pokopia (the Switch 2 game) running natively on my Mac and on my iPhone. Not through an emulator: the
 game's own code runs on the Apple chip, and the graphics go through Metal. After a lot of work on the shaders it looks
 exactly like the Switch 2. I lined up screenshots from the Switch 2 against the phone, scene for scene, and could not tell
@@ -491,8 +493,8 @@ warm. `DM_RENDER_SCALE=0.8` is the first thing to try if that bothers you.
 - A different Xcode than the one nxnative's lock names (27.2) is reported, not refused: the build uses your Metal
   compiler and keeps its libraries apart. Mine is 27.0 and it is fine.
 - `[RED] shader <key> is not in the shader map` in a run log is a run-time shader, see above, not a fault.
-- Open an issue with the stage, the last lines of its log and your Mac/Xcode versions. Never attach game files, build
-  folders or recordings.
+- Ask in the [Discord](https://discord.gg/Aj9GqxZj8V), or open an issue with the stage, the last lines of its log and your
+  Mac/Xcode versions. Never attach game files, build folders or recordings.
 
 ## Licences and credits
 
