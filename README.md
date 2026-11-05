@@ -38,6 +38,7 @@ Playing together (Link Play) works between Windows, Mac and iPhone, on the same 
 
 Older versions and the release notes: [all releases](https://github.com/xFractals/pokopia-native/releases).
 Already have an older version set up? [Updating from an older version](#updating-from-an-older-version) keeps your save.
+Bringing your save from an emulator or another device? [Moving your save](#moving-your-save).
 
 Before anything else:
 
@@ -156,6 +157,42 @@ The game files on the phone only need copying again if you moved to another upda
 say): run `tools/phone_setup.py --romfs "<build folder>/extract/RomFS.img"` once more. Same game update, same dump:
 nothing to copy. Backing your save up first never hurts (Finder's file sharing for the phone, your Library folder on
 the Mac). Link Play needs the same pokopia-native version on every device, so update them all.
+
+## Moving your save
+
+A Pokopia save is three folders: **`B00`, `G00` and `S00`**. Moving a save means copying those three folders from one
+place to another, and the same save works everywhere: in an emulator, the Windows game, the Mac app and the iPhone app.
+
+**Before you copy:** close the game on both sides, and keep a copy of the save you are about to replace (a copy
+replaces it; saves don't merge). A save that game version 2.0.1 has written may not load in 1.0.5.
+
+| Where | Its save folder (the one holding `B00`, `G00` and `S00`) |
+|---|---|
+| **Eden**, and emulators built on it such as **Eglantine** | Right-click Pokémon Pokopia in the game list → **Open Save Data Location**. On Windows Eden's is usually `%APPDATA%\eden\nand\user\save\0000000000000000\<a long user ID>\0400A3A01EE4C000`; a portable install keeps it in the `user` folder next to the program. |
+| **Windows game** | `%APPDATA%\Pokopia Native\<game version>\save`, for example `…\Pokopia Native\2.0.1\save` |
+| **Mac app** | `~/Library/Application Support/nxnative/0400A3A01EE4C000/save` (Finder → Go → Go to Folder…) |
+| **iPhone app** | the `save` folder in the app's Documents, through file sharing (below) |
+
+**Into the Windows game:** **Import save…** in the builder window. **Yes** takes Eden's save on this PC by itself; **No**
+lets you choose any save folder: another emulator's, or one you copied off the iPhone or the Mac. The save that was
+there is kept beside it as `save.before-<date>`.
+
+**Into the Mac app:** quit it, then copy the three folders into its save folder above (make the `save` folder if it is
+not there yet).
+
+**Into or out of the iPhone app:** fully close the app on the phone first (swipe it away in the app switcher), and open
+it again when you're done.
+- **With a Mac:** connect the phone and select it in Finder → **Files** → the Pokopia app. Drag its `save` folder out
+  (that's your backup, or the save to move). To put one in, drag a folder named `save` holding `B00`, `G00` and `S00`
+  onto the app and choose to replace.
+- **With Windows:** the **Apple Devices** app from the Microsoft Store (or iTunes) → your iPhone → **Files** → the
+  Pokopia app, the same way.
+
+**Into an emulator:** open its save folder with **Open Save Data Location** (start the game there once first if the
+folder doesn't exist yet) and copy the three folders in.
+
+**Link Play:** a copied save is still the same save, and the game won't let two copies of one save play together. For
+co-op each player needs a save of their own.
 
 ## The Apple developer thing (iPhone only, read this)
 
