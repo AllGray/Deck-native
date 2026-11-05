@@ -102,7 +102,8 @@ if ($newSave -and -not (Test-Path -LiteralPath $Save) -and -not $DryRun) { New-I
 $must = @($ExeFS, $Dll, $RomFS, $Exe); if (-not ($newSave -and $DryRun)) { $must += $Save }   # a dry run does not make the new save folder
 foreach ($p in $must) { if (-not (Test-Path -LiteralPath $p)) { Write-Error "not found: $p"; exit 2 } }
 foreach ($m in @("main", "sdk")) { if (-not (Test-Path (Join-Path $ExeFS $m))) { Write-Error "$ExeFS has no '$m': give the game's ExeFS folder"; exit 2 } }
-if (-not (Get-ChildItem -LiteralPath $Save -Directory -ErrorAction SilentlyContinue | Where-Object { $_.Name -match '^[BGS]00$' })) {
+$noSave = -not (Get-ChildItem -LiteralPath $Save -Directory -ErrorAction SilentlyContinue | Where-Object { $_.Name -match '^[BGS]00$' })
+if ($noSave) {
     Write-Warning "$Save holds no B00 / G00 / S00 folders: the game will start a new save there"
 }
 if ($CoopHost -and $CoopJoin) { Write-Error "-CoopHost and -CoopJoin: give one"; exit 2 }
@@ -187,6 +188,10 @@ function Show-LinkPlay($pref, [string]$title, $keys) {
         $fl.Padding = New-Object System.Windows.Forms.Padding(8); $p.Controls.Add($fl); [void]$tabs.TabPages.Add($p); $pages[$n] = $fl
     }
     $flow = $pages['Link Play']
+    if ($script:noSave) {   # easy to miss: without Import save the game quietly starts a new one
+        $ns = New-Label "No save here yet, so the game starts a new one. To play your save from Eden, the iPhone or the Mac, press Cancel and use Import save... in the builder first."
+        $ns.ForeColor = [System.Drawing.Color]::DarkRed; $ns.Margin = New-Object System.Windows.Forms.Padding(0, 0, 0, 8); $flow.Controls.Add($ns)
+    }
     $flow.Controls.Add((New-Label "How do you want to play?"))
     $modes = [ordered]@{ alone = "Play alone"; lan = "Link Play with players on this network (the same Wi-Fi)";
                         host = "Host over the internet (your router forwards port 47600 to this PC)"; visit = "Visit a host over the internet" }
@@ -405,6 +410,9 @@ if ($Shaders) {   # an installer build's shader cache (nxs_rt.c), and the run-ti
         if (-not $py -or -not (Test-Path -LiteralPath $py)) {   # the Python the build used has moved: the launcher's, else whatever is on the PATH
             $found = Get-Command py.exe, python.exe -ErrorAction SilentlyContinue | Select-Object -First 1
             $py = if ($found) { $found.Source } else { "" }; if ($found -and $found.Name -eq "py.exe") { $pyArg = " -3" }
+        }
+        if ($py -and [System.IO.Path]::GetFileName($py) -ieq "pythonw.exe") {   # a build made from the 1.1.0 window: under pythonw every console tool the translator runs opens a window
+            $pc = Join-Path (Split-Path -Parent $py) "python.exe"; if (Test-Path -LiteralPath $pc) { $py = $pc }
         }
         if ($py) {
             $env:NXRT_SHADER_TOOL = "`"$py`"$pyArg -I `"$ShaderTool`" --cache `"$Shaders`"" + $(if ($Installer) { " --installer `"$Installer`"" } else { "" })

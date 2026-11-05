@@ -48,7 +48,7 @@ def build_dir_for(dump):
 class App(tk.Tk):
     def __init__(self):
         super().__init__()
-        self.title(f'Pokémon Pokopia native builder {tool_version()}')
+        self.title(f'Pokopia Native Builder {tool_version()}')
         self.minsize(760, 560)
         self.proc = None; self.q = queue.Queue(); self.t0 = None; self.running = None
         self.settings = self.load_settings()
@@ -73,23 +73,25 @@ class App(tk.Tk):
         pad = {'padx': 8, 'pady': 4}
         f = ttk.Frame(self); f.pack(fill='both', expand=True, padx=10, pady=10)
 
-        ttk.Label(f, text='Your dump folder', font=('', 12, 'bold')).grid(row=0, column=0, sticky='w', **pad)
+        ttk.Label(f, text='1. Your game dump', font=('', 12, 'bold')).grid(row=0, column=0, sticky='w', **pad)
         self.dump = tk.StringVar(value=s.get('dump', ''))
         ttk.Entry(f, textvariable=self.dump, width=70).grid(row=1, column=0, columnspan=2, sticky='ew', **pad)
         db = ttk.Frame(f); db.grid(row=1, column=2, sticky='w', **pad)
         ttk.Button(db, text='Choose…', command=self.choose_dump).pack(side='left')
         ttk.Button(db, text='.nup file…', command=self.choose_nup).pack(side='left', padx=(6, 0))
-        ttk.Label(f, text='the folder with updates/327680/exefs and romfs inside (or exefs and romfs directly), or a .nup file; the game is never written to',
+        ttk.Label(f, text='The folder your dumping tool made from your own copy: it holds updates/655360 (game version 2.0.1) or updates/327680 '
+                          '(1.0.5) with exefs and romfs inside, or exefs and romfs directly. A .nup file works too. Your dump is only read, never changed.',
                   foreground='#666', wraplength=720, justify='left').grid(row=2, column=0, columnspan=3, sticky='w', padx=8)
 
-        ttk.Label(f, text='Build folder', font=('', 12, 'bold')).grid(row=3, column=0, sticky='w', **pad)
+        ttk.Label(f, text='2. Build folder', font=('', 12, 'bold')).grid(row=3, column=0, sticky='w', **pad)
         self.out = tk.StringVar(value=s.get('out', ''))
         ttk.Entry(f, textvariable=self.out, width=70).grid(row=4, column=0, columnspan=2, sticky='ew', **pad)
         ttk.Button(f, text='Change…', command=self.choose_out).grid(row=4, column=2, sticky='w', **pad)
-        ttk.Label(f, text='empty = beside the dump, "<dump folder>_native"; everything made from the game goes here and nowhere else',
+        ttk.Label(f, text='Where everything made from your game goes (about 12 GB per game version). Leave it empty for a folder next to your dump.' +
+                          (' Pick one outside Documents, Desktop and Downloads: Windows Security can block writing there.' if WIN else ''),
                   foreground='#666', wraplength=720, justify='left').grid(row=5, column=0, columnspan=3, sticky='w', padx=8)
 
-        ttk.Label(f, text='Outputs', font=('', 12, 'bold')).grid(row=6, column=0, sticky='w', **pad)
+        ttk.Label(f, text='3. What to make', font=('', 12, 'bold')).grid(row=6, column=0, sticky='w', **pad)
         o = ttk.Frame(f); o.grid(row=7, column=0, columnspan=3, sticky='w', padx=8)
         self.mac_app = tk.BooleanVar(value=s.get('mac_app', MAC)); self.ipa = tk.BooleanVar(value=s.get('ipa', not WIN))
         self.windows = tk.BooleanVar(value=s.get('windows', WIN))
@@ -98,7 +100,7 @@ class App(tk.Tk):
         self.full_speed = tk.BooleanVar(value=False)   # never remembered: every session starts gentle
         if MAC: ttk.Checkbutton(o, text='Mac app', variable=self.mac_app).pack(side='left', padx=(0, 14))
         if WIN: ttk.Checkbutton(o, text='Windows: play on this PC', variable=self.windows).pack(side='left', padx=(0, 14))
-        ttk.Checkbutton(o, text='iPhone IPA (unsigned)', variable=self.ipa).pack(side='left', padx=(0, 14))
+        ttk.Checkbutton(o, text='iPhone IPA (the iPhone app, unsigned)', variable=self.ipa).pack(side='left', padx=(0, 14))
         if MAC:
             ttk.Checkbutton(o, text='Xcode project, team ID:', variable=self.xcode).pack(side='left')
             ttk.Entry(o, textvariable=self.team, width=12).pack(side='left', padx=(4, 14))
@@ -106,8 +108,8 @@ class App(tk.Tk):
 
         sp = ttk.Frame(f); sp.grid(row=8, column=0, columnspan=3, sticky='w', padx=8, pady=(6, 0))
         ttk.Checkbutton(sp, text='Full speed (every CPU thread)', variable=self.full_speed).pack(side='left')
-        ttk.Label(sp, text='  off = a few cores at low priority: slower, but the computer stays cool and usable' if not MAC else
-                  '  off = all cores at low priority; on = the same at normal priority', foreground='#666').pack(side='left')
+        ttk.Label(sp, text='  Off: a few cores at low priority, slower but the computer stays cool and usable.' if not MAC else
+                  '  Off: all cores at low priority. On: the same at normal priority.', foreground='#666').pack(side='left')
 
         b = ttk.Frame(f); b.grid(row=9, column=0, columnspan=3, sticky='ew', padx=8, pady=(10, 4))
         self.buttons = {}
@@ -117,13 +119,19 @@ class App(tk.Tk):
             self.buttons[key] = ttk.Button(b, text=text, command=cmd); self.buttons[key].pack(side='left', padx=(0, 6))
         self.stop_btn = ttk.Button(b, text='Stop', command=self.do_stop, state='disabled'); self.stop_btn.pack(side='left', padx=(0, 6))
         ttk.Button(b, text='Open build folder', command=self.open_out).pack(side='right')
+        steps = ('Setup once for each new download, then Build (the first build takes a while; stopping is safe, Build again carries on). '
+                 'Then Play' + (', or Sign IPA' if WIN else '') + ' for the iPhone app. Import save brings your save from Eden, the iPhone or the Mac. '
+                 'Refresh shaders finishes the iPhone app after a first play; the README explains.' if WIN else
+                 'Setup once for each new download, then Build (the first build takes a while; stopping is safe, Build again carries on). '
+                 'Sign IPA makes the iPhone app installable; Refresh shaders finishes it after a first play. The README explains each step.')
+        ttk.Label(f, text=steps, foreground='#666', wraplength=720, justify='left').grid(row=10, column=0, columnspan=3, sticky='w', padx=8)
 
         self.status = tk.StringVar(value='')
-        ttk.Label(f, textvariable=self.status, font=('', 11)).grid(row=10, column=0, columnspan=3, sticky='w', padx=8, pady=(6, 2))
+        ttk.Label(f, textvariable=self.status, font=('', 11)).grid(row=11, column=0, columnspan=3, sticky='w', padx=8, pady=(6, 2))
         self.log = tk.Text(f, height=18, wrap='none', font=('Menlo' if MAC else 'Consolas', 10), state='disabled')
-        self.log.grid(row=11, column=0, columnspan=3, sticky='nsew', padx=8, pady=(0, 4))
-        sb = ttk.Scrollbar(f, orient='vertical', command=self.log.yview); sb.grid(row=11, column=3, sticky='ns'); self.log['yscrollcommand'] = sb.set
-        f.columnconfigure(0, weight=1); f.rowconfigure(11, weight=1)
+        self.log.grid(row=12, column=0, columnspan=3, sticky='nsew', padx=8, pady=(0, 4))
+        sb = ttk.Scrollbar(f, orient='vertical', command=self.log.yview); sb.grid(row=12, column=3, sticky='ns'); self.log['yscrollcommand'] = sb.set
+        f.columnconfigure(0, weight=1); f.rowconfigure(12, weight=1)
         self.protocol('WM_DELETE_WINDOW', self.on_close)
 
     # ---------------------------------------------------------------- helpers
@@ -221,7 +229,10 @@ class App(tk.Tk):
         if rc == 0:
             made = ', '.join(v for k, v in self.result.items() if k != 'fail')
             self.status.set(f'{self.running} done in {el}.' + (f'  {made}' if made else ''))
-            if self.running == 'Build' and made: messagebox.showinfo('Done', f'Build finished in {el}.\n\n{chr(10).join(self.result.values())}\n\nOpen the build folder for the outputs; the README says how to get the IPA onto the phone.')
+            if self.running == 'Build' and made:
+                nxt = ' '.join(t for k, t in (('windows', 'Press Play to start the game.'), ('app', 'The Mac app is in the build folder.'),
+                                              ('ipa', 'Sign IPA makes the iPhone app installable; the README says how to get it onto the phone.')) if k in self.result)
+                messagebox.showinfo('Done', f'Build finished in {el}.\n\n{chr(10).join(self.result.values())}\n\n{nxt or "Open the build folder for the outputs."}')
         elif rc in (130, -15, -2, 143, 1) and self.result.get('stopped'):
             self.status.set(f'{self.running} stopped after {el}. Press the button again to continue where it left off.')
         else:
