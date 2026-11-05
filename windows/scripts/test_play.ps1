@@ -45,6 +45,11 @@ $ErrorActionPreference = "Continue"   # the refusal is an error on stderr: read 
 $out = powershell -NoProfile -ExecutionPolicy Bypass -Command "& '$play' $a -Interact" 2>&1
 $ErrorActionPreference = "Stop"
 if (-not ($out | Where-Object { $_ -like "*-Interact goes with Link Play*" })) { Write-Host "FAIL: -Interact alone`n$($out -join "`n")"; $fail++ } else { Write-Host "ok: -Interact alone is refused" }
+# The keyboard map: a DM_KEYMAP given from outside reaches the game unchanged
+$env:DM_KEYMAP = "$t\controls.json"
+$out = powershell -NoProfile -ExecutionPolicy Bypass -Command "& '$play' $a" 2>&1
+Remove-Item env:DM_KEYMAP
+if (-not ($out | Where-Object { $_ -like "*keys: DM_KEYMAP=$t\controls.json*" })) { Write-Host "FAIL: DM_KEYMAP`n$($out -join "`n")"; $fail++ } else { Write-Host "ok: DM_KEYMAP" }
 Remove-Item env:NXRT_TEST_PLAY
 Remove-Item -Recurse -Force $t
 if ($fail) { Write-Host "scripts.play_defaults: $fail failed"; exit 1 }

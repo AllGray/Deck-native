@@ -62,6 +62,12 @@ Double-click **`<build folder>\out\Play Pokopia <version>.cmd`** (or **Play** in
 
 - **Keyboard and mouse:** WASD moves; click the picture and the mouse looks around (Esc gives it back); J K U I are
   A B X Y, Q E are L R, Z C are ZL ZR, Return is +, Tab is −; F11 is full screen.
+- **Your own keys:** the window before the game starts has a **Controls** tab: click an action, then press the key you
+  want for it (a key another action had swaps over); **Reset to defaults** brings the layout above back. Keys count by
+  their place on the keyboard, so the map works the same under any keyboard language. It is saved for this PC in
+  `%APPDATA%\Pokopia Native\controls.json`, and the game's log lists the keys it uses. (Hold **Shift** while starting the
+  game if you ticked "Don't ask again".) Esc, F11, Alt and the Windows keys can't be used. The Mac and the iPhone keep
+  their own layout.
 - **Controllers:** Xbox, PlayStation and Switch Pro controllers work as Switch controllers (face buttons by position),
   with rumble and motion. Close Steam or turn off Steam Input for the controller if it does not show up.
 - Switches for the launcher go after its name in a terminal: `-Fullscreen`, `-Window 1600x900`, `-Silent`, `-PadCheck`

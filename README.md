@@ -374,7 +374,8 @@ and that feels like a console. I wanted it to feel like a PC or a phone game, so
 
 - **Mac:** click the game picture and the mouse is captured. Move it to look around; left click is A, right click is
   B, the middle button resets the camera. **Esc** gives the mouse back. Keyboard: WASD moves, J K U I are A B X Y, Q E
-  are L R, Z C are ZL ZR, Return is + and Tab is −.
+  are L R, Z C are ZL ZR, Return is + and Tab is −. (On Windows these keys can be changed in the Controls tab of the
+  window before the game starts, docs/WINDOWS.md; the Mac and the iPhone keep this layout.)
 - **iPhone:** drag anywhere on the right half of the screen that isn't a button, and the camera follows your finger.
 
 **Sensitivity and invert** are in the app's launcher under Controls ("Look sensitivity", "Invert look up and down"),
