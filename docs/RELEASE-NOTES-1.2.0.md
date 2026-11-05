@@ -49,6 +49,8 @@ Outside Palette Town the game puts everyone in a Link Play session in Spectator 
 ### Source
 
 - The Windows source in `windows/` now includes `src/coop/nxnative/` and `src/swapin/nxnative/`, which an ignore rule left out of the 1.1.x snapshots.
+- The Windows shader translator (`host/windows/dmsh_xlate_bin`) no longer ships its debug-symbols file.
+- `LEGAL.md` says how rights holders can ask for a change or removal.
 
 ### Getting it
 

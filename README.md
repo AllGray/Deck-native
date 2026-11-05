@@ -62,8 +62,6 @@ Captures from my phone, straight from the build this tool makes. I checked every
 Switch 2 footage of the game. The Switch side-by-sides are not posted here because that footage is not mine to repost;
 when I have captures from my own console they will go up next to these.
 
-https://github.com/user-attachments/assets/1fde210a-48bf-44a9-a100-3989711f7366
-
 ![Night, campfire with Professor Tangrowth](docs/images/iphone-night.png)
 
 ![Day, the first area](docs/images/iphone-day.png)

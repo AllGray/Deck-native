@@ -73,4 +73,10 @@ them, and the names are used only to say which game it is for.
 
 The screenshots in the README show the game only to document the result. They are not game assets for reuse.
 
+## Rights holders
+
+If you hold rights in anything in this repository or its releases and want it changed or removed, open an issue on
+this repository (or contact the account that owns it through GitHub) and say which files. It will be taken care of
+promptly, without a formal notice needed.
+
 If you fork this project, keep these rules: they are what makes it publishable.
