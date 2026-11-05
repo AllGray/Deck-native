@@ -404,10 +404,26 @@ def patch_adds(patch):
     return [b[6:] for a, b in zip(lines, lines[1:]) if a == '--- /dev/null' and b.startswith('+++ b/')]
 
 
+def check_writable(folder, what):
+    """Windows Security's Controlled folder access (ransomware protection) and some antivirus programs stop Python writing in Documents,
+    Desktop, Downloads and Pictures; Python then reports the new file as missing (Errno 2). Said before a step fails halfway."""
+    folder = pathlib.Path(folder)
+    try:
+        folder.mkdir(parents=True, exist_ok=True)
+        t = folder / f'.nxs2-write-test-{os.getpid()}'; t.write_text('ok'); t.unlink()
+    except OSError as e:
+        hint = ('Windows Security\'s "Controlled folder access" or an antivirus is probably blocking Python there. Move the folder somewhere '
+                'outside Documents, Desktop, Downloads and Pictures (for example C:\\Pokopia Native) and run it from there, or allow python.exe in '
+                'Windows Security > Virus & threat protection > Ransomware protection > Allow an app through Controlled folder access.'
+                if WIN else 'check that the folder is yours and not read-only.')
+        raise Fail(f'cannot write in {what} ({folder}: {e.strerror or e}). {hint}')
+
+
 def setup(args):
     """nxnative at the pinned commit with the Switch 2 patch and the rebuilt translator, and ampere-lower built."""
     bad = doctor(need_ios=not args.no_ios, need_windows=False)
     if bad: raise Fail('install the missing tools above, then run setup again')
+    check_writable(HERE, 'the pokopia-native folder')
     if not (NX / '.git').is_dir():
         say(f'fetching nxnative ({UPSTREAM} at {UPSTREAM_COMMIT}) into {NX}')
         run(['git', 'clone', '--filter=blob:none', '--no-checkout', UPSTREAM, NX], HERE / 'setup-clone.log')
@@ -1191,6 +1207,7 @@ def build(args):
     bad = doctor(need_ios=need_ios, quiet=True, need_windows=bool(args.windows))
     if bad: doctor(need_ios=need_ios, need_windows=bool(args.windows)); raise Fail('install the missing tools above (nxs2.py doctor), then build again')
     need_setup(ipa=bool(args.ipa))
+    if args.out: check_writable(pathlib.Path(args.out).expanduser(), 'the build folder')
     nup = pathlib.Path(args.dump).expanduser().resolve() if args.dump else None
     if nup and nup.is_file() and nup.suffix.lower() == '.nup':   # a NUP container: unpacked into the build folder, then read like a dump folder
         args.out = str(pathlib.Path(args.out).expanduser() if args.out else nup.parent / f'{nup.stem}_native')

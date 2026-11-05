@@ -135,6 +135,10 @@ is missing.
   and lz4 has no ready-made package for it yet, so pip tries to compile it (the Visual C++ Redistributable is not what
   it asks for). Install Python 3.14 from python.org beside it and run `py -3.14 -m pip install lz4 fonttools pillow`;
   `Pokopia Native Builder.cmd` then uses 3.14 by itself.
+- **Windows: Setup or Build stops with "No such file or directory" (or "cannot write in…") for a file in its own
+  folder.** Windows Security's Controlled folder access, or an antivirus, is blocking Python in Documents, Desktop,
+  Downloads or Pictures. Move the unzipped folder and the build folder somewhere else, such as `C:\Pokopia Native`, or
+  allow `python.exe` under Ransomware protection → Allow an app through Controlled folder access.
 - **Your dump is a single file** (.nsp, .xci or something else). The builder takes the game's files as folders, an
   `exefs/` and a `romfs/`, or a `.nup` (see "Your dump" above); have your dumping tool extract the others.
 
