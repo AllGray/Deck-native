@@ -310,6 +310,7 @@ static void input_resume(void) {
 
 void front_sdl_start(SDL_Window *win) {
     F.win = win; F.input_on = 1;
+    front_text_window(SDL_GetPointerProperty(SDL_GetWindowProperties(win), SDL_PROP_WINDOW_WIN32_HWND_POINTER, NULL));   // the software keyboard's box goes over it
     snprintf(F.title, sizeof F.title, "%s", SDL_GetWindowTitle(win) ? SDL_GetWindowTitle(win) : "");
     const char *e = getenv("DM_PAD_MERGE"); F.merge = e && atoi(e);
     e = getenv("DM_KBD_PLAYER"); F.kbd_own = !F.merge && e && !strcmp(e, "own");
