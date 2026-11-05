@@ -240,7 +240,7 @@ static int present_one(const pq_item *it) {
     VkResult pr = r == VK_SUCCESS ? vkQueuePresentKHR(g_vk.q, &pi) : r;
     ReleaseSRWLockExclusive(&g_vk.qlock);
     f->used = r == VK_SUCCESS;
-    if (r != VK_SUCCESS) { VKRED("present submit failed (%d)", r); return -1; }
+    if (r != VK_SUCCESS) { VKRED("present submit failed (%d)", r); vk_lost("a present", r); return -1; }
     if (pr == VK_ERROR_OUT_OF_DATE_KHR || pr == VK_SUBOPTIMAL_KHR) g_p.stale = 1;
     if (cap) {
         vkWaitForFences(g_vk.dev, 1, &f->fence, VK_TRUE, UINT64_MAX);
