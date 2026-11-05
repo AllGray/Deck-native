@@ -1,6 +1,6 @@
 # play.ps1: plays Pokemon Pokopia 2.0.1 with nxrt (the Vulkan renderer, SDL3 input and sound). See docs/m6-input-gameplay.md for the controls.
 #   play.ps1 -ExeFS <ExeFS folder> -Dll <game.dll> -RomFS <RomFS.img or folder> -Save <save folder> [-Work <folder>] [-Silent] [-Fullscreen] [-Window 1600x900] [-Exe <nxrt.exe>]
-#            [-LinkPlay] [-Join <IPv4[:port]>|ask] [-Internet [-Room <code>|ask] [-Relay <IPv4[:port]>]] [-CoopHost <port> | -CoopJoin <address:port> [-CoopTcp]]
+#            [-LinkPlay] [-Join <IPv4[:port]>|ask] [-Internet [-Room <code>|ask] [-Relay <IPv4[:port]>]] [-CoopHost <port> | -CoopJoin <address:port> [-CoopTcp]] [-Interact]
 #            [-PadCheck] [-DryRun]
 #   play.ps1 -Config <play.json> [any switch above]: an installer build's launcher (docs/M7-REPORT.md): the paths come from play.json, relative ones from its folder,
 #            %VARIABLES% expanded; a switch given here wins over the file. A save folder named only by the file is created empty the first time.
@@ -17,6 +17,8 @@
 # code shown in this window; -Relay <IPv4>[:<port>] goes through a relay you trust. "ask" for -Join or -Room asks in this window. For tests on one PC:
 # -CoopHost <port> hosts on 127.0.0.1:<port>, -CoopJoin 127.0.0.1:<port> joins it; -CoopTcp sends the game's datagrams over the TCP link (through a tunnel).
 # Each player needs a save of their own (the game refuses a second copy of the host's save). A second instance on one PC needs its own -Save and -Work.
+# -Interact turns on "Interact everywhere" (experimental, docs/coop-interact.md): in every town, not only Palette Town, Link Play visitors can use moves and
+# items and build. Every player in a session needs it on (a session refuses a player whose setting differs).
 # The Link Play window (an installer build's launcher, or -Ask, when no Link Play switch is given): play alone, on this network, host or visit over the
 # internet, remembered in %APPDATA%\Pokopia Native\linkplay.json. "Don't ask again" starts the remembered way; Shift held while starting brings it back.
 # A host over the internet gets its room code in a window with a Copy button.
@@ -48,6 +50,7 @@ param(
     [string]$CoopHost = "",
     [string]$CoopJoin = "",
     [switch]$CoopTcp,
+    [switch]$Interact,
     [switch]$PadCheck,
     [switch]$DryRun
 )
@@ -155,13 +158,17 @@ function Show-LinkPlay($pref, [string]$title) {
     $grid.Controls.Add((New-Label "Host's address:" 160), 0, 0); $grid.Controls.Add($addr, 1, 0)
     $grid.Controls.Add((New-Label "Room code:" 160), 0, 1); $grid.Controls.Add($code, 1, 1)
     $flow.Controls.Add($grid)
+    $ie = New-Object System.Windows.Forms.CheckBox; $ie.AutoSize = $true; $ie.Margin = New-Object System.Windows.Forms.Padding(0, 12, 0, 0)
+    $ie.Text = "Interact everywhere (experimental)"; $ie.Checked = [bool]$pref.interact; $flow.Controls.Add($ie)
+    $ieNote = New-Label "Visitors can use moves and items and build in every town, not only Palette Town. Every player needs it on." 450
+    $ieNote.ForeColor = [System.Drawing.SystemColors]::GrayText; $ieNote.Margin = New-Object System.Windows.Forms.Padding(20, 0, 0, 0); $flow.Controls.Add($ieNote)
     $again = New-Object System.Windows.Forms.CheckBox; $again.AutoSize = $true; $again.Margin = New-Object System.Windows.Forms.Padding(0, 12, 0, 0)
     $again.Text = "Don't ask again (hold Shift while starting to see this window)"; $again.Checked = -not $pref.ask
     $flow.Controls.Add($again)
     $hint = New-Label "In the game: Link Play, then Local connection (not Online connection). Every player needs their own save and the same pokopia-native version."
     $hint.ForeColor = [System.Drawing.SystemColors]::GrayText; $hint.Margin = New-Object System.Windows.Forms.Padding(0, 8, 0, 0); $flow.Controls.Add($hint)
     $row, $btn = New-Buttons $f @('Play', 'Cancel'); $flow.Controls.Add($row)
-    $sync = { $grid.Enabled = $radio['visit'].Checked; $keep.Enabled = $radio['host'].Checked }.GetNewClosure()
+    $sync = { $grid.Enabled = $radio['visit'].Checked; $keep.Enabled = $radio['host'].Checked; $ie.Enabled = -not $radio['alone'].Checked }.GetNewClosure()
     foreach ($r in $radio.Values) { $r.Add_CheckedChanged($sync) }
     & $sync
     $btn['Play'].Add_Click({
@@ -176,7 +183,7 @@ function Show-LinkPlay($pref, [string]$title) {
     if ($f.ShowDialog() -ne 'OK') { return $null }
     $mode = ($radio.Keys | Where-Object { $radio[$_].Checked } | Select-Object -First 1)
     $new = @{} + $pref
-    $new.mode = $mode; $new.ask = -not $again.Checked; $new.keep_room = $keep.Checked
+    $new.mode = $mode; $new.ask = -not $again.Checked; $new.keep_room = $keep.Checked; $new.interact = $ie.Checked
     if ($mode -eq 'visit') { $new.join = $addr.Text.Trim(); $new.room = $code.Text.Trim().ToUpper() }
     return $new
 }
@@ -205,7 +212,7 @@ function Show-RoomCode([string]$code, [string]$title, [string]$relay) {
 $windowed = $false   # the Link Play window chose this session's way: the room code goes in a window too
 if (($Config -or $Ask) -and -not ($LinkPlay -or $Join -or $Internet -or $Room -or $Relay -or $CoopHost -or $CoopJoin -or $env:DM_COOP) -and -not $DryRun) {
     $prefFile = Join-Path ([Environment]::GetFolderPath('ApplicationData')) "Pokopia Native\linkplay.json"
-    $pref = @{ mode = "alone"; join = ""; room = ""; host_room = ""; keep_room = $false; ask = $true }
+    $pref = @{ mode = "alone"; join = ""; room = ""; host_room = ""; keep_room = $false; ask = $true; interact = $false }
     try { if (Test-Path -LiteralPath $prefFile) { (Get-Content -Raw -LiteralPath $prefFile | ConvertFrom-Json).PSObject.Properties | ForEach-Object { $pref[$_.Name] = $_.Value } } } catch {}
     try { Add-Type -AssemblyName System.Windows.Forms, System.Drawing; $forms = $true } catch { $forms = $false; Write-Warning "no Windows Forms: Link Play starts the remembered way" }
     if ($forms) {
@@ -224,6 +231,7 @@ if (($Config -or $Ask) -and -not ($LinkPlay -or $Join -or $Internet -or $Room -o
         'host' { $Internet = $true; if ($pref.keep_room -and $pref.host_room) { $Room = $pref.host_room } }
         'visit' { $Internet = $true; $Join = $pref.join; $Room = $pref.room }
     }
+    if ($pref.mode -ne 'alone' -and $pref.interact) { $Interact = $true }
 }
 if ($Join -or $Internet -or $Room -or $Relay) { $LinkPlay = $true }
 if ($LinkPlay -and ($CoopHost -or $CoopJoin)) { Write-Error "-LinkPlay / -Join / -Internet and -CoopHost / -CoopJoin: give one kind"; exit 2 }
@@ -266,6 +274,11 @@ if ($LinkPlay) {
     }
 } elseif ($CoopHost) { $env:DM_COOP = "host:$CoopHost" } elseif ($CoopJoin) { $env:DM_COOP = "join:$CoopJoin" }
 if ($CoopTcp) { $env:DM_COOP_TCP = "1" }
+if ($Interact) {
+    if (-not $env:DM_COOP) { Write-Error "-Interact goes with Link Play (-LinkPlay, -Join, -Internet, -CoopHost or -CoopJoin)"; exit 2 }
+    $env:DM_COOP_INTERACT = "1"
+    Write-Host "Interact everywhere: on (experimental). Every player needs it on; a session refuses a player whose setting differs."
+}
 if ($env:DM_COOP -and -not $LinkPlay) { Write-Host "Link Play: DM_COOP=$env:DM_COOP$(if ($env:DM_COOP_TCP) { ', datagrams over TCP' })" }
 $cache = Join-Path $Work "cache"; $temp = Join-Path $Work "temp"; $logs = Join-Path $Work "logs"
 if (-not $DryRun) { New-Item -ItemType Directory -Force $cache, $temp, $logs | Out-Null }
@@ -299,6 +312,7 @@ if ($DryRun) {
     Write-Host "env: NXRT_VK_CACHE_DIR=$env:NXRT_VK_CACHE_DIR DM_AUDIO=$env:DM_AUDIO DM_PAD_CHECK=$env:DM_PAD_CHECK"
     if ($Shaders) { Write-Host "shaders: NXRT_SHADER_CACHE=$env:NXRT_SHADER_CACHE NXRT_SHADER_BUILD=$env:NXRT_SHADER_BUILD NXSHADER_TOOLS=$env:NXSHADER_TOOLS"; Write-Host "shader tool: $env:NXRT_SHADER_TOOL" }
     if ($Fonts -or $PipelineSeed) { Write-Host "fonts: $env:DM_FONT_DIR; pipeline seed: $env:NXRT_VK_PIPELINE_SEED" }
+    if ($env:DM_COOP) { Write-Host "link play: DM_COOP=$env:DM_COOP DM_COOP_INTERACT=$env:DM_COOP_INTERACT" }
     exit 0
 }
 Write-Host "Pokopia: keyboard WASD move, mouse look (click the picture; Esc releases the mouse), J/K/U/I = A/B/X/Y, Return = +, Tab = -, F11 fullscreen."

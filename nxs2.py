@@ -577,9 +577,9 @@ def builds():
 
 # ---------------------------------------------------------------- stages
 def st_profile(b):
-    """The game profile the tools read: game.tsv, the entitlements and the empty shader tables (the package fills them later)."""
+    """The game profile the tools read: game.tsv, the rewriter's patches.py, the entitlements and the empty shader tables (the package fills them later)."""
     b.profile.mkdir(parents=True, exist_ok=True)
-    for name in ('game.tsv', 'pokopia.entitlements', 'runtime_keys.tsv', 'shader_sources.tsv', 'shader_facts.seed.tsv'):
+    for name in ('game.tsv', 'patches.py', 'pokopia.entitlements', 'runtime_keys.tsv', 'shader_sources.tsv', 'shader_facts.seed.tsv'):
         src = PROFILE_SRC / name
         if src.is_file(): shutil.copyfile(src, b.profile / name)
     for name, text in EMPTY_TABLES.items():
@@ -611,7 +611,7 @@ def make_nacp(name, title, version):   # a control record (NACP) with the game's
 
 def st_rewrite(b):
     """The game's code modules rewritten for Apple's kernel (nxnative's patch_nso.py), with their recipe tables."""
-    key = fingerprint(*(b.exefs / m for m in b.modules), NX / 'dm/tools/patch_nso.py', PROFILE_SRC / 'game.tsv')
+    key = fingerprint(*(b.exefs / m for m in b.modules), NX / 'dm/tools/patch_nso.py', PROFILE_SRC / 'game.tsv', PROFILE_SRC / 'patches.py')   # patches.py: the profile's gates
     if b.fresh('rewrite', key) and all((b.patched / f'{m}.patched.bin').is_file() for m in b.modules): return say('rewrite: up to date')
     b.patched.mkdir(parents=True, exist_ok=True)
     env = b.env(DM_REWRITE_J='1' if WIN else str(JOBS))   # the rewriter's worker pool forks (no fork on Windows): one worker runs the same code inline, about a minute

@@ -104,12 +104,16 @@ a save copied from one device to another cannot join itself).
   last time" saves them typing a new one;
 - **Visit a host over the internet**: type the host's address and room code.
 
+Under them, **Interact everywhere (experimental)** lets Link Play players use moves and items and build in every town, not only
+Palette Town (the README's [Playing together](../README.md#playing-together-link-play) explains it). Every player needs it on,
+the iPhone and Mac in their launcher.
+
 It remembers your choice. **Don't ask again** starts the same way every time; hold **Shift** while starting the game to
 see the window again. The settings live in `%APPDATA%\Pokopia Native\linkplay.json`.
 
 From a terminal, switches after the launcher's name skip the window: `-LinkPlay`; `-Join <address>[:<port>]` visits one
 host by address; `-Internet` with `-Room <code>` (a host without one gets a new code); `-Relay <address>[:<port>]` goes
-through a relay you trust.
+through a relay you trust; `-Interact` turns on Interact everywhere.
 
 - **The first time**, Windows Firewall asks whether the game may use networks: allow **Private networks**. Your network
   must be Private (Settings → Network & internet → your connection → Network profile type: Private): on a Public network

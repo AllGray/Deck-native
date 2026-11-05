@@ -297,6 +297,21 @@ host has reached the point in the game where Link Play opens.
      the code.
 4. In the game: **Link Play → Local connection**, then look for towns.
 
+**Interact everywhere** (experimental, new in 1.2.0)
+
+Outside Palette Town the game puts everyone in a Link Play session in Spectator Mode: certain moves and items can't be used,
+and visitors can't build. **Interact everywhere** lifts that: in every town, a session gets the rules Palette Town has with
+Spectator Mode off, so visitors can water, pick up and place things, and build alongside the host.
+
+- Turn it on **on every device**: iPhone and Mac: the launcher's **Interact everywhere** (under Link Play); Windows: the
+  **Interact everywhere (experimental)** box in the window before the game starts. A device with it on only sees hosts that
+  have it on too.
+- The game still shows its own words: the host's settings show Spectator Mode On (greyed out), and the visitor is told everyone
+  will be restricted. The session is not restricted.
+- As in any Link Play visit, the town and its progress (challenges, building) belong to the host, and what a visitor picks up
+  goes home with them.
+- It is experimental: keep a copy of your save before a long session.
+
 Good to know:
 
 - **Internet play must match on every device.** With Internet play on, a device only sees hosts that have it on too

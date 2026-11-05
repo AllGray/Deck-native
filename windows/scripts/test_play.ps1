@@ -38,6 +38,13 @@ if ($miss) { Write-Host "FAIL: -Config -> missing $($miss -join ' | ')`n$($out -
 if (Test-Path "$t\new save") { Write-Host "FAIL: -Config -DryRun made the save folder"; $fail++ }
 $out = powershell -NoProfile -ExecutionPolicy Bypass -File $play -Config "$t\b\windows\play.json" -Save "$t\save" -DryRun 2>&1
 if (-not ($out | Where-Object { $_ -like "*--save $t\save *" })) { Write-Host "FAIL: -Save over -Config`n$($out -join "`n")"; $fail++ } else { Write-Host "ok: -Save wins over play.json" }
+# Interact everywhere: -Interact with Link Play sets DM_COOP_INTERACT; without Link Play it is refused
+$out = powershell -NoProfile -ExecutionPolicy Bypass -Command "& '$play' $a -LinkPlay -Interact" 2>&1
+if (-not ($out | Where-Object { $_ -like "*DM_COOP=auto DM_COOP_INTERACT=1*" })) { Write-Host "FAIL: -LinkPlay -Interact`n$($out -join "`n")"; $fail++ } else { Write-Host "ok: -LinkPlay -Interact" }
+$ErrorActionPreference = "Continue"   # the refusal is an error on stderr: read it, do not stop here
+$out = powershell -NoProfile -ExecutionPolicy Bypass -Command "& '$play' $a -Interact" 2>&1
+$ErrorActionPreference = "Stop"
+if (-not ($out | Where-Object { $_ -like "*-Interact goes with Link Play*" })) { Write-Host "FAIL: -Interact alone`n$($out -join "`n")"; $fail++ } else { Write-Host "ok: -Interact alone is refused" }
 Remove-Item env:NXRT_TEST_PLAY
 Remove-Item -Recurse -Force $t
 if ($fail) { Write-Host "scripts.play_defaults: $fail failed"; exit 1 }
