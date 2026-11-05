@@ -21,7 +21,8 @@ As always: **your own copy, your own dump.** Neither download contains anything 
 ## New in 1.1.2
 
 - **Fixed, Windows: new games got stuck at "What's your name?".** The Windows game never showed a keyboard when the game asked for text, so a new game could not get past Tangrowth's name question. A small text box now opens over the game: type the name and press Enter (Esc cancels). Mac and iPhone were not affected.
-- **Getting it:** unzip 1.1.2, run **Setup** once, then **Build** with "Windows: play on this PC" ticked, using the same build folder: only the Windows game's runtime is replaced, nothing is recompiled. The Mac and iPhone apps you already built stay as they are.
+- **Fixed, Windows: freezes on a first play-through.** The first time the game drew something new, the graphics driver built it on the spot, freezing the game for up to half a second. The builder now ships a list of the game's graphics pipelines (2.0.1: the title, a new game and the first towns), and the game builds them on background threads while it starts. In our test with an empty cache, the pipelines built in the middle of play went from 213 to 1, and the opening area ran at a steady 60 fps.
+- **Getting it:** unzip 1.1.2, run **Setup** once, then **Build** with "Windows: play on this PC" ticked, using the same build folder: only the Windows game's runtime and its pipeline list are replaced, nothing is recompiled. The Mac and iPhone apps you already built stay as they are.
 
 ## New in 1.1.1
 
@@ -64,8 +65,7 @@ The game's **Link Play → Local connection** works between our builds: Windows,
 - The Windows game was developed and tested on one PC (Windows 11, NVIDIA). AMD and Intel GPUs are untested; please report how it runs.
 - Physical controllers on Windows were tested with SDL's virtual pads only; `-PadCheck` logs everything for a report.
 - The first start on Windows draws some effects late while the run-time shaders are translated (about 150, once).
-- **Windows, first play-through: short freezes** (up to about half a second) the first time the game draws something new, while the graphics driver builds it. They are kept, so they go away as you play and do not come back on later starts. A way to build them ahead of time is being worked on.
-- **Windows: the opening area right after character creation runs at a low frame rate** (about 10–15 fps on the test PC; the towns later run at 60). Being investigated.
+- **Windows: areas past the first towns** still build their graphics the first time you visit them (short freezes, once: they are kept for later starts). The list grows with each update. Game version 1.0.5 has no list yet.
 - The Expansion Pass (DLC) is not supported yet.
 - Link Play over the internet needs the host's router to forward a port; there is no matchmaking server. Hosting from an iPhone over the internet is untested, as are Tailscale-style virtual networks.
 - The iPhone app reads its settings when it starts: after changing Link Play settings, close it fully and open it again.
