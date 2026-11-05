@@ -19,7 +19,7 @@ import argparse, hashlib, io, os, pathlib, re, struct, subprocess, sys, time, zi
 HERE = pathlib.Path(__file__).resolve().parents[1]
 WIN_ONLY = ('windows/', 'host/windows/', 'ampere-lower/windows/', 'Pokopia Native Builder.cmd')
 MAC_ONLY = ('Pokopia Native Builder.app/', 'host/dmsh_xlate_bin/')
-NEVER = ('.github/workflows/',)   # the CI files are the repository's, not the players'
+NEVER = ('.github/workflows/', '.github/ISSUE_TEMPLATE/')   # the CI files and issue forms are the repository's, not the players'
 GAME_DERIVED = re.compile(r'(^|/)(_local|extract|shader/corpus|shader/maxwell|shdump|dumps|objcache)(/|$)|\.(nso|img|nca|nsp|xci|bin\.patched)$|(^|/)(main|sdk|subsdk0|rtld)$', re.I)
 VC_RUNTIME = ('msvcp140.dll', 'vcruntime140.dll', 'vcruntime140_1.dll')   # the SPIRV-Tools of the Vulkan SDK are built with the DLL runtime: app-local copies
 LLVM_EXCEPTION = '''---- LLVM Exceptions to the Apache 2.0 License ----
