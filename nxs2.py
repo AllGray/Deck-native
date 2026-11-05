@@ -28,7 +28,7 @@ Windows game the tools of the "for Windows PCs" download (windows/bin). `nxs2.py
 """
 import argparse, concurrent.futures as cf, hashlib, json, os, pathlib, platform, re, shutil, struct, subprocess, sys, time
 
-TOOL_VERSION = '1.2.0'   # this tool's release (co-op needs the same one on every device); the game's own version is separate
+TOOL_VERSION = '1.2.1'   # this tool's release (co-op needs the same one on every device); the game's own version is separate
 TITLE = '0400A3A01EE4C000'
 NAME = 'Pokemon Pokopia'
 UPSTREAM = 'https://github.com/seedds/nxnative'
@@ -285,6 +285,15 @@ def windows_env():
 
 
 # ---------------------------------------------------------------- environment
+VENV = pathlib.Path.home() / '.pokopia-native' / 'venv'   # the builder's own Python environment on a Mac (the app's launcher looks there first)
+
+
+def externally_managed():
+    """A Python that refuses pip installs (PEP 668: Homebrew's, a Linux distribution's); a virtual environment never is."""
+    import sysconfig
+    return sys.prefix == sys.base_prefix and pathlib.Path(sysconfig.get_path('stdlib'), 'EXTERNALLY-MANAGED').is_file()
+
+
 def doctor(need_ios=True, quiet=False, need_windows=True):
     """What this machine has of what the build needs. Returns the list of problems (empty = ready). On Windows need_ios is the iPhone IPA's toolchain
     and need_windows the Windows game's tools."""
@@ -296,13 +305,20 @@ def doctor(need_ios=True, quiet=False, need_windows=True):
     if WIN: return doctor_windows(ok, bad, need_ios, need_windows)
     ok('macOS on Apple silicon', sys.platform == 'darwin' and platform.machine() == 'arm64', 'the host runs the game\'s arm64 code natively: an Apple silicon Mac is required')
     ok(f'Python 3.12+ (running {platform.python_version()})', sys.version_info >= (3, 12), 'brew install python@3.12, then run nxs2.py with python3.12')
+    managed = externally_managed(); missing = 0
     for mod, pip in (('capstone', 'capstone>=5,<6'), ('lz4', 'lz4'), ('fontTools', 'fonttools')):
         try: __import__(mod); have = True
-        except ImportError: have = False
-        ok(f'python module {mod}', have, f'{PY} -m pip install "{pip}"')
+        except ImportError: have = False; missing += 1
+        ok(f'python module {mod}', have, 'the steps below' if managed else f'{PY} -m pip install "{pip}"')
     try:
-        import capstone; ok('capstone 5.x', capstone.__version__.startswith('5.'), f'{PY} -m pip install "capstone>=5,<6"')
+        import capstone; ok('capstone 5.x', capstone.__version__.startswith('5.'), f'{VENV}/bin/python -m pip install "capstone>=5,<6"' if managed else f'{PY} -m pip install "capstone>=5,<6"')
     except ImportError: pass
+    if missing and managed and not quiet:
+        print(f'  This Python ({sys.executable}) is managed by Homebrew or the system, which keeps pip packages out of it.\n'
+              f'  The builder gets its own environment instead, once, in Terminal:\n'
+              f'    {sys.executable} -m venv {VENV}\n'
+              f'    {VENV}/bin/python -m pip install "capstone>=5,<6" lz4 fonttools pillow\n'
+              f'  then open Pokopia Native Builder again (it uses that environment by itself), or run nxs2.py with {VENV}/bin/python.')
     xc = subprocess.run(['xcode-select', '-p'], capture_output=True, text=True)
     ok('Xcode command line tools (xcode-select -p)', xc.returncode == 0 and xc.stdout.strip() != '', 'install Xcode from developer.apple.com, open it once, then: sudo xcode-select -s /Applications/Xcode.app')
     ok('clang', which('clang') is not None, 'comes with Xcode\'s command line tools')

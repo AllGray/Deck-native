@@ -10,7 +10,7 @@ your Mac it builds a Mac app and an iPhone app. On a Windows PC it builds the ga
 PC, and the iPhone app too. Everything that comes from the game is created on your machine and stays in your build
 folder. Nothing from the game is in here.
 
-This works for both versions 1.0.5 (v327680) and 2.0.1 (v655360) as of 11/3/2026. The tool is version **1.2.0**.
+This works for both versions 1.0.5 (v327680) and 2.0.1 (v655360) as of 11/3/2026. The tool is version **1.2.1**.
 
 ## Which download do I need?
 
@@ -90,8 +90,16 @@ Mac compiling 3,800 shaders. After that, rebuilds take a couple of minutes.
   of graphics memory once macOS and your other apps have taken their share (see [Common problems](#common-problems)).
 - **Xcode 27** installed, with its command line tools and the Metal toolchain (Xcode → Settings → Components). For the
   iPhone build you also need the iOS platform from that same screen, and `xcodegen` (`brew install xcodegen`).
-- **Python 3.12 or newer**: `brew install python@3.12`, then `python3.12 -m pip install "capstone>=5,<6" lz4 fonttools pillow`
-  (Pillow only for the app icon).
+- **Python 3.12 or newer, with the builder's own environment.** Homebrew's Python takes no pip packages of its own
+  ("externally-managed-environment"), so the builder's go into a private environment. Once, in Terminal:
+  ```bash
+  brew install python@3.12 python-tk@3.12
+  python3.12 -m venv ~/.pokopia-native/venv
+  ~/.pokopia-native/venv/bin/python -m pip install "capstone>=5,<6" lz4 fonttools pillow
+  ```
+  (Pillow only for the app icon.) **Pokopia Native Builder.app** uses that environment by itself. For the commands in
+  this README, run `source ~/.pokopia-native/venv/bin/activate` first in each Terminal window: `python3.12` and `pip`
+  are then the environment's.
 - The **.NET 10 runtime** (the shader translator is .NET): `brew install --cask dotnet-sdk`.
 - **Your dump.** The game's files as your dumping tool wrote them, with the update:
   ```
@@ -130,6 +138,9 @@ is missing.
   folder is still marked as downloaded. Since 1.2.0 the app finds its folder by itself. With an older download, move the
   whole unzipped folder somewhere else (into Documents, say) and open the app from there, or run
   `xattr -dr com.apple.quarantine <the unzipped folder>` in Terminal.
+- **Mac: `pip install` fails with "externally-managed-environment".** Homebrew's Python takes no pip packages of its own:
+  make the builder's environment as in "What you need" and install the packages there. The Builder app picks it up by
+  itself from 1.2.1 on.
 - **Windows: `pip install lz4` fails with "Microsoft Visual C++ 14.0 or greater is required".** Your Python is 3.15,
   and lz4 has no ready-made package for it yet, so pip tries to compile it (the Visual C++ Redistributable is not what
   it asks for). Install Python 3.14 from python.org beside it and run `py -3.14 -m pip install lz4 fonttools pillow`;
