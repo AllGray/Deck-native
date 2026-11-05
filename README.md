@@ -99,7 +99,10 @@ Mac compiling 3,800 shaders. After that, rebuilds take a couple of minutes.
   <your folder>/updates/<version>/exefs/   main  main.npdm  rtld  sdk  subsdk0
   <your folder>/updates/<version>/romfs/   LD_C0_R.BIN  LI_C0_R.IDX  motor_asset_re/  movie_asset/
   ```
-  A folder that holds `exefs/` and `romfs/` directly works too. Two updates of Pokémon Pokopia (title
+  A folder that holds `exefs/` and `romfs/` directly works too, and so does a **`.nup` file** (a NUP container of
+  an already-decrypted dump: pick it with **.nup file…** in the window, or give its path to `nxs2.py build`). The
+  builder unpacks the update it needs into the build folder (about 7–10 GB more), once; it needs Python's `zstandard`
+  module: `python3.12 -m pip install zstandard`. Two updates of Pokémon Pokopia (title
   `0400A3A01EE4C000`) are supported, and the tool tells which one you have from the build IDs: **v327680** and
   **2.0.1 (v655360)**. Both get everything, including the mouse and drag look. The base game alone is not enough, and
   another version will not build until it is added, because the patch recipe and the camera address are per version.
@@ -124,7 +127,7 @@ is missing.
 - **Mouse look stops while you hold movement keys on a MacBook's trackpad.** The trackpad ignores your finger while keys
   are held down (palm rejection), so the game never sees the movement. An external mouse or a controller works.
 - **Your dump is a single file** (.nsp, .xci or something else). The builder takes the game's files as folders, an
-  `exefs/` and a `romfs/` (see "Your dump" above); have your dumping tool extract them.
+  `exefs/` and a `romfs/`, or a `.nup` (see "Your dump" above); have your dumping tool extract the others.
 
 ## Updating from an older version
 

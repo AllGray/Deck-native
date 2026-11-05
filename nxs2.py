@@ -506,6 +506,55 @@ def find_dump(args):
                '\n  '.join(seen) + '\n(a base-game folder is not enough: the game\'s update is needed)')
 
 
+def nup_unpack(path, out):
+    """A .nup (a NUP container of an already-decrypted dump, nupread.py) unpacked into <build folder>/nup as a dump folder: each program's
+    ExeFS (small), then the RomFS of the one this recipe is for, an update's own files over its base's (the format's layering). A second
+    build of the same .nup unpacks nothing."""
+    import nupread
+    dest = out / 'nup'; stamp = dest / '.from'
+    st = path.stat()
+    try:
+        with nupread.Nup(path) as n:
+            key = f'{path}|{st.st_size}|{int(st.st_mtime)}|{n.uuid}'
+            if stamp.is_file() and stamp.read_text() == key:
+                say(f'.nup: {path.name} is unpacked already ({dest})'); return dest
+            progs = sorted((p for p in n.packages if p['kind'] in ('base', 'update') and p['exefs'] is not None),
+                           key=lambda p: (p['kind'] == 'update', p['version']), reverse=True)   # the newest update first, the base last
+            if not progs: raise Fail(f'{path.name} holds no game program (no base or update package with an ExeFS)')
+            if dest.exists():   # another .nup's, or an unpack that did not finish: only a folder this function made is removed
+                if not (stamp.is_file() or (dest / '.unpacking').is_file()): raise Fail(f'{dest} exists and was not made by the builder: choose another build folder')
+                shutil.rmtree(dest)
+            dest.mkdir(parents=True); (dest / '.unpacking').write_text(key)
+            known = {w['main'] for _, _, w in builds()}
+            chosen, seen = None, []
+            for p in progs:
+                root = dest / ('base' if p['kind'] == 'base' else f'updates/{p["version"]}')
+                for rel, fi in n.walk(p['exefs']): n.extract_file(fi, root / 'exefs' / rel)
+                bid = build_id(root / 'exefs/main') if (root / 'exefs/main').is_file() else None
+                seen.append(f'{p["kind"]} {p["version"]}: main build {bid}')
+                if chosen is None and bid in known: chosen = (p, root)
+            if not chosen:
+                raise Fail(f'this recipe is for {NAME} ' + ', '.join(f'{v} (main build {w["main"]})' for v, _, w in builds()) + f'; {path.name} holds:\n  ' + '\n  '.join(seen))
+            p, root = chosen
+            base = next((q for q in n.packages if q['kind'] == 'base' and q['romfs'] is not None and q is not p), None)
+            files = {}
+            for tree in ([p] if p['romfs'] is not None else []) + ([base] if base else []):
+                for rel, fi in n.walk(tree['romfs']): files.setdefault(rel, fi)   # the update's file shadows the base's
+            if not files: raise Fail(f'{path.name}: the game program has no RomFS')
+            need = sum(n.files[fi][2] for fi in files.values()); free = shutil.disk_usage(out).free
+            if free < need + (2 << 30): raise Fail(f'unpacking {path.name} needs about {need / (1 << 30):.0f} GB free where the build folder is; {free / (1 << 30):.0f} GB are')
+            say(f'.nup: unpacking {p["kind"]} {p["version"]} from {path.name}: {len(files)} RomFS files, {need / (1 << 30):.1f} GB')
+            done = 0; step = need // 10 or 1
+            for rel, fi in files.items():
+                n.extract_file(fi, root / 'romfs' / rel)
+                before, done = done, done + n.files[fi][2]
+                if done // step != before // step: say(f'    {done * 100 // need}%')
+    except nupread.NupError as e:
+        raise Fail(str(e))
+    stamp.write_text(key); (dest / '.unpacking').unlink()
+    return dest
+
+
 def nso_short(p):
     """How many bytes an NSO lacks against the segments its header lists (0 = complete)."""
     h = p.read_bytes()[:0x70]; flags = struct.unpack_from('<I', h, 0xC)[0]
@@ -1134,6 +1183,11 @@ def build(args):
     bad = doctor(need_ios=need_ios, quiet=True, need_windows=bool(args.windows))
     if bad: doctor(need_ios=need_ios, need_windows=bool(args.windows)); raise Fail('install the missing tools above (nxs2.py doctor), then build again')
     need_setup(ipa=bool(args.ipa))
+    nup = pathlib.Path(args.dump).expanduser().resolve() if args.dump else None
+    if nup and nup.is_file() and nup.suffix.lower() == '.nup':   # a NUP container: unpacked into the build folder, then read like a dump folder
+        args.out = str(pathlib.Path(args.out).expanduser() if args.out else nup.parent / f'{nup.stem}_native')
+        pathlib.Path(args.out).mkdir(parents=True, exist_ok=True)
+        args.dump = str(nup_unpack(nup, pathlib.Path(args.out)))
     exefs, romfs, ver, disp = find_dump(args)
     if args.out: out = pathlib.Path(args.out).expanduser()
     elif args.dump: d = pathlib.Path(args.dump).expanduser().resolve(); out = d.parent / f'{d.name}_native'   # beside the dump, never inside it
@@ -1317,7 +1371,7 @@ def main():
     s = sub.add_parser('doctor'); s.add_argument('--no-ios', action='store_true'); s.add_argument('--no-windows', action='store_true', help="Windows: not the Windows game's tools")
     s.set_defaults(f=lambda a: sys.exit(1 if doctor(not a.no_ios, need_windows=not a.no_windows) else 0))
     s = sub.add_parser('build')
-    s.add_argument('dump', nargs='?', help='the dump folder (<game>/updates/<version>/{exefs,romfs} inside, or exefs/ and romfs/ directly)')
+    s.add_argument('dump', nargs='?', help='the dump folder (<game>/updates/<version>/{exefs,romfs} inside, or exefs/ and romfs/ directly), or a .nup file')
     s.add_argument('--exefs'); s.add_argument('--romfs'); s.add_argument('--out', help=f'the build folder (default: <dump>/../{TITLE}_native)')
     s.add_argument('--mac-app', action='store_true'); s.add_argument('--ipa', action='store_true'); s.add_argument('--xcode', action='store_true')
     s.add_argument('--windows', action='store_true', help='Windows: the game recompiled for this PC, with its launcher (out/Play Pokopia <version>.cmd)')

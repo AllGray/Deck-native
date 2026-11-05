@@ -22,7 +22,7 @@ stay in your build folder.
   2015, and anything newer), and **16 GB of memory** to be comfortable (the game itself took about 5 GB on the test PC).
 - A **graphics card with Vulkan 1.3** and a current driver (NVIDIA, AMD or Intel).
 - **Python 3.12 or newer** from python.org (tick "Add python.exe to PATH"), then
-  `python -m pip install lz4 fonttools pillow`.
+  `python -m pip install lz4 fonttools pillow` (add `zstandard` if your dump is a `.nup` file).
 - The **.NET 10 runtime** (the shader translator) from dotnet.microsoft.com, and **git** (git-scm.com: setup fetches nxnative).
 - About **12 GB** free where the build folder goes, per game version.
 - Your dump, as for the other builds (the README's "What you need").

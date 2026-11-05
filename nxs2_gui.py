@@ -42,7 +42,7 @@ def tool_version():
 
 def build_dir_for(dump):
     d = pathlib.Path(dump).expanduser()
-    return d.parent / f'{d.name}_native' if dump else None
+    return d.parent / f'{d.stem if d.suffix.lower() == ".nup" else d.name}_native' if dump else None
 
 
 class App(tk.Tk):
@@ -76,8 +76,10 @@ class App(tk.Tk):
         ttk.Label(f, text='Your dump folder', font=('', 12, 'bold')).grid(row=0, column=0, sticky='w', **pad)
         self.dump = tk.StringVar(value=s.get('dump', ''))
         ttk.Entry(f, textvariable=self.dump, width=70).grid(row=1, column=0, columnspan=2, sticky='ew', **pad)
-        ttk.Button(f, text='Choose…', command=self.choose_dump).grid(row=1, column=2, sticky='w', **pad)
-        ttk.Label(f, text='the folder with updates/327680/exefs and romfs inside (or exefs and romfs directly); the game is never written to',
+        db = ttk.Frame(f); db.grid(row=1, column=2, sticky='w', **pad)
+        ttk.Button(db, text='Choose…', command=self.choose_dump).pack(side='left')
+        ttk.Button(db, text='.nup file…', command=self.choose_nup).pack(side='left', padx=(6, 0))
+        ttk.Label(f, text='the folder with updates/327680/exefs and romfs inside (or exefs and romfs directly), or a .nup file; the game is never written to',
                   foreground='#666', wraplength=720, justify='left').grid(row=2, column=0, columnspan=3, sticky='w', padx=8)
 
         ttk.Label(f, text='Build folder', font=('', 12, 'bold')).grid(row=3, column=0, sticky='w', **pad)
@@ -127,6 +129,11 @@ class App(tk.Tk):
     # ---------------------------------------------------------------- helpers
     def choose_dump(self):
         d = filedialog.askdirectory(title='Your dump folder', initialdir=self.dump.get() or str(pathlib.Path.home()))
+        if d: self.dump.set(d); self.save_settings()
+
+    def choose_nup(self):
+        d = filedialog.askopenfilename(title='Your dump as a .nup file', filetypes=[('NUP container', '*.nup'), ('All files', '*.*')],
+                                       initialdir=str(pathlib.Path(self.dump.get()).parent) if self.dump.get() else str(pathlib.Path.home()))
         if d: self.dump.set(d); self.save_settings()
 
     def choose_out(self):
@@ -233,8 +240,9 @@ class App(tk.Tk):
     # ---------------------------------------------------------------- the buttons
     def need_dump(self):
         d = self.dump.get().strip()
-        if not d or not pathlib.Path(d).expanduser().is_dir():
-            messagebox.showwarning('Dump folder', 'Choose your dump folder first.'); return None
+        p = pathlib.Path(d).expanduser() if d else None
+        if not p or not (p.is_dir() or (p.is_file() and p.suffix.lower() == '.nup')):
+            messagebox.showwarning('Dump folder', 'Choose your dump folder (or your .nup file) first.'); return None
         return d
 
     def common(self):
