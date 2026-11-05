@@ -348,7 +348,11 @@ def doctor_windows(ok, bad, need_ios=True, need_windows=True):
     for mod, pip in ((('capstone', 'capstone>=5,<6'),) if need_ios else ()) + (('lz4', 'lz4'), ('fontTools', 'fonttools'), ('PIL', 'pillow')):
         try: __import__(mod); have = True
         except ImportError: have = False
-        ok(f'python module {mod}', have, f'{PY} -m pip install "{pip}"')
+        hint = f'{PY} -m pip install "{pip}"'
+        if mod == 'lz4' and sys.version_info >= (3, 15):   # no lz4 wheel for 3.15 yet: pip would compile it and asks for the C++ Build Tools
+            hint = (f'lz4 has no ready-made package for Python {platform.python_version()} yet. Install Python 3.14 from python.org beside it, '
+                    'run py -3.14 -m pip install lz4 fonttools pillow, then start Pokopia Native Builder again: it picks 3.14')
+        ok(f'python module {mod}', have, hint)
     if need_ios:
         try:
             import capstone; ok('capstone 5.x', capstone.__version__.startswith('5.'), f'{PY} -m pip install "capstone>=5,<6"')

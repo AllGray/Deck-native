@@ -126,6 +126,15 @@ is missing.
   the comfortable size for now.
 - **Mouse look stops while you hold movement keys on a MacBook's trackpad.** The trackpad ignores your finger while keys
   are held down (palm rejection), so the game never sees the movement. An external mouse or a controller works.
+- **Mac: Pokopia Native Builder does nothing, and its log says `nxs2_gui.py: No such file`** (macOS 27, with a path
+  containing `AppTranslocation`). macOS ran the app from a temporary copy away from its folder, because the downloaded
+  folder is still marked as downloaded. Since 1.2.0 the app finds its folder by itself. With an older download, move the
+  whole unzipped folder somewhere else (into Documents, say) and open the app from there, or run
+  `xattr -dr com.apple.quarantine <the unzipped folder>` in Terminal.
+- **Windows: `pip install lz4` fails with "Microsoft Visual C++ 14.0 or greater is required".** Your Python is 3.15,
+  and lz4 has no ready-made package for it yet, so pip tries to compile it (the Visual C++ Redistributable is not what
+  it asks for). Install Python 3.14 from python.org beside it and run `py -3.14 -m pip install lz4 fonttools pillow`;
+  `Pokopia Native Builder.cmd` then uses 3.14 by itself.
 - **Your dump is a single file** (.nsp, .xci or something else). The builder takes the game's files as folders, an
   `exefs/` and a `romfs/`, or a `.nup` (see "Your dump" above); have your dumping tool extract the others.
 
@@ -231,7 +240,7 @@ the graphics replayed on Vulkan and SDL3 for the window, input and sound. No emu
 is in the download; the recompiled game and its shaders are made on your PC and stay in your build folder.
 
 You need Windows 10 or 11 (64-bit) with an AVX2 CPU (2013 or newer), a Vulkan 1.3 graphics card, about 12 GB of disk,
-Python 3.12 with `lz4 fonttools pillow`, the .NET 10 runtime and git. No compiler and no installer: the download brings
+Python 3.12–3.14 with `lz4 fonttools pillow` (not 3.15 yet, see [Common problems](#common-problems)), the .NET 10 runtime and git. No compiler and no installer: the download brings
 its own tools. Then:
 
 ```
