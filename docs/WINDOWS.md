@@ -73,6 +73,9 @@ Double-click **`<build folder>\out\Play Pokopia <version>.cmd`** (or **Play** in
   their own layout.
 - **Controllers:** Xbox, PlayStation and Switch Pro controllers work as Switch controllers (face buttons by position),
   with rumble and motion. Close Steam or turn off Steam Input for the controller if it does not show up.
+- **Typing (your name, for one):** a small box opens over the game. Type and press Enter, or with only a controller
+  press A, B or + to accept it (an empty box becomes "Player"; the game won't let you change your name later, so a
+  keyboard is best for this one).
 - Switches for the launcher go after its name in a terminal: `-Fullscreen`, `-Window 1600x900`, `-Silent`, `-PadCheck`
   (the controller check: every button and stick is logged and shown in the title bar).
 

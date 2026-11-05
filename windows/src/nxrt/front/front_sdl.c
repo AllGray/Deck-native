@@ -405,7 +405,11 @@ void front_sdl_event(const SDL_Event *e) {
         break;
     case SDL_EVENT_GAMEPAD_ADDED: pad_added(e->gdevice.which); break;
     case SDL_EVENT_GAMEPAD_REMOVED: pad_removed(e->gdevice.which); break;
-    case SDL_EVENT_GAMEPAD_BUTTON_DOWN: case SDL_EVENT_GAMEPAD_BUTTON_UP: { fpad *p = pad_by_id(e->gbutton.which); if (p) pad_read(p); break; }
+    case SDL_EVENT_GAMEPAD_BUTTON_DOWN: case SDL_EVENT_GAMEPAD_BUTTON_UP: {
+        fpad *p = pad_by_id(e->gbutton.which);
+        if (p && e->type == SDL_EVENT_GAMEPAD_BUTTON_DOWN && front_text_pad(pad_buttons(p))) break;   // the name box is up and has the focus: a player without a keyboard accepts it here
+        if (p) pad_read(p);
+        break; }
     case SDL_EVENT_GAMEPAD_AXIS_MOTION: { fpad *p = pad_by_id(e->gaxis.which); if (p) pad_read(p); break; }
     case SDL_EVENT_GAMEPAD_REMAPPED: { fpad *p = pad_by_id(e->gdevice.which); if (p) pad_read(p); break; }
     case SDL_EVENT_GAMEPAD_SENSOR_UPDATE: pad_sensor(&e->gsensor); break;
