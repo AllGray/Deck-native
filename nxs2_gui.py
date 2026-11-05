@@ -165,11 +165,15 @@ class App(tk.Tk):
     # ---------------------------------------------------------------- running nxs2.py
     def start(self, what, args, secret=None):   # secret: one line handed to the command on its stdin (the .p12 password), never shown or logged
         if self.proc: return
-        cmd = [sys.executable, '-u', str(NXS2)] + [str(a) for a in args]
+        py = pathlib.Path(sys.executable)
+        if WIN and py.name.lower() == 'pythonw.exe' and py.with_name('python.exe').is_file(): py = py.with_name('python.exe')
+        cmd = [str(py), '-u', str(NXS2)] + [str(a) for a in args]
         self.write('$ ' + ' '.join(cmd[2:]))
         try:
             kw = {}
-            if WIN: kw['creationflags'] = subprocess.CREATE_NEW_PROCESS_GROUP
+            # Windows: the build gets a console of its own, hidden. Every tool it starts shares that console. Without one (pythonw, as this window
+            # runs), each console tool would open a window of its own: the shader stage starts thousands
+            if WIN: kw['creationflags'] = subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.CREATE_NO_WINDOW
             else: kw['start_new_session'] = True
             self.proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, stdin=subprocess.PIPE if secret is not None else subprocess.DEVNULL,
                                          text=True, errors='replace', cwd=str(HERE), **kw)

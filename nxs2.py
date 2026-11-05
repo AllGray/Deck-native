@@ -42,6 +42,9 @@ TOOLS = HERE / 'tools'
 AMPERE = HERE / 'ampere-lower' / ('windows/ampere-lower.exe' if WIN else 'ampere-lower')
 NX = pathlib.Path(os.environ.get('NXNATIVE') or HERE / 'nxnative')
 PY = sys.executable
+if WIN and pathlib.Path(PY).name.lower() == 'pythonw.exe' and pathlib.Path(PY).with_name('python.exe').is_file():
+    PY = str(pathlib.Path(PY).with_name('python.exe'))   # the tools' Python has a console: started without one, every console tool it runs opens a window
+NO_WINDOW = subprocess.CREATE_NO_WINDOW if WIN else 0   # the tools' consoles stay hidden: their output is captured anyway
 WIN_KIT = HERE / 'windows' / 'bin'   # the Windows game's tools as the "for Windows PCs" download ships them (tools/package_release.py makes it)
 T0 = time.time()
 
@@ -78,7 +81,8 @@ def run(cmd, log, env=None, cwd=None, ok=(0,), heartbeat=30, show=None):
     last, t_beat, t_start = '', time.time(), time.time()
     with open(log, 'w', encoding='utf-8', errors='replace') as f:
         f.write('$ ' + ' '.join(cmd) + '\n'); f.flush()
-        p = subprocess.Popen(cmd, env=e, cwd=str(cwd) if cwd else None, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, errors='replace')
+        p = subprocess.Popen(cmd, env=e, cwd=str(cwd) if cwd else None, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, errors='replace',
+                             creationflags=NO_WINDOW)
         for line in p.stdout:
             f.write(line); last = line.rstrip()
             if VERBOSE or (show and re.search(show, line)): print('    ' + last[:160], flush=True)
