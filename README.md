@@ -55,7 +55,7 @@ is the right version and refuses anything else, and it needs no keys of any kind
 
 Hey guys, I really hope you enjoy this. I just have to give a massive shout-out to the people at NxNative, this wouldn't be possible without them. I'd never tried to do any of this until last week, when they went viral, and once I found out, I kept going. This all started after 0x2593 posted their fork of Eden for NS2, shout out to them as well, that was a great help for getting this going. After running the first emulation of Pokopia, I just knew I needed to fix it and put it on my phone and Mac. Right now all of the PC emulators with Pokopia have issues with the shaders. My work on this native build allowed me to dig deeper and fix all of those issues. If you want to play emulated Pokopia with Eden, that's my other repository "pokopia-fixes" (https://github.com/xFractals/Eden-NS2), which is a fork of https://github.com/0x2593/Eden-NS2. Go check it out if you want, hopefully it gets merged into main soon. Anyways Enjoy!
 
-Also, if you find any bugs, please feel free to let me know or submit a PR. More than happy to take a look. I've played up to after the first wake-up and encountered zero issues.
+Also, if you find any bugs, please feel free to submit an issue request or a PR; it's much appreciated!
 
 ## Gameplay on the iPhone
 
@@ -67,7 +67,7 @@ when I have captures from my own console they will go up next to these.
 
 ![Day, the first area](docs/images/iphone-day.png)
 
-![Opening, meeting Professor Tangrowth](docs/images/iphone-intro-12.png)
+<img width="1007" height="485" alt="Screenshot 2026-11-04 205343" src="https://github.com/user-attachments/assets/238eb6b2-a815-4ac7-aeea-7c4d99479f19" />
 
 ![Opening, the workbench at night](docs/images/iphone-intro-18.png)
 
