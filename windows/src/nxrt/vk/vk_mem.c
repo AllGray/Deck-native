@@ -27,6 +27,8 @@ typedef struct {
     int sparse;
     int placed, refs;             // placed: the pool's pages are device memory mapped at its guest address, the CPU's and the GPU's alike, with no copies; refs: pools that share it
     uint64_t sec_off;             // placed: where the pages lie in the guest section, for when the pool goes
+    VkDeviceMemory whole;         // placed whole: the pool's one buffer object (small pools); larger ones are placed by the granule, on first use
+    VkDeviceSize gran_size_last;
     vk_alloc *gran; uint64_t ngran, bound;   // sparse: one allocation per bound granule, bound into every window that covers it
     vk_alloc mem[MAXWIN];         // not sparse: one allocation per window
     const void *span;             // the dirty tracker's range (registered by the recording layer right after gfx_pool_add)
@@ -165,10 +167,14 @@ static int gran_place(pool_t_ *p, uint64_t g, const VkMemoryRequirements *gr) {
     if (ty < 0) ty = placed_type(gr->memoryTypeBits, hc | VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, g_gran);
     if (ty < 0) ty = placed_type(gr->memoryTypeBits, hc, g_gran);
     if (ty < 0) return -1;
-    VkMemoryAllocateInfo ai = {VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO, NULL, g_gran, (uint32_t)ty};
+    // RADV maps a whole buffer object at the placed address, whatever size is asked for: the last granule's memory ends at the pool's end, rounded up to the sparse block, and what
+    // sticks out past the pool goes back to the section right after the map (a 2 MB object over a short tail zeroed the next 2 MB of the game's heap)
+    uint64_t o = g * g_gran, n = o + g_gran <= p->size ? g_gran : p->size - o, a = p->base + o;
+    VkDeviceSize block = gr->alignment ? gr->alignment : 65536, bo = (n + block - 1) / block * block;
+    p->gran_size_last = bo;
+    VkMemoryAllocateInfo ai = {VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO, NULL, bo, (uint32_t)ty};
     VkDeviceMemory m = VK_NULL_HANDLE;
     if (vkAllocateMemory(g_vk.dev, &ai, NULL, &m) != VK_SUCCESS) return -1;
-    uint64_t o = g * g_gran, n = o + g_gran <= p->size ? g_gran : p->size - o, a = p->base + o;
     void *tmp = NULL;
     if (vkMapMemory(g_vk.dev, m, 0, VK_WHOLE_SIZE, 0, &tmp) != VK_SUCCESS) { vkFreeMemory(g_vk.dev, m, NULL); return -1; }
     AcquireSRWLockExclusive(&g_place_lk);
@@ -191,29 +197,80 @@ static int gran_place(pool_t_ *p, uint64_t g, const VkMemoryRequirements *gr) {
         mprotect((void *)(uintptr_t)a, n, PROT_READ | PROT_WRITE); atomic_store(&g_placing_lo, 0); ReleaseSRWLockExclusive(&g_place_lk);
         VKRED("pool %p: vkMapMemory2 placed at %#llx failed (%d)", p->key, (unsigned long long)a, r); vkFreeMemory(g_vk.dev, m, NULL); return -1;
     }
+    if (bo > n && as_section_map(a + n, bo - n, p->sec_off + o + n)) VKRED("pool %p: the section past its end could not be mapped back", p->key);
     atomic_store(&g_placing_lo, 0); ReleaseSRWLockExclusive(&g_place_lk);
     as_section_punch(p->sec_off + o, n);
     if (p->span) nvn_dirty_protect((const void *)(uintptr_t)a, (size_t)n);   // the map replaced the tracker's protection
-    p->gran[g].mem = m; p->gran[g].off = 0; p->gran[g].size = g_gran;
-    g_placed_bytes += g_gran; if (cached) g_cached_bytes += g_gran;
+    p->gran[g].mem = m; p->gran[g].off = 0; p->gran[g].size = bo;
+    g_placed_bytes += bo; if (cached) g_cached_bytes += bo;
     return 0;
+}
+// A small pool is placed whole when it is made, in one buffer object of its exact size. Most of the game's 3,000 pools are like that, and 2 MB for each would be 6 GB
+static int pool_place_whole(pool_t_ *p) {
+    VkMemoryRequirements mr; vkGetBufferMemoryRequirements(g_vk.dev, p->buf[0], &mr);
+    const VkMemoryPropertyFlags hc = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
+    VkDeviceSize sz = (mr.size + PAGE - 1) / PAGE * PAGE;
+    if (sz != p->size) return -1;   // the object would stick out past the pool
+    int ty = -1, cached = 0;
+    if (g_cached_bytes + sz <= (2500ull << 20)) { ty = placed_type(mr.memoryTypeBits, hc | VK_MEMORY_PROPERTY_HOST_CACHED_BIT, sz); cached = ty >= 0; }
+    if (ty < 0) ty = placed_type(mr.memoryTypeBits, hc | VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, sz);
+    if (ty < 0) ty = placed_type(mr.memoryTypeBits, hc, sz);
+    if (ty < 0) return -1;
+    VkMemoryAllocateInfo ai = {VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO, NULL, sz, (uint32_t)ty};
+    if (vkAllocateMemory(g_vk.dev, &ai, NULL, &p->whole) != VK_SUCCESS) { p->whole = VK_NULL_HANDLE; return -1; }
+    uint64_t a = p->base, n = p->size;
+    void *tmp = NULL;
+    if (vkMapMemory(g_vk.dev, p->whole, 0, VK_WHOLE_SIZE, 0, &tmp) != VK_SUCCESS) goto fail;
+    AcquireSRWLockExclusive(&g_place_lk);
+    atomic_store(&g_placing_hi, a + n); atomic_store(&g_placing_lo, a);
+    mprotect((void *)(uintptr_t)a, n, PROT_READ);
+    int rd = as_section_read(p->sec_off, tmp, n);
+    vkUnmapMemory(g_vk.dev, p->whole);
+    VkResult r = VK_ERROR_UNKNOWN; void *out = NULL;
+    if (!rd) {
+        vkBindBufferMemory(g_vk.dev, p->buf[0], p->whole, 0);
+        VkMemoryMapPlacedInfoEXT pi = {VK_STRUCTURE_TYPE_MEMORY_MAP_PLACED_INFO_EXT, NULL, (void *)(uintptr_t)a};
+        VkMemoryMapInfoKHR mi = {VK_STRUCTURE_TYPE_MEMORY_MAP_INFO_KHR, &pi, VK_MEMORY_MAP_PLACED_BIT_EXT, p->whole, 0, n};
+        r = vkMapMemory2KHR(g_vk.dev, &mi, &out);
+    }
+    if (rd || r != VK_SUCCESS || out != (void *)(uintptr_t)a) {
+        mprotect((void *)(uintptr_t)a, n, PROT_READ | PROT_WRITE); atomic_store(&g_placing_lo, 0); ReleaseSRWLockExclusive(&g_place_lk);
+        VKRED("pool %p: placing it whole at %#llx failed (%d)", p->key, (unsigned long long)a, r);
+        goto fail;
+    }
+    atomic_store(&g_placing_lo, 0); ReleaseSRWLockExclusive(&g_place_lk);
+    as_section_punch(p->sec_off, n);
+    g_placed_bytes += sz; if (cached) g_cached_bytes += sz;
+    return 0;
+fail:
+    vkFreeMemory(g_vk.dev, p->whole, NULL); p->whole = VK_NULL_HANDLE;
+    return -1;
 }
 // Puts the section's pages back with what the pool holds. The device memory may still be in use by the GPU, and goes when pool_free runs
 static void pool_unplace(pool_t_ *p) {
+    if (p->whole) {
+        if (as_section_write(p->sec_off, (const void *)(uintptr_t)p->base, p->size)) VKRED("pool %p: its contents did not go back to the guest section", p->key);
+        VkMemoryUnmapInfoKHR ui = {VK_STRUCTURE_TYPE_MEMORY_UNMAP_INFO_KHR, NULL, VK_MEMORY_UNMAP_RESERVE_BIT_EXT, p->whole};
+        vkUnmapMemory2KHR(g_vk.dev, &ui);
+        if (as_section_map(p->base, p->size, p->sec_off)) VKRED("pool %p: the guest section could not be mapped back at %#llx", p->key, (unsigned long long)p->base);
+        return;
+    }
     for (uint64_t g = 0; g < p->ngran; g++) {
         if (!p->gran[g].mem) continue;
         uint64_t o = g * g_gran, n = o + g_gran <= p->size ? g_gran : p->size - o, a = p->base + o;
         if (as_section_write(p->sec_off + o, (const void *)(uintptr_t)a, n)) VKRED("pool %p: its contents did not go back to the guest section", p->key);
         VkMemoryUnmapInfoKHR ui = {VK_STRUCTURE_TYPE_MEMORY_UNMAP_INFO_KHR, NULL, VK_MEMORY_UNMAP_RESERVE_BIT_EXT, p->gran[g].mem};
         vkUnmapMemory2KHR(g_vk.dev, &ui);
-        if (as_section_map(a, n, p->sec_off + o)) VKRED("pool %p: the guest section could not be mapped back at %#llx", p->key, (unsigned long long)a);
+        uint64_t whole = p->gran[g].size > n ? p->gran[g].size : n;   // the unmap took all of the object's range, the part past the pool as well
+        if (as_section_map(a, whole, p->sec_off + o)) VKRED("pool %p: the guest section could not be mapped back at %#llx", p->key, (unsigned long long)a);
     }
 }
 #endif
 
 static void pool_free(pool_t_ *p) {
     for (int k = 0; k < p->nwin; k++) if (p->buf[k]) vkDestroyBuffer(g_vk.dev, p->buf[k], NULL);
-    if (p->placed) { for (uint64_t g = 0; g < p->ngran; g++) if (p->gran[g].mem) vkFreeMemory(g_vk.dev, p->gran[g].mem, NULL); free(p->gran); }
+    if (p->whole) vkFreeMemory(g_vk.dev, p->whole, NULL);
+    else if (p->placed && p->sparse) { for (uint64_t g = 0; g < p->ngran; g++) if (p->gran[g].mem) vkFreeMemory(g_vk.dev, p->gran[g].mem, NULL); free(p->gran); }
     else if (p->sparse) { for (uint64_t g = 0; g < p->ngran; g++) vk_free_mem(&p->gran[g]); free(p->gran); }
     else for (int k = 0; k < p->nwin; k++) vk_free_mem(&p->mem[k]);
     free(p->up); free(p->last_dirty); free(p->streak); free(p->hot); free((void *)p->gpu_pending); free(p->committed); free(p);
@@ -243,7 +300,7 @@ void vkm_pool_add(const void *mem, uint64_t size) {
         }
         ReleaseSRWLockExclusive(&g_lk);
         if (inside) { free(p->up); free(p->last_dirty); free(p->streak); free(p->hot); free((void *)p->gpu_pending); free(p->committed); free(p); return; }
-        if (!overlap && !as_section_offset(p->base, p->size, &p->sec_off)) p->placed = p->sparse;
+        if (!overlap && !as_section_offset(p->base, p->size, &p->sec_off)) { p->placed = 1; if (p->size <= (32ull << 20)) p->sparse = 0; else if (!p->sparse) p->placed = 0; }
     }
 #endif
     VkDeviceSize bsize = p->sparse ? (p->size + g_gran - 1) / g_gran * g_gran : p->size, w = bsize, ov = 0;
@@ -267,6 +324,17 @@ void vkm_pool_add(const void *mem, uint64_t size) {
         if (ok) vk_name((uint64_t)p->buf[k], VK_OBJECT_TYPE_BUFFER, "nvn memory pool");
     }
     if (!ok) { VKRED("cannot create the buffer of memory pool %p+%#llx", mem, (unsigned long long)size); pool_free(p); return; }
+#ifndef _WIN32
+    if (p->placed && !p->sparse) {
+        if (pool_place_whole(p)) {   // a mirror of it instead, fully backed
+            p->placed = 0;
+            VkMemoryRequirements mr; vkGetBufferMemoryRequirements(g_vk.dev, p->buf[0], &mr);
+            if (vk_alloc_mem(&mr, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, 0, &p->mem[0])) { VKRED("no device memory for memory pool %p+%#llx", mem, (unsigned long long)size); pool_free(p); return; }
+            vkBindBufferMemory(g_vk.dev, p->buf[0], p->mem[0].mem, p->mem[0].off);
+        }
+        p->bound = p->size;
+    } else
+#endif
     if (p->sparse) { p->ngran = bsize / g_gran; p->gran = calloc(p->ngran, sizeof *p->gran); for (uint64_t g = 0; g < p->ngran; g++) p->gran[g].block = -1; }
     else {   // without sparse binding: all of it now
         for (int k = 0; k < p->nwin; k++) {
