@@ -169,6 +169,22 @@ static void worker_main() {
     }
 }
 
+// Until the workers are done: the level's average colour, from up to 8x8 of its blocks (a black texture on a track reads as a black world)
+static void flat_colour(const uint8_t *astc, uint32_t w, uint32_t h, int bw, int bh, int srgb, uint8_t *bc7, size_t out) {
+    uint32_t nx = (w + bw - 1) / bw, ny = (h + bh - 1) / bh, gx = nx < 8 ? nx : 8, gy = ny < 8 ? ny : 8;
+    std::vector<uint8_t> blocks((size_t)gx * gy * 16), rgba((size_t)gx * bw * gy * bh * 4);
+    for (uint32_t y = 0; y < gy; y++) for (uint32_t x = 0; x < gx; x++)
+        memcpy(&blocks[((size_t)y * gx + x) * 16], astc + ((size_t)(y * ny / gy) * nx + x * nx / gx) * 16, 16);
+    memset(bc7, 0, out);
+    if (vka_decode_rgba8(blocks.data(), gx * bw, gy * bh, 1, bw, bh, srgb, rgba.data())) return;
+    uint64_t sum[4] = {0, 0, 0, 0}; size_t n = rgba.size() / 4;
+    for (size_t i = 0; i < n; i++) for (int c = 0; c < 4; c++) sum[c] += rgba[i * 4 + c];
+    uint8_t px[64], block[16];
+    for (int i = 0; i < 16; i++) for (int c = 0; c < 4; c++) px[i * 4 + c] = (uint8_t)(sum[c] / n);
+    if (vka_encode_bc7(px, 4, 4, VKA_FAST, block)) return;
+    for (size_t at = 0; at + 16 <= out; at += 16) memcpy(bc7 + at, block, 16);
+}
+
 extern "C" int vka_get_bc7(const uint8_t *astc, uint32_t w, uint32_t h, uint32_t s, int bw, int bh, int srgb, uint8_t *bc7, vka_key *key_out) {
     size_t n = (size_t)((w + bw - 1) / bw) * ((h + bh - 1) / bh) * 16 * s, out = vka_bc7_size(w, h, s);
     vka_key k = make_key(astc, n, w, h, s, bw, bh, srgb);
@@ -176,7 +192,7 @@ extern "C" int vka_get_bc7(const uint8_t *astc, uint32_t w, uint32_t h, uint32_t
     if (cache_read(k, VKA_HIGH, bc7, out, w, h, s)) { s_hits_high++; return VKA_HIGH; }
     int fast = cache_read(k, VKA_FAST, bc7, out, w, h, s);
     if (fast) { s_hits_fast++; if (g_async) return VKA_HIGH; }
-    else if (g_async && (uint64_t)w * h * s > 128 * 128) { s_miss++; memset(bc7, 0, out); }
+    else if (g_async && (uint64_t)w * h * s > 128 * 128) { s_miss++; flat_colour(astc, w, h, bw, bh, srgb, bc7, out); }
     else {
         s_miss++;
         uint64_t t0 = now_ns();
