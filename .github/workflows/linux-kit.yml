@@ -73,7 +73,15 @@ jobs:
           echo "::notice::HLE registry: $(grep -c . $H/gen/out/hle_inventory.tsv) lines; $(git diff --stat -- $H/gen/out | tail -1)"
 
       - name: Build nxrt, nxlift and nxanalyze
-        run: bash windows/scripts/build.sh -j 4 Release -- nxrt nxlift-cli nxanalyze-cli
+        run: |
+          set +e
+          bash windows/scripts/build.sh -j 4 Release -- -k 0 nxrt nxlift-cli nxanalyze-cli > /tmp/build.log 2>&1
+          RC=$?
+          tail -5 /tmp/build.log
+          if [ $RC -ne 0 ]; then
+            grep -E ' error: |ld.lld: error|undefined (symbol|reference)' /tmp/build.log | sed -E 's#^.*/windows/src/##' | sort -u | head -9 | while IFS= read -r l; do echo "::error::$(echo "$l" | cut -c1-400)"; done
+          fi
+          exit $RC
 
       - name: Check and collect
         run: |
