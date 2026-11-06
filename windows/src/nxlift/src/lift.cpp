@@ -455,7 +455,8 @@ struct FnBuilder {
             // one of sdk's four context functions (docs/m2-nxanalyze.md §6): no host stack can follow its SP or x30 rewrite
             st.contexts++, st.functions++;
             do_leave();
-            if (name.find("setjmp") != std::string::npos && name.find("longjmp") == std::string::npos) {
+            const std::string_view sym = fr.name ? std::string_view(L.in.db.str(fr.name)) : std::string_view();   // name is only "fn_<address>"
+            if (sym == "_setjmp" || sym == "__setjmp" || sym == "setjmp" || sym == "sigsetjmp" || sym == "__sigsetjmp") {
                 // setjmp only saves state and returns 0; nothing rewrites SP or x30 on this path. Only longjmp needs a non-local transfer, which still stops in rt_nonlocal
                 B.CreateCall(decl("rt_setjmp", FunctionType::get(L.vd, {L.ptr}, false)), {cpu});
                 B.CreateRetVoid();
