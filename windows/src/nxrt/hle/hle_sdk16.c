@@ -111,7 +111,8 @@ static void font_load_init(void) {
 }
 HLE_FORCE("_ZN2nn6fontll18ScalableFontEngine8LoadFontEPcPKvjj", "shared font BFTTF allocation base → TTF payload; parsing and errors stay in the SDK", uint32_t, h_font_LoadFont, void *self, char *name, const void *data, unsigned index, unsigned capacity) {
     pthread_once(&font_load_once, font_load_init);
-    return font_load(self, name, font_payload(data), index, capacity);
+    // Through the runtime: font_load is a guest address, whose arm64 code an x86-64 host cannot call directly (Mario Kart World loads its fonts this way)
+    return (uint32_t)GUEST_CALL(font_load, (uint64_t)(uintptr_t)self, (uint64_t)(uintptr_t)name, (uint64_t)(uintptr_t)font_payload(data), (uint64_t)index, (uint64_t)capacity);
 }
 // The address points straight at the TTF (past the 8-byte header) and the size excludes the header, except for a game on SDK 11 or later whose main imports ScalableFontEngineHelper::Decode
 //   (dm_sdk_major, dm_main_imports; the profile's shared_font overrides). Super Mario 3D World + Bowser's Fury (SDK 10) records shared fonts as type 0 (main+0x975658), calls no Decode and hands the address
