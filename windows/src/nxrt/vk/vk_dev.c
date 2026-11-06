@@ -21,6 +21,21 @@ static VKAPI_ATTR VkBool32 VKAPI_CALL on_debug(VkDebugUtilsMessageSeverityFlagBi
     return VK_FALSE;
 }
 
+// NXRT_VK_ADDRLOG=<file>: every GPU address the driver binds or frees, to look a GPU fault's address up afterwards
+static FILE *g_addrlog; static int g_addrbind_feat;
+static VKAPI_ATTR VkBool32 VKAPI_CALL on_addr(VkDebugUtilsMessageSeverityFlagBitsEXT sev, VkDebugUtilsMessageTypeFlagsEXT type,
+                                              const VkDebugUtilsMessengerCallbackDataEXT *d, void *user) {
+    (void)sev; (void)type; (void)user;
+    for (const VkBaseInStructure *n = d->pNext; n; n = n->pNext) {
+        if (n->sType != VK_STRUCTURE_TYPE_DEVICE_ADDRESS_BINDING_CALLBACK_DATA_EXT) continue;
+        const VkDeviceAddressBindingCallbackDataEXT *b = (const void *)n;
+        fprintf(g_addrlog, "%c %llx %llx %d %llx %s\n", b->bindingType == VK_DEVICE_ADDRESS_BINDING_TYPE_BIND_EXT ? 'B' : 'U', (unsigned long long)b->baseAddress, (unsigned long long)b->size,
+                d->objectCount ? (int)d->pObjects[0].objectType : -1, d->objectCount ? (unsigned long long)d->pObjects[0].objectHandle : 0ull, d->objectCount && d->pObjects[0].pObjectName ? d->pObjects[0].pObjectName : "-");
+        fflush(g_addrlog);
+    }
+    return VK_FALSE;
+}
+
 void vk_name(uint64_t handle, VkObjectType type, const char *name) {
     if (!g_vk.validation || !vkSetDebugUtilsObjectNameEXT || !handle) return;
     VkDebugUtilsObjectNameInfoEXT n = {VK_STRUCTURE_TYPE_DEBUG_UTILS_OBJECT_NAME_INFO_EXT, NULL, type, handle, name};
@@ -72,6 +87,13 @@ int vk_dev_open(const vk_dev_opts *o, const char *const *inst_exts, uint32_t n_i
     if (r != VK_SUCCESS) { VKRED("vkCreateInstance failed (%d)", r); return -1; }
     if (vkf_load_instance(g_vk.inst)) { VKRED("the Vulkan instance lacks core entry points"); return -1; }
     if (g_vk.validation && vkCreateDebugUtilsMessengerEXT) vkCreateDebugUtilsMessengerEXT(g_vk.inst, &dci, NULL, &g_vk.dbg);
+    const char *al = getenv("NXRT_VK_ADDRLOG");
+    if (al && *al && vkCreateDebugUtilsMessengerEXT && (g_addrlog = fopen(al, "w"))) {
+        VkDebugUtilsMessengerCreateInfoEXT aci = {VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT, NULL, 0,
+            VK_DEBUG_UTILS_MESSAGE_SEVERITY_VERBOSE_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_SEVERITY_INFO_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT,
+            VK_DEBUG_UTILS_MESSAGE_TYPE_DEVICE_ADDRESS_BINDING_BIT_EXT, on_addr, NULL};
+        VkDebugUtilsMessengerEXT m; vkCreateDebugUtilsMessengerEXT(g_vk.inst, &aci, NULL, &m);
+    }
 
     // Physical device: NXRT_VK_DEVICE=<index or part of the name>, else the first discrete GPU with Vulkan 1.3, else the first 1.3 device
     uint32_t npd = 0; vkEnumeratePhysicalDevices(g_vk.inst, &npd, NULL);
@@ -140,6 +162,7 @@ int vk_dev_open(const vk_dev_opts *o, const char *const *inst_exts, uint32_t n_i
         {VK_EXT_4444_FORMATS_EXTENSION_NAME, NULL, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_4444_FORMATS_FEATURES_EXT, sizeof(VkPhysicalDevice4444FormatsFeaturesEXT), &h->fmt_4444},
         {VK_EXT_VERTEX_INPUT_DYNAMIC_STATE_EXTENSION_NAME, NULL, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VERTEX_INPUT_DYNAMIC_STATE_FEATURES_EXT, sizeof(VkPhysicalDeviceVertexInputDynamicStateFeaturesEXT), &h->vertex_input_dynamic},   // the replay (M5-C)
         {VK_EXT_MAP_MEMORY_PLACED_EXTENSION_NAME, NULL, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MAP_MEMORY_PLACED_FEATURES_EXT, sizeof(VkPhysicalDeviceMapMemoryPlacedFeaturesEXT), &h->placed},   // vk_mem.c: pools at their guest addresses
+        {VK_EXT_DEVICE_ADDRESS_BINDING_REPORT_EXTENSION_NAME, NULL, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ADDRESS_BINDING_REPORT_FEATURES_EXT, sizeof(VkPhysicalDeviceAddressBindingReportFeaturesEXT), &g_addrbind_feat},   // NXRT_VK_ADDRLOG
         {VK_EXT_DEVICE_FAULT_EXTENSION_NAME, NULL, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FAULT_FEATURES_EXT, sizeof(VkPhysicalDeviceFaultFeaturesEXT), &h->device_fault},   // vk_lost's report
     };
     enum { NEF = sizeof ef / sizeof *ef };
@@ -208,6 +231,8 @@ int vk_dev_open(const vk_dev_opts *o, const char *const *inst_exts, uint32_t n_i
             VkPhysicalDeviceExtendedDynamicState2FeaturesEXT *x = (void *)fs[i]; h->eds2_logic_op = x->extendedDynamicState2LogicOp != 0; h->eds2_patch_points = x->extendedDynamicState2PatchControlPoints != 0; continue; }
         if (ef[i].st == VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROVOKING_VERTEX_FEATURES_EXT) {
             VkPhysicalDeviceProvokingVertexFeaturesEXT *x = (void *)fs[i]; x->transformFeedbackPreservesProvokingVertex = x->transformFeedbackPreservesProvokingVertex && h->xfb; h->provoking_last = x->provokingVertexLast != 0; continue; }
+        if (ef[i].st == VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ADDRESS_BINDING_REPORT_FEATURES_EXT) {
+            VkPhysicalDeviceAddressBindingReportFeaturesEXT *x = (void *)fs[i]; x->reportAddressBinding = x->reportAddressBinding && g_addrlog; g_addrbind_feat = x->reportAddressBinding != 0; continue; }
         if (ef[i].st == VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FAULT_FEATURES_EXT) {
             VkPhysicalDeviceFaultFeaturesEXT *x = (void *)fs[i]; x->deviceFaultVendorBinary = 0; h->device_fault = x->deviceFault != 0; continue; }
         *ef[i].flag = count_true(fs[i], ef[i].size) > 0;
