@@ -3,6 +3,7 @@
 // exception filter (the crash report). The report goes to the log and to <log>.crash.txt, with the faulting thread's guest context: its NxwGuestCpu.
 // Dropped: the progress watchdog (DM_WATCH; diagnostic), the Mac sampler, the iOS dump port.
 // Linux (docs/LINUX-PLAN.md L-D4): SIGSEGV / SIGBUS on an alternate stack run the same hook chain, then a plat_guard recovery point, then the report.
+#include <sched.h>
 #include "dm.h"
 #include "nxrt/runtime.h"
 
@@ -231,11 +232,15 @@ void crash_report(const char *why, const void *ctx_) {
 __thread plat_guard *plat_guard_top;
 void crash_thread_init(void);
 // One handler for every fatal signal. SA_NODEFER: a plat_guard recovery leaves the handler with siglongjmp and no signal mask to restore
+// A pool granule on its way into Vulkan memory (vk_mem.c gran_place) is read-only for that moment: a write waits here, then runs again on the new pages
+_Atomic uintptr_t g_placing_lo, g_placing_hi;
 static void on_signal(int sig, siginfo_t *si, void *uc_) {
     ucontext_t *uc = uc_;
     if ((sig == SIGSEGV || sig == SIGBUS) && si) {
         int is_write = uc && (uc->uc_mcontext.gregs[REG_ERR] & 2) != 0;
         int saved = errno;
+        uintptr_t fa = (uintptr_t)si->si_addr, plo = atomic_load(&g_placing_lo);
+        if (plo && fa >= plo && fa < atomic_load(&g_placing_hi)) { while (atomic_load(&g_placing_lo) == plo) sched_yield(); errno = saved; return; }
         for (int i = 0; i < g_nfault_hook; i++) if (g_fault_hook[i](si->si_addr, is_write, uc)) { errno = saved; return; }
         plat_guard *g = plat_guard_top;
         if (g) { plat_guard_top = g->prev; siglongjmp(g->jb, 1); }

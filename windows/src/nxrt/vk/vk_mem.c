@@ -10,6 +10,8 @@
 
 void dm_guest_write_prepare(void *addr, size_t len);   // host/crash.c: unprotect before the host writes guest memory
 #ifndef _WIN32
+#include <sys/mman.h>
+#include <stdatomic.h>
 #include "addrspace.h"
 int dm_guest_readable_run(uint64_t a, uint64_t *end);   // host/hle_svc.c: what VirtualQuery tells on Windows
 #endif
@@ -152,8 +154,10 @@ static int placed_type(uint32_t bits, VkMemoryPropertyFlags want, VkDeviceSize n
     return -1;
 }
 // One 2 MB granule of the pool's buffer becomes device memory placed at its guest address, the first time the GPU needs it: the game's pools are far larger than what it
-// draws from (Mario Kart World: 4.8 GB in 3,000 pools), and the GPU's 8 GB of GTT would not hold them all. A CPU write landing between the read and the map is lost: the window is short
-// and nearly all of a pool's data is there long before its first draw
+// draws from (Mario Kart World: 4.8 GB in 3,000 pools), and the GPU's 8 GB of GTT would not hold them all. The game is running meanwhile, so the granule is read-only from before the read
+// until the map replaces it, and a write in between waits in the signal handler (host/crash.c) and then lands on the new pages. One at a time
+extern _Atomic uintptr_t g_placing_lo, g_placing_hi;
+static SRWLOCK g_place_lk = SRWLOCK_INIT;
 static int gran_place(pool_t_ *p, uint64_t g, const VkMemoryRequirements *gr) {
     const VkMemoryPropertyFlags hc = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
     int ty = -1, cached = 0;
@@ -167,13 +171,20 @@ static int gran_place(pool_t_ *p, uint64_t g, const VkMemoryRequirements *gr) {
     uint64_t o = g * g_gran, n = o + g_gran <= p->size ? g_gran : p->size - o, a = p->base + o;
     void *tmp = NULL;
     if (vkMapMemory(g_vk.dev, m, 0, VK_WHOLE_SIZE, 0, &tmp) != VK_SUCCESS) { vkFreeMemory(g_vk.dev, m, NULL); return -1; }
+    AcquireSRWLockExclusive(&g_place_lk);
+    atomic_store(&g_placing_hi, a + n); atomic_store(&g_placing_lo, a);
+    mprotect((void *)(uintptr_t)a, n, PROT_READ);
     int rd = as_section_read(p->sec_off + o, tmp, n);
     vkUnmapMemory(g_vk.dev, m);
-    if (rd) { vkFreeMemory(g_vk.dev, m, NULL); return -1; }
+    if (rd) { mprotect((void *)(uintptr_t)a, n, PROT_READ | PROT_WRITE); atomic_store(&g_placing_lo, 0); ReleaseSRWLockExclusive(&g_place_lk); vkFreeMemory(g_vk.dev, m, NULL); return -1; }
     VkMemoryMapPlacedInfoEXT pi = {VK_STRUCTURE_TYPE_MEMORY_MAP_PLACED_INFO_EXT, NULL, (void *)(uintptr_t)a};
     VkMemoryMapInfoKHR mi = {VK_STRUCTURE_TYPE_MEMORY_MAP_INFO_KHR, &pi, VK_MEMORY_MAP_PLACED_BIT_EXT, m, 0, n};
     void *out = NULL; VkResult r = vkMapMemory2KHR(g_vk.dev, &mi, &out);
-    if (r != VK_SUCCESS || out != (void *)(uintptr_t)a) { VKRED("pool %p: vkMapMemory2 placed at %#llx failed (%d)", p->key, (unsigned long long)a, r); vkFreeMemory(g_vk.dev, m, NULL); return -1; }
+    if (r != VK_SUCCESS || out != (void *)(uintptr_t)a) {
+        mprotect((void *)(uintptr_t)a, n, PROT_READ | PROT_WRITE); atomic_store(&g_placing_lo, 0); ReleaseSRWLockExclusive(&g_place_lk);
+        VKRED("pool %p: vkMapMemory2 placed at %#llx failed (%d)", p->key, (unsigned long long)a, r); vkFreeMemory(g_vk.dev, m, NULL); return -1;
+    }
+    atomic_store(&g_placing_lo, 0); ReleaseSRWLockExclusive(&g_place_lk);
     as_section_punch(p->sec_off + o, n);
     if (p->span) nvn_dirty_protect((const void *)(uintptr_t)a, (size_t)n);   // the map replaced the tracker's protection
     p->gran[g].mem = m; p->gran[g].off = 0; p->gran[g].size = g_gran;
