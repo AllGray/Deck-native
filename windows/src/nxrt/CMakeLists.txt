@@ -3,7 +3,7 @@
 set(NXRT_HLE
   hle/hle_sdkinit.c hle/hle_offline.c hle/hle_net.c hle/hle_nvdrv.c hle/hle_account.c hle/hle_friends.c hle/hle_time.c hle/hle_table.c hle/hle_nvn.c
   hle/hle_fs.c hle/hle_oe.c hle/hle_sdk16.c hle/hle_hid.c hle/hle_touch.c hle/hle_haptics.c hle/hle_nv.c hle/hle_vi.c
-  hle/hle_audio.c hle/audio_silent.c hle/hle_audren.c hle/hle_misc.c hle/hle_codec.c hle/hle_swkbd.c)
+  hle/hle_audio.c hle/audio_silent.c hle/hle_audren.c hle/hle_misc.c hle/hle_sf.c hle/hle_codec.c hle/hle_swkbd.c)
 # The platform's own files: Win32, or Linux (docs/LINUX-PLAN.md: plat/linux/windows.h gives the rest of nxrt the Win32 subset it uses)
 if(WIN32)
   set(NXRT_PLAT plat/plat_win32.c host/addrspace.c host/prof.c hle/save_txn.c front/text_input_win.c)

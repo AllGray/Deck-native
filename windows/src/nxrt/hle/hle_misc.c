@@ -196,6 +196,7 @@ HLE_FORCE("_ZN2nn4pctl27CheckStereoVisionPermissionEb", "parental controls · st
 
 // ---------- From BananaNative (MIT, moceure), ported for Mario Kart World 1.8.0 on x86-64 ----------
 #include <pthread.h>
+uint32_t dm_sf_host_session(const char *name);   // hle_sf.c
 #ifndef DM_SYNC_NEVER
 #define DM_SYNC_NEVER 0x4e436d44u   // 'DmCN'
 #endif
@@ -300,7 +301,7 @@ HLE_FORCE("_ZN2nn4chat28RequestNextRemoteCameraImageEPNS_2gs16NativeSyncHandleEP
 // 0x30af3, and the game aborts) and then talks HIPC on it with nn::sf::hipc::SendSyncRequest. The host hands out a session of its own (hle_sf.c): every request succeeds with zeroed
 // output, which reads as no camera (command 3 "Default" gives context 0)
 HLE_FORCE("_ZN2nn6camera3sdk19CreateCameraContextEPNS_5gsdrv18UniqueNativeHandleE", "a host session answered with zeroed output: no camera", uint32_t, h_cam_Context, uint32_t *out) {
-    *out = 0xCA3E0001u; LOG("[RED] camera context: a fake handle (nxrt has no host sessions yet)"); return RES_OK;
+    *out = dm_sf_host_session("camera"); return RES_OK;
 }
 
 #include "hle_misc.adapters.inc"
