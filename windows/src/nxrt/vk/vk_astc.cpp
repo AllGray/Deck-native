@@ -94,6 +94,10 @@ extern "C" int vka_decode_rgba8(const uint8_t *astc, uint32_t w, uint32_t h, uin
     return 0;
 }
 
+// NXRT_VK_ASTC_ASYNC (on unless 0): nothing is transcoded where a large texture is first used. It starts out black and the workers' results replace it,
+// smallest first, and go to the cache: first use of a big texture must not stall the frame (a whole level of an 8192x8192 takes seconds on a handheld)
+static int g_async;
+
 // ---------- Encoding: bc7enc, fast (mode 6 alone) or high quality (modes 1 and 6, partitions, uber level 1); the fast pass on a few helper threads ----------
 static void params(int q, bc7enc_compress_block_params *p) {
     bc7enc_compress_block_params_init(p);
@@ -115,7 +119,7 @@ static void encode_rows(const uint8_t *rgba, uint32_t w, uint32_t h, uint32_t by
 static std::once_flag g_bc7_once;
 static unsigned g_helpers;
 extern "C" int vka_encode_bc7(const uint8_t *rgba, uint32_t w, uint32_t h, int quality, uint8_t *bc7) {
-    std::call_once(g_bc7_once, [] { bc7enc_compress_block_init(); unsigned n = std::thread::hardware_concurrency(); g_helpers = n >= 16 ? 3 : n >= 8 ? 1 : 0; });
+    std::call_once(g_bc7_once, [] { bc7enc_compress_block_init(); unsigned n = std::thread::hardware_concurrency(); g_helpers = g_async ? 0 : n >= 16 ? 3 : n >= 8 ? 1 : 0; });
     bc7enc_compress_block_params p; params(quality, &p);
     uint32_t rows = (h + 3) / 4;
     if (quality != VKA_FAST || g_helpers == 0 || (uint64_t)w * h < 256 * 256) { encode_rows(rgba, w, h, 0, rows, &p, bc7); return 0; }
@@ -133,7 +137,8 @@ extern "C" size_t vka_bc7_size(uint32_t w, uint32_t h, uint32_t slices) { return
 struct job { vka_key key; std::vector<uint8_t> astc; uint32_t w, h, s; int bw, bh, srgb; };
 struct ready { vka_key key; std::vector<uint8_t> bc7; };
 static std::mutex g_mu; static std::condition_variable g_cv, g_idle_cv;
-static std::deque<job> g_jobs; static std::deque<ready> g_ready; static int g_busy; static bool g_stop; static std::thread g_worker;
+static std::deque<job> g_jobs; static std::deque<ready> g_ready; static int g_busy; static bool g_stop;
+enum { MAX_WORKERS = 6 }; static std::thread g_workers[MAX_WORKERS]; static int g_nworkers;
 
 static int transcode(const uint8_t *astc, uint32_t w, uint32_t h, uint32_t s, int bw, int bh, int srgb, int q, uint8_t *bc7) {
     std::vector<uint8_t> rgba((size_t)w * h * 4 * s);
@@ -149,16 +154,18 @@ static void worker_main() {
     for (;;) {
         g_cv.wait(lk, [] { return g_stop || !g_jobs.empty(); });
         if (g_stop) break;
-        job j = std::move(g_jobs.front()); g_jobs.pop_front(); g_busy = 1;
+        auto best = g_jobs.begin();
+        if (g_async) for (auto it = g_jobs.begin(); it != g_jobs.end(); ++it) if ((uint64_t)it->w * it->h * it->s < (uint64_t)best->w * best->h * best->s) best = it;
+        job j = std::move(*best); g_jobs.erase(best); g_busy++;
         lk.unlock();
         uint64_t t0 = now_ns();
         std::vector<uint8_t> out(vka_bc7_size(j.w, j.h, j.s));
-        int ok = !transcode(j.astc.data(), j.w, j.h, j.s, j.bw, j.bh, j.srgb, VKA_HIGH, out.data());
+        int ok = !transcode(j.astc.data(), j.w, j.h, j.s, j.bw, j.bh, j.srgb, g_async ? VKA_FAST : VKA_HIGH, out.data());
         if (ok) cache_write(j.key, VKA_HIGH, out.data(), out.size(), j.w, j.h, j.s);
         s_high_ns += now_ns() - t0; s_high_done++; s_high_tex += (uint64_t)j.w * j.h * j.s;
         lk.lock();
         if (ok) g_ready.push_back({j.key, std::move(out)});
-        g_busy = 0; g_idle_cv.notify_all();
+        g_busy--; g_idle_cv.notify_all();
     }
 }
 
@@ -168,18 +175,20 @@ extern "C" int vka_get_bc7(const uint8_t *astc, uint32_t w, uint32_t h, uint32_t
     if (key_out) *key_out = k;
     if (cache_read(k, VKA_HIGH, bc7, out, w, h, s)) { s_hits_high++; return VKA_HIGH; }
     int fast = cache_read(k, VKA_FAST, bc7, out, w, h, s);
-    if (fast) s_hits_fast++;
+    if (fast) { s_hits_fast++; if (g_async) return VKA_HIGH; }
+    else if (g_async && (uint64_t)w * h * s > 128 * 128) { s_miss++; memset(bc7, 0, out); }
     else {
         s_miss++;
         uint64_t t0 = now_ns();
         if (transcode(astc, w, h, s, bw, bh, srgb, VKA_FAST, bc7)) return -1;
         s_fast_ns += now_ns() - t0; s_fast_tex += (uint64_t)w * h * s;
         cache_write(k, VKA_FAST, bc7, out, w, h, s);
+        if (g_async) return VKA_HIGH;
     }
     {   // the high-quality pass, once per key
         std::lock_guard<std::mutex> lk(g_mu);
         bool queued = false; for (auto &j : g_jobs) if (j.key.lo == k.lo && j.key.hi == k.hi) queued = true;
-        if (!queued && g_worker.joinable()) { g_jobs.push_back({k, std::vector<uint8_t>(astc, astc + n), w, h, s, bw, bh, srgb}); s_queued++; g_cv.notify_one(); }
+        if (!queued && g_nworkers) { g_jobs.push_back({k, std::vector<uint8_t>(astc, astc + n), w, h, s, bw, bh, srgb}); s_queued++; g_cv.notify_one(); }
     }
     return VKA_FAST;
 }
@@ -205,14 +214,19 @@ extern "C" int vka_init(const char *dir) {
     }
     if (g_dir[0]) CreateDirectoryW(g_dir, nullptr);
     { std::lock_guard<std::mutex> lk(g_mu); g_stop = false; }
-    if (!g_worker.joinable()) g_worker = std::thread(worker_main);
-    ALOG("ASTC -> BC7 cache %ls (fast pass at first use, high quality in the background)", g_dir[0] ? g_dir : L"(none)");
+    const char *ae = getenv("NXRT_VK_ASTC_ASYNC"), *we = getenv("NXRT_VK_ASTC_WORKERS");
+    g_async = !(ae && *ae == '0');
+    int want = we && *we ? atoi(we) : g_async ? 3 : 1;
+    if (want < 1) want = 1; if (want > MAX_WORKERS) want = MAX_WORKERS;
+    while (g_nworkers < want) g_workers[g_nworkers++] = std::thread(worker_main);
+    ALOG("ASTC -> BC7 cache %ls (%ls, %d workers)", g_dir[0] ? g_dir : L"(none)", g_async ? L"all in the background" : L"fast pass at first use, high quality in the background", g_nworkers);
     return 0;
 }
 extern "C" void vka_shutdown(void) {
     { std::lock_guard<std::mutex> lk(g_mu); g_stop = true; g_jobs.clear(); }
     g_cv.notify_all();
-    if (g_worker.joinable()) g_worker.join();
+    for (int i = 0; i < g_nworkers; i++) if (g_workers[i].joinable()) g_workers[i].join();
+    g_nworkers = 0;
     std::lock_guard<std::mutex> lk(g_mu); g_ready.clear();
 }
 extern "C" void vka_stats(vka_stats_t *s) {
