@@ -175,6 +175,13 @@ static int gran_place(pool_t_ *p, uint64_t g, const VkMemoryRequirements *gr) {
     atomic_store(&g_placing_hi, a + n); atomic_store(&g_placing_lo, a);
     mprotect((void *)(uintptr_t)a, n, PROT_READ);
     int rd = as_section_read(p->sec_off + o, tmp, n);
+    if (!rd && getenv("NXRT_VK_PL_CHECK")) {
+        const uint8_t *g = (const uint8_t *)(uintptr_t)a, *t = tmp; uint64_t diff = 0, first = n, nz = 0;
+        plat_guard pg; PLAT_GUARD_PUSH(&pg);
+        if (!sigsetjmp(pg.jb, 0)) { for (uint64_t i = 0; i < n; i++) { if (g[i] != t[i]) { if (!diff) first = i; diff++; } if (g[i]) nz++; } PLAT_GUARD_POP(&pg); }
+        else { VKRED("placed check: guest %#llx not readable", (unsigned long long)a); }
+        static _Atomic int cnt; if (diff || atomic_fetch_add(&cnt, 1) < 8) VKLOG("placed check: pool %p gran %llu at %#llx+%#llx sec %#llx: guest nonzero %llu, differ %llu (first %#llx)", p->key, (unsigned long long)(a - p->base) / g_gran, (unsigned long long)a, (unsigned long long)n, (unsigned long long)(p->sec_off + o), (unsigned long long)nz, (unsigned long long)diff, (unsigned long long)first);
+    }
     vkUnmapMemory(g_vk.dev, m);
     if (rd) { mprotect((void *)(uintptr_t)a, n, PROT_READ | PROT_WRITE); atomic_store(&g_placing_lo, 0); ReleaseSRWLockExclusive(&g_place_lk); vkFreeMemory(g_vk.dev, m, NULL); return -1; }
     VkMemoryMapPlacedInfoEXT pi = {VK_STRUCTURE_TYPE_MEMORY_MAP_PLACED_INFO_EXT, NULL, (void *)(uintptr_t)a};
