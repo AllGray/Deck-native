@@ -283,27 +283,11 @@ HLE_FORCE("_ZN2nn3hid12FinalizeJcmsEv", "SWITCH2 hid: Joy-Con mouse sensor final
 HLE_FORCE("_ZN2nn3hid13GetJcmsHandleERKjRKNS0_8JcmsTypeE", "SWITCH2 hid: sensor handle; 0", uint64_t, h_hid_JcmsHandle, const uint32_t *npad, const void *type) { (void)npad; (void)type; return 0; }
 HLE_FORCE("_ZN2nn3hid9StartJcmsERKNS0_10JcmsHandleE", "SWITCH2 hid: start sensor; reports success", Result, h_hid_JcmsStart, const void *h) { (void)h; return RES_OK; }
 HLE_FORCE("_ZN2nn3hid12GetJcmsStateEPNS0_9JcmsStateERKNS0_10JcmsHandleE", "SWITCH2 hid: sensor state; left untouched, reports success", Result, h_hid_JcmsState, void *state, const void *h) { (void)state; (void)h; return RES_OK; }
-// The Switch 2 vibration graph (nodes, players, converters): the host plays no HD rumble 2 waveforms; every object is inert
-HLE_FORCE("_ZN2nn3hid13VibrationNode6UpdateEv", "SWITCH2 hid: vibration node update; inert", void, h_hid_VnUpdate, void *self) { (void)self; }
-HLE_FORCE("_ZN2nn3hid13VibrationNode15SetModulationToEPKS1_RKNS0_19VibrationModulationE", "SWITCH2 hid: vibration modulation; inert", void, h_hid_VnMod, void *self, const void *to, const void *m) { (void)self; (void)to; (void)m; }
-HLE_FORCE("_ZN2nn3hid23VibrationNodeConnectionC1Ev", "SWITCH2 hid: vibration connection ctor; inert", void, h_hid_VcCtor, void *self) { (void)self; }
-HLE_FORCE("_ZN2nn3hid23VibrationNodeConnectionD1Ev", "SWITCH2 hid: vibration connection dtor; inert", void, h_hid_VcDtor, void *self) { (void)self; }
+// The Switch 2 vibration graph (nodes, players, converters) runs in the SDK: inert constructors here left objects without a vtable, and Mario Kart World calls their destructors
 HLE_FORCE("_ZN2nn3hid23VibrationNodeConnection7ConnectEPNS0_13VibrationNodeES3_", "SWITCH2 hid: connect vibration nodes; reports success", Result, h_hid_VcConnect, void *self, void *a, void *b) { (void)self; (void)a; (void)b; return RES_OK; }
-HLE_FORCE("_ZN2nn3hid23VibrationNodeConnection10DisconnectEv", "SWITCH2 hid: disconnect vibration nodes; inert", void, h_hid_VcDisc, void *self) { (void)self; }
-HLE_FORCE("_ZN2nn3hid15VibrationPlayerC1Ev", "SWITCH2 hid: vibration player ctor; inert", void, h_hid_VpCtor, void *self) { (void)self; }
-HLE_FORCE("_ZN2nn3hid15VibrationPlayerD1Ev", "SWITCH2 hid: vibration player dtor; inert", void, h_hid_VpDtor, void *self) { (void)self; }
 HLE_FORCE("_ZN2nn3hid15VibrationPlayer4LoadEPKvm", "SWITCH2 hid: vibration player load; reports success", Result, h_hid_VpLoad, void *self, const void *p, uint64_t n) { (void)self; (void)p; (void)n; return RES_OK; }
-HLE_FORCE("_ZN2nn3hid15VibrationPlayer4PlayEv", "SWITCH2 hid: vibration player play; inert", void, h_hid_VpPlay, void *self) { (void)self; }
-HLE_FORCE("_ZN2nn3hid15VibrationPlayer4StopEv", "SWITCH2 hid: vibration player stop; inert", void, h_hid_VpStop, void *self) { (void)self; }
-HLE_FORCE("_ZN2nn3hid15VibrationPlayer7SetLoopEb", "SWITCH2 hid: vibration player loop; inert", void, h_hid_VpLoop, void *self, unsigned on) { (void)self; (void)on; }
-HLE_FORCE("_ZN2nn3hid15VibrationPlayer15SetLoopIntervalEi", "SWITCH2 hid: vibration player loop interval; inert", void, h_hid_VpLoopIv, void *self, int n) { (void)self; (void)n; }
-HLE_FORCE("_ZN2nn3hid15VibrationPlayer18SetCurrentPositionEi", "SWITCH2 hid: vibration player position; inert", void, h_hid_VpPos, void *self, int n) { (void)self; (void)n; }
-HLE_FORCE("_ZN2nn3hid15VibrationTargetC1Ev", "SWITCH2 hid: vibration target ctor; inert", void, h_hid_VtCtor, void *self) { (void)self; }
-HLE_FORCE("_ZN2nn3hid15VibrationTargetD1Ev", "SWITCH2 hid: vibration target dtor; inert", void, h_hid_VtDtor, void *self) { (void)self; }
 HLE_FORCE("_ZN2nn3hid15VibrationTarget24GetVibrationDeviceHandleEv", "SWITCH2 hid: vibration target device handle; 0", uint64_t, h_hid_VtGet, void *self) { (void)self; return 0; }
 HLE_FORCE("_ZN2nn3hid15VibrationTarget24SetVibrationDeviceHandleERKNS0_21VibrationDeviceHandleE", "SWITCH2 hid: vibration target device handle; ignored", void, h_hid_VtSet, void *self, const void *h) { (void)self; (void)h; }
-HLE_FORCE("_ZN2nn3hid18VibrationConverterC1Ei", "SWITCH2 hid: vibration converter ctor; inert", void, h_hid_VcvCtor, void *self, int rate) { (void)self; (void)rate; }
-HLE_FORCE("_ZN2nn3hid18VibrationConverterD1Ev", "SWITCH2 hid: vibration converter dtor; inert", void, h_hid_VcvDtor, void *self) { (void)self; }
 HLE_FORCE("_ZN2nn3hid18VibrationConverter12ProcessChunkEPNS0_14VibrationValueEPKsi", "SWITCH2 hid: vibration converter; 0 values", int, h_hid_VcvChunk, void *self, void *out, const short *pcm, int n) { (void)self; (void)out; (void)pcm; (void)n; return 0; }
 
 #include "hle_offline.adapters.inc"
