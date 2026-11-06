@@ -61,7 +61,7 @@ int nxrt_load_program(const char *exefs) {
     { void nxrt_prof_env(void); nxrt_prof_env(); }   // NXRT_PROF=<start s>,<seconds>: the sampling profiler (prof.c)
     stubs_report();
     LOG("program loaded in %.1f ms: game build %s (%s)", (now_ns() - t0) / 1e6, dm_main_build(),
-        !strncmp(dm_main_build(), DM_GAME_BUILD_201, 32) ? "2.0.1" : !strncmp(dm_main_build(), DM_GAME_BUILD_105, 32) ? "1.0.5" : "a build the profile does not know");
+        !strncmp(dm_main_build(), DM_GAME_BUILD_180, 32) ? "1.8.0" : "a build the profile does not know");
     return 0;
 }
 
