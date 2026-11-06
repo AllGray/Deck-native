@@ -146,6 +146,7 @@ static vkt_image *image_create(const tex_t *t, int cls) {
     if (im->unbacked) { static int n; if (n++ < 12) VKLOG("sparse texture %ux%ux%u layers %u %s: %.1f MB not backed", im->w, im->h, im->depth, im->layers, fi->name, mr.size / 1048576.0); }
     else if (vk_alloc_mem(&mr, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, 0, &im->alloc)) { VKRED("no device memory for a %ux%u %s texture (%llu bytes)", im->w, im->h, fi->name, (unsigned long long)mr.size); vkDestroyImage(g_vk.dev, im->img, NULL); free(im); return NULL; }
     if (!im->unbacked) vkBindImageMemory(g_vk.dev, im->img, im->alloc.mem, im->alloc.off);
+    if (!im->unbacked && mr.size >= (16ull << 20)) VKLOG("large texture %ux%ux%u layers %u levels %u %s (%s): %.1f MB, flags %#x", im->w, im->h, im->depth, im->layers, im->levels, fi->name, cls == VKT_GPU ? "render" : "sampled", mr.size / 1048576.0, t->d.flags);
     im->view = make_view(im, fi->vk, im->vtype, fi->swz, 0, im->levels, 0, im->layers, im->aspect & ~VK_IMAGE_ASPECT_STENCIL_BIT ? im->aspect & ~VK_IMAGE_ASPECT_STENCIL_BIT : im->aspect);
     VkFormat pf = vkf_unorm_of(fi->vk);
     im->present_view = pf != fi->vk ? make_view(im, pf, VK_IMAGE_VIEW_TYPE_2D, (VkComponentMapping){0}, 0, 1, 0, 1, VK_IMAGE_ASPECT_COLOR_BIT) : VK_NULL_HANDLE;
