@@ -10,6 +10,7 @@
 
 void dm_guest_write_prepare(void *addr, size_t len);   // host/crash.c: unprotect before the host writes guest memory
 #ifndef _WIN32
+#include "addrspace.h"
 int dm_guest_readable_run(uint64_t a, uint64_t *end);   // host/hle_svc.c: what VirtualQuery tells on Windows
 #endif
 
@@ -22,6 +23,9 @@ typedef struct {
     const void *key;
     VkBuffer buf[MAXWIN]; uint64_t win_lo[MAXWIN], win_n[MAXWIN]; int nwin;   // window k covers [win_lo, win_lo + win_n) of the pool, from base
     int sparse;
+    int placed, refs;             // placed: the pool's pages are device memory mapped at its guest address, the CPU's and the GPU's alike, with no copies; refs: pools that share it
+    uint64_t sec_off;             // placed: where the pages lie in the guest section, for when the pool goes
+    VkDeviceMemory pmem[MAXWIN];
     vk_alloc *gran; uint64_t ngran, bound;   // sparse: one allocation per bound granule, bound into every window that covers it
     vk_alloc mem[MAXWIN];         // not sparse: one allocation per window
     const void *span;             // the dirty tracker's range (registered by the recording layer right after gfx_pool_add)
@@ -133,8 +137,71 @@ static pool_t_ *pool_find(uintptr_t a, uint64_t len) {   // caller holds g_lk (s
 static int win_of(const pool_t_ *p, uint64_t off) { int k = p->nwin - 1; while (k > 0 && p->win_lo[k] > off) k--; return k; }   // the last window starting at or before off
 static int win_for(const pool_t_ *p, uint64_t off, uint64_t n) { int k = win_of(p, off); return off + n <= p->win_lo[k] + p->win_n[k] ? k : -1; }   // the window holding all of it, or -1
 
+// ---------- Pools placed at their guest addresses ----------
+// A mirror holds everything twice, which suits a discrete GPU and not unified memory: the Steam Deck ran out of memory for command submissions, the kernel swapping
+// GTT buffers out in amdgpu_cs_ioctl. So on Linux a pool's pages become device memory mapped placed over its range in the guest section (VK_EXT_map_memory_placed):
+// the game and the GPU read and write the same bytes, and the section's copy is given back. Nothing else needs them, as the guest reaches the pool only through this range
+#ifndef _WIN32
+static int g_placed;              // NXRT_VK_PLACED=0: mirrors, as on Windows
+static uint64_t g_placed_bytes, g_cached_bytes;
+enum { COHERENT_AMD = VK_MEMORY_PROPERTY_DEVICE_COHERENT_BIT_AMD | VK_MEMORY_PROPERTY_DEVICE_UNCACHED_BIT_AMD };
+static int placed_type(uint32_t bits, VkMemoryPropertyFlags want, VkDeviceSize need) {
+    for (uint32_t i = 0; i < g_vk.memp.memoryTypeCount; i++) {
+        VkMemoryPropertyFlags f = g_vk.memp.memoryTypes[i].propertyFlags;
+        if ((bits >> i & 1) && (f & want) == want && !(f & COHERENT_AMD) && g_vk.memp.memoryHeaps[g_vk.memp.memoryTypes[i].heapIndex].size >= need) return (int)i;
+    }
+    return -1;
+}
+// Puts the section's pages back with what the pool holds. The device memory itself may still be in use by the GPU, and goes when pool_free runs
+static void pool_unplace(pool_t_ *p, int nwin) {
+    for (int k = 0; k < nwin; k++) {
+        uint64_t a = p->base + p->win_lo[k], n = p->win_n[k];
+        if (a + n > p->base + p->size) n = p->base + p->size - a;
+        if (as_section_write(p->sec_off + p->win_lo[k], (const void *)(uintptr_t)a, n)) VKRED("pool %p: its contents did not go back to the guest section", p->key);
+        VkMemoryUnmapInfoKHR ui = {VK_STRUCTURE_TYPE_MEMORY_UNMAP_INFO_KHR, NULL, VK_MEMORY_UNMAP_RESERVE_BIT_EXT, p->pmem[k]};
+        vkUnmapMemory2KHR(g_vk.dev, &ui);
+        if (as_section_map(a, n, p->sec_off + p->win_lo[k])) VKRED("pool %p: the guest section could not be mapped back at %#llx", p->key, (unsigned long long)a);
+    }
+}
+static int pool_place(pool_t_ *p) {
+    int k;
+    for (k = 0; k < p->nwin; k++) {
+        VkMemoryRequirements mr; vkGetBufferMemoryRequirements(g_vk.dev, p->buf[k], &mr);
+        const VkMemoryPropertyFlags hc = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
+        int ty = -1, cached = 0;
+        if (g_cached_bytes + mr.size <= (2500ull << 20)) { ty = placed_type(mr.memoryTypeBits, hc | VK_MEMORY_PROPERTY_HOST_CACHED_BIT, mr.size); cached = ty >= 0; }   // the game reads these too
+        if (ty < 0) ty = placed_type(mr.memoryTypeBits, hc | VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, mr.size);
+        if (ty < 0) ty = placed_type(mr.memoryTypeBits, hc, mr.size);
+        if (ty < 0) break;
+        VkMemoryAllocateInfo ai = {VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO, NULL, mr.size, (uint32_t)ty};
+        if (vkAllocateMemory(g_vk.dev, &ai, NULL, &p->pmem[k]) != VK_SUCCESS) { p->pmem[k] = VK_NULL_HANDLE; break; }
+        uint64_t a = p->base + p->win_lo[k], n = p->win_n[k];
+        void *tmp = NULL;
+        if (vkMapMemory(g_vk.dev, p->pmem[k], 0, VK_WHOLE_SIZE, 0, &tmp) != VK_SUCCESS || as_section_read(p->sec_off + p->win_lo[k], tmp, n)) {
+            if (tmp) vkUnmapMemory(g_vk.dev, p->pmem[k]);
+            vkFreeMemory(g_vk.dev, p->pmem[k], NULL); p->pmem[k] = VK_NULL_HANDLE; break;
+        }
+        vkUnmapMemory(g_vk.dev, p->pmem[k]);
+        vkBindBufferMemory(g_vk.dev, p->buf[k], p->pmem[k], 0);
+        VkMemoryMapPlacedInfoEXT pi = {VK_STRUCTURE_TYPE_MEMORY_MAP_PLACED_INFO_EXT, NULL, (void *)(uintptr_t)a};
+        VkMemoryMapInfoKHR mi = {VK_STRUCTURE_TYPE_MEMORY_MAP_INFO_KHR, &pi, VK_MEMORY_MAP_PLACED_BIT_EXT, p->pmem[k], 0, n};
+        void *out = NULL; VkResult r = vkMapMemory2KHR(g_vk.dev, &mi, &out);
+        if (r != VK_SUCCESS || out != (void *)(uintptr_t)a) {
+            VKRED("pool %p: vkMapMemory2 placed at %#llx failed (%d): a mirror instead", p->key, (unsigned long long)a, r);
+            vkFreeMemory(g_vk.dev, p->pmem[k], NULL); p->pmem[k] = VK_NULL_HANDLE; break;
+        }
+        as_section_punch(p->sec_off + p->win_lo[k], n);
+        g_placed_bytes += mr.size; if (cached) g_cached_bytes += mr.size;
+    }
+    if (k == p->nwin) return 1;
+    pool_unplace(p, k);   // buffers already bound cannot be rebound, and the caller gives up on this pool's copy of them
+    return -1;
+}
+#endif
+
 static void pool_free(pool_t_ *p) {
     for (int k = 0; k < p->nwin; k++) if (p->buf[k]) vkDestroyBuffer(g_vk.dev, p->buf[k], NULL);
+    for (int k = 0; k < p->nwin; k++) if (p->pmem[k]) vkFreeMemory(g_vk.dev, p->pmem[k], NULL);
     if (p->sparse) { for (uint64_t g = 0; g < p->ngran; g++) vk_free_mem(&p->gran[g]); free(p->gran); }
     else for (int k = 0; k < p->nwin; k++) vk_free_mem(&p->mem[k]);
     free(p->up); free(p->last_dirty); free(p->streak); free(p->hot); free((void *)p->gpu_pending); free(p->committed); free(p);
@@ -150,6 +217,22 @@ void vkm_pool_add(const void *mem, uint64_t size) {
     p->up = calloc(p->npages, sizeof *p->up); p->last_dirty = calloc(p->npages, sizeof *p->last_dirty); p->streak = calloc(p->npages, 1); p->hot = calloc(p->npages, 1); p->gpu_pending = calloc(p->npages, 1);
     p->committed = calloc(p->npages, 1);
     p->sparse = g_vk.has.sparse_buffer;
+#ifndef _WIN32
+    if (g_placed) {
+        // A range inside a pool already placed (a virtual pool over a physical one) is that pool; one that only overlaps stays a mirror
+        int inside = 0, overlap = 0;
+        AcquireSRWLockExclusive(&g_lk);
+        for (int i = 0; i < g_npool; i++) {
+            pool_t_ *q = g_pool[i];
+            if (!q->placed || p->lo >= q->base + q->size || p->hi <= q->base) continue;
+            if (p->lo >= q->lo && p->hi <= q->hi) { q->refs += q->key == mem; inside = 1; } else overlap = 1;
+            break;
+        }
+        ReleaseSRWLockExclusive(&g_lk);
+        if (inside) { free(p->up); free(p->last_dirty); free(p->streak); free(p->hot); free((void *)p->gpu_pending); free(p->committed); free(p); return; }
+        if (!overlap && !as_section_offset(p->base, p->size, &p->sec_off)) { p->placed = 1; p->sparse = 0; }
+    }
+#endif
     VkDeviceSize bsize = p->sparse ? (p->size + g_gran - 1) / g_gran * g_gran : p->size, w = bsize, ov = 0;
     if (g_max_buffer && bsize > g_max_buffer) {   // windows start on granules (or pages), so a granule never straddles two
         w = p->sparse ? g_max_buffer / g_gran * g_gran : g_max_buffer / PAGE * PAGE;
@@ -171,7 +254,15 @@ void vkm_pool_add(const void *mem, uint64_t size) {
         if (ok) vk_name((uint64_t)p->buf[k], VK_OBJECT_TYPE_BUFFER, "nvn memory pool");
     }
     if (!ok) { VKRED("cannot create the buffer of memory pool %p+%#llx", mem, (unsigned long long)size); pool_free(p); return; }
-    if (p->sparse) { p->ngran = bsize / g_gran; p->gran = calloc(p->ngran, sizeof *p->gran); for (uint64_t g = 0; g < p->ngran; g++) p->gran[g].block = -1; }
+#ifndef _WIN32
+    if (p->placed) {
+        int rc = pool_place(p);
+        if (rc < 0) { VKRED("memory pool %p+%#llx could not be placed: not mirrored", mem, (unsigned long long)size); p->placed = 0; pool_free(p); return; }
+        if (rc) p->bound = p->size;
+    }
+#endif
+    if (p->placed) {}
+    else if (p->sparse) { p->ngran = bsize / g_gran; p->gran = calloc(p->ngran, sizeof *p->gran); for (uint64_t g = 0; g < p->ngran; g++) p->gran[g].block = -1; }
     else {   // without sparse binding: all of it now
         for (int k = 0; k < p->nwin; k++) {
             VkMemoryRequirements mr; vkGetBufferMemoryRequirements(g_vk.dev, p->buf[k], &mr);
@@ -182,18 +273,22 @@ void vkm_pool_add(const void *mem, uint64_t size) {
     }
     if (p->nwin > 1) VKLOG("memory pool %p+%#llx: %d buffers of up to %llu MB%s (the device's largest buffer is %llu MB)", mem, (unsigned long long)size, p->nwin,
                            (unsigned long long)(w >> 20), ov ? ", overlapping by the same memory" : ", side by side", (unsigned long long)(g_max_buffer >> 20));
+    const int placed_now = p->placed;
     AcquireSRWLockExclusive(&g_lk);
     if (g_npool < MAXPOOL) { g_pool[g_npool++] = p; qsort(g_pool, (size_t)g_npool, sizeof *g_pool, pool_cmp); p = NULL; }
     ReleaseSRWLockExclusive(&g_lk);
     if (p) { VKRED("too many memory pools (%d)", MAXPOOL); pool_free(p); return; }
-    static int nlog; if (nlog++ < 32) VKLOG("memory pool %p+%#llx: device-local mirror%s", mem, (unsigned long long)size, g_vk.has.sparse_buffer ? ", backed in 2 MB granules on first use" : "");
+    static int nlog; if (nlog++ < 32) VKLOG("memory pool %p+%#llx: %s%s", mem, (unsigned long long)size, placed_now ? "placed at its address" : "device-local mirror", !placed_now && g_vk.has.sparse_buffer ? ", backed in 2 MB granules on first use" : "");
 }
 
 void vkm_pool_del(const void *mem) {
     pool_t_ *p = NULL;
     AcquireSRWLockExclusive(&g_lk);
-    for (int i = 0; i < g_npool; i++) if (g_pool[i]->key == mem) { p = g_pool[i]; memmove(&g_pool[i], &g_pool[i + 1], (size_t)(g_npool - i - 1) * sizeof *g_pool); g_npool--; break; }
+    for (int i = 0; i < g_npool; i++) if (g_pool[i]->key == mem) { if (g_pool[i]->refs > 0) { g_pool[i]->refs--; break; } p = g_pool[i]; memmove(&g_pool[i], &g_pool[i + 1], (size_t)(g_npool - i - 1) * sizeof *g_pool); g_npool--; break; }
     ReleaseSRWLockExclusive(&g_lk);
+#ifndef _WIN32
+    if (p && p->placed) pool_unplace(p, p->nwin);   // the game may reuse this memory at once; the device memory stays until the submissions are past it
+#endif
     if (p) vk_retire(pool_free_cb, p);   // submissions recorded so far may still read it
 }
 
@@ -310,6 +405,7 @@ static void pool_fill_zero(pool_t_ *p, VkCommandBuffer cb, uint64_t off, uint64_
 // Copies the pages among [p0, p1) of pool p whose device copy is behind into cb, until budget bytes; *stop_at (optional) is where it stopped.
 // Order per run (nxnative's): take the stamp, write-protect, then read guest memory: a write after the protection faults and is seen at the next check
 static uint64_t pool_sync(pool_t_ *p, uint64_t p0, uint64_t p1, VkCommandBuffer cb, uint64_t budget, uint64_t *stop_at) {
+    if (p->placed) { if (stop_at) *stop_at = p1 < p->npages ? p1 : p->npages; return 0; }   // the GPU reads the guest's own pages
     if (!p->span) p->span = nvn_dirty_span((const void *)p->lo, p->hi - p->lo);
     if (p1 > p->npages) p1 = p->npages;
     copy_batch b; b.n = 0; b.src = b.dst = VK_NULL_HANDLE;
@@ -415,6 +511,14 @@ static void gpu_pending(uint64_t a, uint64_t len, int d) {
     ReleaseSRWLockShared(&g_lk);
 }
 
+static int pool_placed_at(uint64_t a, uint64_t len) {
+    AcquireSRWLockShared(&g_lk);
+    pool_t_ *p = pool_find((uintptr_t)a, len ? len : 1);
+    int r = p && p->placed;
+    ReleaseSRWLockShared(&g_lk);
+    return r;
+}
+
 // ---------- GPU writes back to guest memory ----------
 typedef struct { uint64_t addr, len; VkBuffer buf; vk_alloc mem; const uint8_t *cpu; uint32_t fill; int kind; } wb_t;   // kind 0 readback, 1 known bytes, 2 fill
 static void wb_land(void *arg) {
@@ -433,6 +537,10 @@ void vkm_gpu_wrote(uint64_t addr, uint64_t len) {
     VkBuffer pb; VkDeviceSize po;
     VkCommandBuffer cb = vks_cb();
     if (!cb || !len || !vkm_addr(addr, len, &pb, &po)) return;
+    if (pool_placed_at(addr, len)) {   // already in guest memory: only the host's view of it
+        vk_mem_barrier(cb, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, VK_ACCESS_2_MEMORY_WRITE_BIT, VK_PIPELINE_STAGE_2_HOST_BIT, VK_ACCESS_2_HOST_READ_BIT);
+        return;
+    }
     wb_t *w = calloc(1, sizeof *w); w->addr = addr; w->len = len;
     VkBufferCreateInfo bci = {VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO, NULL, 0, len, VK_BUFFER_USAGE_TRANSFER_DST_BIT, VK_SHARING_MODE_EXCLUSIVE, 0, NULL};
     vkCreateBuffer(g_vk.dev, &bci, NULL, &w->buf);
@@ -449,6 +557,7 @@ void vkm_gpu_wrote(uint64_t addr, uint64_t len) {
 }
 // Writes whose bytes the CPU knows (inline uniform updates, fills): the GPU writes the mirror in order, guest memory gets the same bytes at completion
 void vkm_cpu_also(uint64_t addr, uint64_t len, const void *data, int fill, uint32_t value) {
+    if (pool_placed_at(addr, len)) return;   // the GPU writes the guest's own pages
     wb_t *w = calloc(1, sizeof *w); w->addr = addr; w->len = len; w->kind = fill ? 2 : 1; w->fill = value;
     if (!fill) { uint8_t *c = malloc((size_t)len); memcpy(c, data, (size_t)len); w->cpu = c; }
     gpu_pending(addr, len, 1);
@@ -509,6 +618,11 @@ int vkm_init(void) {
     e = getenv("NXRT_VK_MAX_BUFFER_MB");   // test switch: pretend the device's largest buffer is smaller (AMD's 2048, to try its pool windows on another card)
     if (e && atoi(e) > 0 && ((VkDeviceSize)atoi(e) << 20) < g_max_buffer) g_max_buffer = (VkDeviceSize)atoi(e) << 20;
     g_alias = g_vk.has.sparse_aliased && !(getenv("NXRT_VK_NO_ALIAS") && atoi(getenv("NXRT_VK_NO_ALIAS")));
+#ifndef _WIN32
+    { const char *pl = getenv("NXRT_VK_PLACED");
+      g_placed = g_vk.has.placed && g_vk.has.map_memory2 && vkMapMemory2KHR && vkUnmapMemory2KHR && !(pl && *pl == '0');
+      VKLOG("memory: pools %s", g_placed ? "placed at their guest addresses (no mirrors)" : "mirrored"); }
+#endif
     if (g_vk.has.sparse_buffer) {   // the granule is a whole number of the device's sparse blocks
         VkBufferCreateInfo bci = {VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO, NULL, VK_BUFFER_CREATE_SPARSE_BINDING_BIT | VK_BUFFER_CREATE_SPARSE_RESIDENCY_BIT, GRAN, g_usage, VK_SHARING_MODE_EXCLUSIVE, 0, NULL};
         VkBuffer b; VkMemoryRequirements mr;

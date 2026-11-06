@@ -27,7 +27,7 @@ typedef struct {
     int custom_border, custom_border_noformat, xfb, xfb_streams, depth_clip_control, index_u8, cond_render, provoking_last, null_descriptor,
         eds2_logic_op, eds2_patch_points, eds3, viewport_swizzle_nv, memory_budget, present_id, present_wait, swap_maint1, line_raster,
         vertex_divisor, prim_list_restart, stencil_export, fs_interlock, blend_adv, gs_passthrough_nv, viewport_array2_nv, feedback_loop,
-        color_write_enable, depth_clamp_01, push_descriptor, gpl, sparse_buffer, sparse_image, sparse_aliased, bc, astc_ldr, mirror_clamp_edge,
+        color_write_enable, depth_clamp_01, push_descriptor, gpl, sparse_buffer, sparse_image, placed, map_memory2, sparse_aliased, bc, astc_ldr, mirror_clamp_edge,
         minmax_filter, debug_utils, surface_maint1, fmt_4444, vertex_input_dynamic, device_fault;
     int checkpoints;   // VK_NV_device_diagnostic_checkpoints: 1 = before each dispatch, 2 = draws too (NXRT_VK_CHECKPOINTS=all), 0 = off (=0, or not NVIDIA)
     int corpus_ok;   // everything the translated corpus declares (docs/m5-record-shaders.md section 7): draw parameters, subgroup ballot / vote / shuffle, formatless storage images, gather, geometry

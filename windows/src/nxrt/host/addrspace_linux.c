@@ -131,6 +131,31 @@ int as_unmap_view(uint64_t a) {
 }
 void as_coalesce(uint64_t lo, uint64_t hi) { (void)lo; (void)hi; }   /* Linux has no placeholders to merge */
 
+/* Pools placed in Vulkan memory (vk_mem.c): their pages leave the section while the pool lives, and come back with its contents when it goes */
+int as_section_read(uint64_t off, void *dst, uint64_t n) {
+    uint8_t *d = dst;
+    while (n) {
+        ssize_t r = pread(g_fd, d, n, (off_t)off);
+        if (r <= 0) { if (r < 0 && errno == EINTR) continue; return -1; }
+        d += r; off += (uint64_t)r; n -= (uint64_t)r;
+    }
+    return 0;
+}
+int as_section_write(uint64_t off, const void *src, uint64_t n) {
+    const uint8_t *s = src;
+    while (n) {
+        ssize_t r = pwrite(g_fd, s, n, (off_t)off);
+        if (r <= 0) { if (r < 0 && errno == EINTR) continue; return -1; }
+        s += r; off += (uint64_t)r; n -= (uint64_t)r;
+    }
+    return 0;
+}
+int as_section_punch(uint64_t off, uint64_t n) { return fallocate(g_fd, FALLOC_FL_PUNCH_HOLE | FALLOC_FL_KEEP_SIZE, (off_t)off, (off_t)n); }
+int as_section_map(uint64_t a, uint64_t n, uint64_t off) {
+    void *p = mmap((void *)(uintptr_t)a, n, PROT_READ | PROT_WRITE, MAP_SHARED | MAP_FIXED, g_fd, (off_t)off);
+    return p == (void *)(uintptr_t)a ? 0 : -1;
+}
+
 int as_guest_views(void) {
     static int done, rc;
     if (done) return rc;

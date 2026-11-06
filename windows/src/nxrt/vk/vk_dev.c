@@ -139,6 +139,7 @@ int vk_dev_open(const vk_dev_opts *o, const char *const *inst_exts, uint32_t n_i
         {VK_EXT_GRAPHICS_PIPELINE_LIBRARY_EXTENSION_NAME, NULL, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_GRAPHICS_PIPELINE_LIBRARY_FEATURES_EXT, sizeof(VkPhysicalDeviceGraphicsPipelineLibraryFeaturesEXT), &h->gpl},
         {VK_EXT_4444_FORMATS_EXTENSION_NAME, NULL, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_4444_FORMATS_FEATURES_EXT, sizeof(VkPhysicalDevice4444FormatsFeaturesEXT), &h->fmt_4444},
         {VK_EXT_VERTEX_INPUT_DYNAMIC_STATE_EXTENSION_NAME, NULL, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VERTEX_INPUT_DYNAMIC_STATE_FEATURES_EXT, sizeof(VkPhysicalDeviceVertexInputDynamicStateFeaturesEXT), &h->vertex_input_dynamic},   // the replay (M5-C)
+        {VK_EXT_MAP_MEMORY_PLACED_EXTENSION_NAME, NULL, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MAP_MEMORY_PLACED_FEATURES_EXT, sizeof(VkPhysicalDeviceMapMemoryPlacedFeaturesEXT), &h->placed},   // vk_mem.c: pools at their guest addresses
         {VK_EXT_DEVICE_FAULT_EXTENSION_NAME, NULL, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FAULT_FEATURES_EXT, sizeof(VkPhysicalDeviceFaultFeaturesEXT), &h->device_fault},   // vk_lost's report
     };
     enum { NEF = sizeof ef / sizeof *ef };
@@ -147,6 +148,7 @@ int vk_dev_open(const vk_dev_opts *o, const char *const *inst_exts, uint32_t n_i
         {VK_NV_VIEWPORT_SWIZZLE_EXTENSION_NAME, &h->viewport_swizzle_nv}, {VK_EXT_MEMORY_BUDGET_EXTENSION_NAME, &h->memory_budget},
         {VK_EXT_SHADER_STENCIL_EXPORT_EXTENSION_NAME, &h->stencil_export}, {VK_NV_GEOMETRY_SHADER_PASSTHROUGH_EXTENSION_NAME, &h->gs_passthrough_nv},
         {VK_NV_VIEWPORT_ARRAY_2_EXTENSION_NAME, &h->viewport_array2_nv}, {VK_KHR_PUSH_DESCRIPTOR_EXTENSION_NAME, &h->push_descriptor},
+        {VK_KHR_MAP_MEMORY_2_EXTENSION_NAME, &h->map_memory2},
         {VK_KHR_PIPELINE_LIBRARY_EXTENSION_NAME, NULL},   // with the graphics pipeline library only
         {VK_NV_DEVICE_DIAGNOSTIC_CHECKPOINTS_EXTENSION_NAME, &h->checkpoints},   // vk_lost's report; NXRT_VK_CHECKPOINTS=0 leaves it off
     };
