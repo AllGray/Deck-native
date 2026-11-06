@@ -593,6 +593,7 @@ static VkImageView tex_view(int tid, const vks_bind *b, VkImageLayout *layout, v
         VkImageView dv = dcmp_view(im, b->vtype);
         if (dv) { *layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL; return dv; }
     }
+    if (!v.set_format && r.t.d.format != im->d.format) { v.set_format = 1; v.format = (uint16_t)r.t.d.format; use = 1; }   // the image was made for another texture over the same storage (key_of)
     int cf = vkr_fmt_as_ct(v.set_format ? v.format : r.t.d.format, b->ct);
     if (cf >= 0 && !(im->aspect & (VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT))) { v.set_format = 1; v.format = (uint16_t)cf; use = 1; }
     *layout = im->rest; *out_im = im; td_note(im);

@@ -54,6 +54,10 @@ static void key_of(const tex_t *t, int cls, skey *k) {
     k->pkg_bh = t->has_layout ? t->d.pkg_block_h : 0;
     k->w = t->d.width; k->h = t->d.height; k->d = t->d.depth; k->levels = t->d.levels ? t->d.levels : 1; k->stride = t->d.stride;
     k->layout_flags = t->d.flags & (NVN_TEXTURE_FLAGS_LINEAR | NVN_TEXTURE_FLAGS_LINEAR_RENDER_TARGET | NVN_TEXTURE_FLAGS_SPARSE);
+    // Textures over the same storage in formats of one size are one picture, read through a view of the other format: Mario Kart World draws a video frame into an RGBA8
+    // texture and reads it through an RGBA8_SRGB texture over the same memory; two images left the second one black
+    const vkf_info *fi = vkf_get(t->d.format);
+    if (cls == VKT_GPU && fi && fi->conv == VKF_COPY && !(fi->flags & (VKF_COMPRESSED | VKF_DEPTH | VKF_STENCIL)) && t->d.samples <= 1) k->format = 0x100000 | fi->vbpb;
 }
 
 // ---------- Image creation ----------
