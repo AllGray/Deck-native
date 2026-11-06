@@ -303,11 +303,14 @@ static int pool_window(pool_t_ *p, uint64_t addr, uint64_t len, VkBuffer *buf, V
     return 1;
 }
 
+static int pool_bind(pool_t_ *p, uint64_t o, uint64_t n);
 int vkm_addr(uint64_t addr, uint64_t len, VkBuffer *buf, VkDeviceSize *off) {
     AcquireSRWLockShared(&g_lk);
     pool_t_ *p = pool_find((uintptr_t)addr, len ? len : 1);
     int ok = p && pool_window(p, addr, len, buf, off);
     ReleaseSRWLockShared(&g_lk);
+    // Whatever asks for a range may have the GPU write it (query results, copies, storage): a placed granule must exist first, or the write is lost and the game reads zeros
+    if (ok && p->placed) pool_bind(p, addr - p->base, len ? len : 1);
     return ok;
 }
 
