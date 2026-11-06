@@ -194,4 +194,113 @@ HLE_FORCE("_ZN2nn4pctl27CheckStereoVisionPermissionEb", "parental controls · st
 
 // swkbd software keyboard: see hle_swkbd.c
 
+// ---------- From BananaNative (MIT, moceure), ported for Mario Kart World 1.8.0 on x86-64 ----------
+#include <pthread.h>
+#ifndef DM_SYNC_NEVER
+#define DM_SYNC_NEVER 0x4e436d44u   // 'DmCN'
+#endif
+// ---------- chat: GameChat (Switch 2 SDKs) ----------
+// Hyrule Warriors: Age of Imprisonment initializes it at boot (main+0x14480b8); the SDK's Initialize connects to the chat:u service, which the host does not serve, and aborts (Result 0xe15).
+// The host has no GameChat: the library is ready and no chat is running, so the game's screen sharing has nobody to share with. The SDK's other calls go through the service object that
+// Initialize would have made, so each one a game imports needs a hook here
+HLE_FORCE("_ZN2nn4chat10InitializeEv", "GameChat (chat:u): ready, no chat", void, h_chat_Init, void) {}
+HLE_FORCE("_ZN2nn4chat10IsChattingEv", "GameChat: not chatting", unsigned, h_chat_IsChatting, void) { return 0; }
+HLE_FORCE("_ZN2nn4chat20SetScreenSharingModeENS0_17ScreenSharingModeE", "GameChat screen sharing mode: no chat to share with", void, h_chat_ShareMode, int mode) { (void)mode; }
+// Mario Kart World 1.8.0 also attaches the room-info change event at boot (the SDK reads the service object Initialize would have made: a null read at sdk+0x6bc148) and sets its
+// sharing key: no room ever changes (the event is bound, never signalled), and a key has nobody to share with (0: success, for a void or a Result return alike)
+HLE_FORCE("_ZN2nn4chat28AttachToRoomInfoChangedEventEPNS_2os11SystemEventE", "GameChat room info change event: bound, never signalled (no chat)", uint32_t, h_chat_RoomEv, void *ev) { hle_bind_system_event(ev, 0); return RES_OK; }
+HLE_FORCE("_ZN2nn4chat13SetSharingKeyERKNS0_10SharingKeyE", "GameChat sharing key: no chat to share with", uint32_t, h_chat_SetKey, const void *k) { (void)k; return 0; }
+HLE_FORCE("_ZN2nn4chat15ClearSharingKeyEv", "GameChat sharing key cleared: no chat", uint32_t, h_chat_ClearKey, void) { return 0; }
+// The room: none. RoomInfo's header (Mario Kart World 1.8.0 reads +0x28 the owner, +0x30 a flag, +0x38 the member count, +0x40 the members, 16 bytes each; its callers' frames
+// leave it at most 0xf0 bytes) is zeroed, so no member is listed
+HLE_FORCE("_ZN2nn4chat11GetRoomInfoEPNS0_8RoomInfoE", "GameChat room: none (no members)", uint32_t, h_chat_RoomInfo, void *info) { memset(info, 0, 0x40); return 0; }
+// The chat applets (start a chat, the camera sharing guide, the camera settings) have no chat to start: they close at once
+HLE_FORCE("_ZN2nn4chat13ShowChatStartERKNS_7account3UidE", "GameChat start applet: no chat, closes at once", uint32_t, h_chat_ShowStart, const void *uid) { (void)uid; return 0; }
+HLE_FORCE("_ZN2nn4chat22ShowCameraSharingGuideEv", "GameChat camera sharing guide: no chat, closes at once", uint32_t, h_chat_ShowGuide, void) { return 0; }
+HLE_FORCE("_ZN2nn4chat36ShowLocalCameraConfigurationVersion0ENS0_25CameraImageProcessingModeE", "GameChat camera settings applet: no camera, closes at once", uint32_t, h_chat_ShowCamCfg, int mode) { (void)mode; return 0; }
+HLE_FORCE("_ZN2nn4chat46BeginFullScreenWithLocalCameraAvailableSectionEb", "GameChat full-screen camera section: no camera", void, h_chat_FsBegin, unsigned on) { (void)on; }
+HLE_FORCE("_ZN2nn4chat44EndFullScreenWithLocalCameraAvailableSectionEv", "GameChat full-screen camera section: no camera", void, h_chat_FsEnd, void) {}
+
+// Camera videos: no camera. Mario Kart World 1.8.0 sets up its local and remote camera storage at boot whatever the chat state (main+0xd32270, main+0xd31b20: 384 x 216, 3 pictures),
+// makes a texture of each picture (nn::gs::NativeImageHandle → nvnNativeImage → nvnTextureInitializeFromNativeImage) and aborts if one fails; the SDK's own CalculateLocal-
+// CameraVideoBufferSize aborts first (sdk+0x6bf2c8) because Initialize above never counted GameChat initialized. The host keeps each storage's pictures in the game's buffer as
+// linear RGBA8 (black), which hle_nvn.c's native images make textures over (dm_chat_camera_image), and no picture ever comes: streaming starts nothing and the sync handle a
+// RequestNext*CameraImage gives back never signals (DM_SYNC_NEVER), so the game keeps polling and shows no camera
+#define CAM_SLOTS 16
+#define CAM_TAG 0x43480000u   // 'CH' << 16: a camera handle (slot << 8 | picture); apart from upstream's decoder native image handles (below 0x10100; that decoder is not on this branch)
+typedef struct { const void *type; uint8_t *mem; uint64_t size; uint32_t w, h, n; } chat_cam;
+static chat_cam g_cam[CAM_SLOTS];
+static pthread_mutex_t g_cam_mu = PTHREAD_MUTEX_INITIALIZER;
+static uint32_t cam_stride(uint32_t w) { return (w * 4 + 255) & ~255u; }
+static uint64_t cam_picture(uint32_t w, uint32_t h) { return ((uint64_t)cam_stride(w) * h + 0xfff) & ~(uint64_t)0xfff; }
+static uint64_t cam_size(int w, int h, int n) {
+    if (w < 32 || w > 1920 || h < 32 || h > 1080 || n < 1 || n > 4) { LOG("[RED] GameChat camera video %dx%d x%d: outside the SDK's range (32..1920 x 32..1080, 1..4 pictures)", w, h, n); return 0; }
+    return (uint64_t)n * cam_picture((uint32_t)w, (uint32_t)h);
+}
+static uint32_t cam_init(const void *type, int w, int h, int n, void *mem, uint64_t size) {
+    uint64_t need = cam_size(w, h, n);
+    if (!need || !mem || size < need) { LOG("[RED] GameChat camera video storage %dx%d x%d: buffer %p of %#llx bytes, %#llx needed", w, h, n, mem, (unsigned long long)size, (unsigned long long)need); return RES_FAIL; }
+    memset(mem, 0, need);   // black pictures
+    pthread_mutex_lock(&g_cam_mu);
+    int k = 0; while (k < CAM_SLOTS && g_cam[k].type && g_cam[k].type != type) k++;
+    if (k < CAM_SLOTS) g_cam[k] = (chat_cam){type, mem, size, (uint32_t)w, (uint32_t)h, (uint32_t)n};
+    pthread_mutex_unlock(&g_cam_mu);
+    if (k == CAM_SLOTS) { LOG("[RED] GameChat: more than %d camera video storages", CAM_SLOTS); return RES_FAIL; }
+    return 0;
+}
+static void cam_fini(const void *type) {
+    pthread_mutex_lock(&g_cam_mu);
+    for (int k = 0; k < CAM_SLOTS; k++) if (g_cam[k].type == type) g_cam[k] = (chat_cam){0};
+    pthread_mutex_unlock(&g_cam_mu);
+}
+static uint32_t cam_handle(const void *type, int i) {
+    uint32_t r = 0;
+    pthread_mutex_lock(&g_cam_mu);
+    for (int k = 0; k < CAM_SLOTS; k++) if (g_cam[k].type == type && i >= 0 && (uint32_t)i < g_cam[k].n) r = CAM_TAG | (uint32_t)k << 8 | (uint32_t)i;
+    pthread_mutex_unlock(&g_cam_mu);
+    if (!r) LOG("[RED] GameChat camera image handle %d of a storage the host does not hold (%p)", i, type);
+    return r;
+}
+// A camera handle's picture for hle_nvn.c's native images: 1 and its memory, size and layout; 0 for a handle that is not a camera picture
+int dm_chat_camera_image(uint32_t handle, uint8_t **mem, uint64_t *size, uint32_t *w, uint32_t *h, uint32_t *stride) {
+    if ((handle & 0xffff0000u) != CAM_TAG) return 0;
+    uint32_t k = handle >> 8 & 0xff, i = handle & 0xff; int ok = 0;
+    pthread_mutex_lock(&g_cam_mu);
+    if (k < CAM_SLOTS && g_cam[k].type && i < g_cam[k].n) {
+        uint64_t pic = cam_picture(g_cam[k].w, g_cam[k].h);
+        *mem = g_cam[k].mem + i * pic; *size = pic; *w = g_cam[k].w; *h = g_cam[k].h; *stride = cam_stride(g_cam[k].w); ok = 1;
+    }
+    pthread_mutex_unlock(&g_cam_mu);
+    return ok;
+}
+static void cam_never(void *sync) { uint32_t *s = sync; s[0] = DM_SYNC_NEVER; s[1] = s[2] = s[3] = 0; }
+HLE_FORCE("_ZN2nn4chat35CalculateLocalCameraVideoBufferSizeEiii", "GameChat camera pictures: the host's linear RGBA8 layout", uint64_t, h_chat_LocalSize, int w, int h, int n) { return cam_size(w, h, n); }
+HLE_FORCE("_ZN2nn4chat36CalculateRemoteCameraVideoBufferSizeEiii", "GameChat camera pictures: the host's linear RGBA8 layout", uint64_t, h_chat_RemoteSize, int w, int h, int n) { return cam_size(w, h, n); }
+HLE_FORCE("_ZN2nn4chat33InitializeLocalCameraVideoStorageEPNS0_20LocalCameraVideoTypeEiiiPvm", "GameChat camera storage: black pictures in the game's buffer (no camera)",
+          uint32_t, h_chat_LocalInit, void *t, int w, int h, int n, void *mem, uint64_t size) { return cam_init(t, w, h, n, mem, size); }
+HLE_FORCE("_ZN2nn4chat34InitializeRemoteCameraVideoStorageEPNS0_21RemoteCameraVideoTypeEiiiPvm", "GameChat camera storage: black pictures in the game's buffer (no camera)",
+          uint32_t, h_chat_RemoteInit, void *t, int w, int h, int n, void *mem, uint64_t size) { return cam_init(t, w, h, n, mem, size); }
+HLE_FORCE("_ZN2nn4chat31FinalizeLocalCameraVideoStorageEPNS0_20LocalCameraVideoTypeE", "GameChat camera storage released", void, h_chat_LocalFini, void *t) { cam_fini(t); }
+HLE_FORCE("_ZN2nn4chat32FinalizeRemoteCameraVideoStorageEPNS0_21RemoteCameraVideoTypeE", "GameChat camera storage released", void, h_chat_RemoteFini, void *t) { cam_fini(t); }
+HLE_FORCE("_ZN2nn4chat25GetLocalCameraImageHandleEPKNS0_20LocalCameraVideoTypeEi", "GameChat camera picture: a handle the host's nvnNativeImage knows", uint32_t, h_chat_LocalImg, const void *t, int i) { return cam_handle(t, i); }
+HLE_FORCE("_ZN2nn4chat26GetRemoteCameraImageHandleEPKNS0_21RemoteCameraVideoTypeEi", "GameChat camera picture: a handle the host's nvnNativeImage knows", uint32_t, h_chat_RemoteImg, const void *t, int i) { return cam_handle(t, i); }
+HLE_FORCE("_ZN2nn4chat25StartLocalCameraStreamingEv", "GameChat camera streaming: no camera, nothing streams", uint32_t, h_chat_LocalStart, void) { return 0; }
+HLE_FORCE("_ZN2nn4chat24StopLocalCameraStreamingEv", "GameChat camera streaming: no camera", uint32_t, h_chat_LocalStop, void) { return 0; }
+HLE_FORCE("_ZN2nn4chat26StartRemoteCameraStreamingERKNS_7account23NetworkServiceAccountIdE", "GameChat camera streaming: nobody to stream from", uint32_t, h_chat_RemoteStart, const void *id) { (void)id; return 0; }
+HLE_FORCE("_ZN2nn4chat25StopRemoteCameraStreamingERKNS_7account23NetworkServiceAccountIdE", "GameChat camera streaming: nobody to stream from", uint32_t, h_chat_RemoteStop, const void *id) { (void)id; return 0; }
+// (out sync handle, storage, picture, a handle to wait for first, passed by value in x3/x4[, the remote's account]): the picture never comes
+HLE_FORCE("_ZN2nn4chat27RequestNextLocalCameraImageEPNS_2gs16NativeSyncHandleEPNS0_20LocalCameraVideoTypeEiS2_", "GameChat camera picture: never comes (no camera)",
+          uint32_t, h_chat_LocalNext, void *sync, void *t, int i) { (void)t; (void)i; cam_never(sync); return 0; }
+HLE_FORCE("_ZN2nn4chat28RequestNextRemoteCameraImageEPNS_2gs16NativeSyncHandleEPNS0_21RemoteCameraVideoTypeEiS2_RKNS_7account23NetworkServiceAccountIdE", "GameChat camera picture: never comes (nobody streams)",
+          uint32_t, h_chat_RemoteNext, void *sync, void *t, int i) { (void)t; (void)i; cam_never(sync); return 0; }
+
+// ---------- camera: the Switch 2's USB camera ----------
+// The camera library is the game's own (Mario Kart World 1.8.0 links it into main: nn::camera::Initialize at main+0xcdebc0, called at boot by its camera manager whatever the
+// chat state). It takes a context from the sdk (nn::camera::sdk::CreateCameraContext, a session through the graphics server's user session, which the host does not have: Result
+// 0x30af3, and the game aborts) and then talks HIPC on it with nn::sf::hipc::SendSyncRequest. The host hands out a session of its own (hle_sf.c): every request succeeds with zeroed
+// output, which reads as no camera (command 3 "Default" gives context 0)
+HLE_FORCE("_ZN2nn6camera3sdk19CreateCameraContextEPNS_5gsdrv18UniqueNativeHandleE", "a host session answered with zeroed output: no camera", uint32_t, h_cam_Context, uint32_t *out) {
+    *out = 0xCA3E0001u; LOG("[RED] camera context: a fake handle (nxrt has no host sessions yet)"); return RES_OK;
+}
+
 #include "hle_misc.adapters.inc"

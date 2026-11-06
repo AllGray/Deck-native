@@ -9,7 +9,11 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write   # the rolling pre-release of the tools
+
+defaults:
+  run:
+    shell: bash
 
 jobs:
   build:
@@ -55,7 +59,19 @@ jobs:
           cmake --build sdl-build -j 4
           cmake --install sdl-build
 
-      # No nxs2.py setup here: its doctor asks for the tools this job builds, and nxnative is only used by a test that skips itself without it
+      # No nxs2.py setup here: its doctor asks for the tools this job builds. The generator reads nxnative at the patch's commit, on GitHub rather than on a player's computer
+      - name: Regenerate the HLE registry from the ported files
+        run: |
+          git config --global --add safe.directory '*'
+          C=$(python3 -I -c "import re;print(re.search(r\"UPSTREAM_COMMIT = '(\w+)'\",open('nxs2.py').read()).group(1))")
+          git clone -q --filter=blob:none --no-checkout https://github.com/seedds/nxnative nxnative
+          git -C nxnative checkout -q "$C"
+          git -C nxnative apply --whitespace=nowarn ../host/nxnative-switch2.patch
+          H=windows/src/nxrt
+          python3 -I $H/gen/gen_hle.py --nxnative nxnative --port $H/host --port $H/hle --extra $H/tests/hle_sig_test.c --out $H/gen/out
+          git status --short -- $H/gen/out | head -30
+          echo "::notice::HLE registry: $(grep -c . $H/gen/out/hle_inventory.tsv) lines; $(git diff --stat -- $H/gen/out | tail -1)"
+
       - name: Build nxrt, nxlift and nxanalyze
         run: bash windows/scripts/build.sh -j 4 Release -- nxrt nxlift-cli nxanalyze-cli
 
@@ -79,3 +95,20 @@ jobs:
           name: linux-kit
           path: kit
           retention-days: 3
+
+      # One rolling pre-release per branch, so the Deck can fetch the tools without a login. Tools only: nothing of the game is in them
+      - name: Pre-release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="kit-$GITHUB_REF_NAME"; API="https://api.github.com/repos/$GITHUB_REPOSITORY"
+          tar -czf linux-kit.tar.gz -C kit .
+          sha256sum linux-kit.tar.gz
+          AUTH=(-H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json")
+          OLD=$(curl -fsS "${AUTH[@]}" "$API/releases?per_page=100" | python3 -I -c "import json,sys;print(next((r['id'] for r in json.load(sys.stdin) if r['tag_name']=='$TAG'),''))")
+          if [ -n "$OLD" ]; then curl -fsS -X DELETE "${AUTH[@]}" "$API/releases/$OLD"; fi
+          curl -sS -X DELETE "${AUTH[@]}" "$API/git/refs/tags/$TAG" -o /dev/null || true
+          BODY=$(python3 -I -c "import json,os;print(json.dumps({'tag_name':'$TAG','target_commitish':os.environ['GITHUB_SHA'],'name':'Deck-native tools, $GITHUB_REF_NAME (test build)','body':'Automatic test build of the tools (nxrt, nxlift, nxanalyze, SDL3). Contains nothing from any game. Not a release.','prerelease':True}))")
+          ID=$(curl -fsS -X POST "${AUTH[@]}" "$API/releases" -d "$BODY" | python3 -I -c "import json,sys;print(json.load(sys.stdin)['id'])")
+          curl -fsS -X POST "${AUTH[@]}" -H "Content-Type: application/gzip" --data-binary @linux-kit.tar.gz "https://uploads.github.com/repos/$GITHUB_REPOSITORY/releases/$ID/assets?name=linux-kit.tar.gz" -o /dev/null
+          echo "::notice::published $TAG"

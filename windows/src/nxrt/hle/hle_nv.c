@@ -33,4 +33,9 @@ HLE_FORCE("_ZN2nv22DumpGraphicsMemoryInfoEv", WHY "; the dump goes to the host l
     LOG("nv::DumpGraphicsMemoryInfo: pool %.2f MB, 0 used (host graphics layer)", g_nv_pool.size / 1048576.0);
 }
 
+// ---------- From BananaNative (MIT, moceure), ported for Mario Kart World 1.8.0 on x86-64 ----------
+HLE_FORCE("_ZN2nn2gs3sdk30CheckGraphicsSystemInitializedEPKcm", "the graphics system's boot is nv::InitializeGraphics, recorded on the host", void, h_gs_CheckInit, const char *who, unsigned long n) {
+    if (!g_nv_pool.inited) die("%.*s: the graphics system is not booted (nv::InitializeGraphics was not called)", (int)(n < 64 ? n : 64), who ? who : "?");
+}
+
 #include "hle_nv.adapters.inc"
