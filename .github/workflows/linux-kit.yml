@@ -64,7 +64,10 @@ jobs:
           B="$NXW_BUILD_ROOT/linux-Release/bin"
           ls -l "$B"
           ldd "$B/nxrt" || true
-          if nm -D --defined-only "$B/nxrt" | grep -E ' [BbDd] vk'; then echo "::error::nxrt still exports Vulkan pointers"; exit 1; fi
+          # Vulkan's own names only (vk + capital): nxrt's own vk_* and vkw_* symbols cannot interpose anything in the loader
+          BAD=$(nm -D --defined-only "$B/nxrt" | awk '$2 ~ /^[BbDd]$/ && $3 ~ /^vk[A-Z]/ {print $3}' | tr '\n' ' ')
+          echo "::notice::other vk data symbols: $(nm -D --defined-only "$B/nxrt" | awk '$2 ~ /^[BbDd]$/ && $3 ~ /^vk[^A-Z]/ {print $3}' | tr '\n' ' ' | cut -c1-300)"
+          if [ -n "$BAD" ]; then echo "::error::nxrt still exports Vulkan pointers: $(echo "$BAD" | cut -c1-400)"; exit 1; fi
           objdump -T "$B/nxrt" | grep -oE 'GLIBC_[0-9.]+' | sort -Vu | tail -1
           mkdir -p kit/nxshader
           cp "$B/nxrt" "$B/nxlift" "$B/nxanalyze" kit/
