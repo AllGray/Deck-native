@@ -212,6 +212,7 @@ static void pool_free(pool_t_ *p) {
     free(p->up); free(p->last_dirty); free(p->streak); free(p->hot); free((void *)p->gpu_pending); free(p->committed); free(p);
 }
 static void pool_free_cb(void *arg) { pool_free(arg); }
+static int pool_bind(pool_t_ *p, uint64_t o, uint64_t n);
 
 void vkm_pool_add(const void *mem, uint64_t size) {
     if (!g_vk.up || !mem || !size) return;
@@ -275,6 +276,7 @@ void vkm_pool_add(const void *mem, uint64_t size) {
     if (g_npool < MAXPOOL) { g_pool[g_npool++] = p; qsort(g_pool, (size_t)g_npool, sizeof *g_pool, pool_cmp); p = NULL; }
     ReleaseSRWLockExclusive(&g_lk);
     if (p) { VKRED("too many memory pools (%d)", MAXPOOL); pool_free(p); return; }
+    { pool_t_ *q = NULL; if (placed_now && getenv("NXRT_VK_PL_EAGER")) { AcquireSRWLockShared(&g_lk); q = pool_find((uintptr_t)mem, 1); ReleaseSRWLockShared(&g_lk); if (q) pool_bind(q, 0, q->size); } }   // test switch
     static int nlog; if (nlog++ < 32) VKLOG("memory pool %p+%#llx: %s%s", mem, (unsigned long long)size, placed_now ? "placed at its address" : "device-local mirror", g_vk.has.sparse_buffer ? ", backed in 2 MB granules on first use" : "");
 }
 
@@ -575,7 +577,7 @@ void vkm_gpu_wrote(uint64_t addr, uint64_t len) {
 }
 // Writes whose bytes the CPU knows (inline uniform updates, fills): the GPU writes the mirror in order, guest memory gets the same bytes at completion
 void vkm_cpu_also(uint64_t addr, uint64_t len, const void *data, int fill, uint32_t value) {
-    if (pool_placed_at(addr, len)) return;   // the GPU writes the guest's own pages
+    if (pool_placed_at(addr, len) && !getenv("NXRT_VK_PL_CPUALSO")) return;   // the GPU writes the guest's own pages
     wb_t *w = calloc(1, sizeof *w); w->addr = addr; w->len = len; w->kind = fill ? 2 : 1; w->fill = value;
     if (!fill) { uint8_t *c = malloc((size_t)len); memcpy(c, data, (size_t)len); w->cpu = c; }
     gpu_pending(addr, len, 1);
