@@ -40,13 +40,20 @@
 // with VK_KHR_swapchain only (not on a headless device); the replay's extension entry points (NULL when the device lacks the extension)
 #define VKF_DEVICE_OPT(X) X(vkCreateSwapchainKHR) X(vkDestroySwapchainKHR) X(vkGetSwapchainImagesKHR) X(vkAcquireNextImageKHR) X(vkQueuePresentKHR)     X(vkCmdSetVertexInputEXT) X(vkCmdSetColorBlendEnableEXT) X(vkCmdSetColorBlendEquationEXT) X(vkCmdSetColorWriteMaskEXT) X(vkCmdSetLogicOpEnableEXT)     X(vkCmdSetLogicOpEXT) X(vkCmdSetAlphaToCoverageEnableEXT) X(vkCmdSetPolygonModeEXT) X(vkCmdSetDepthClampEnableEXT) X(vkCmdSetPatchControlPointsEXT)     X(vkCmdSetCheckpointNV) X(vkGetQueueCheckpointData2NV) X(vkGetDeviceFaultInfoEXT)
 
-#define VKF_DECL(n) extern PFN_##n n;
+// Hidden on Linux: nxrt links with -rdynamic, and an exported pointer named vkFoo interposes libvulkan's own vkFoo. The system's loader then calls
+// these variables as code (SteamOS, vulkan-icd-loader 1.4.350: SIGSEGV at nxrt's vkEnumerateInstanceExtensionProperties before the window opens).
+#ifdef _WIN32
+#define VKF_VIS
+#else
+#define VKF_VIS __attribute__((visibility("hidden")))
+#endif
+#define VKF_DECL(n) extern VKF_VIS PFN_##n n;
 VKF_GLOBAL(VKF_DECL)
 VKF_INSTANCE(VKF_DECL)
 VKF_INSTANCE_OPT(VKF_DECL)
 VKF_DEVICE(VKF_DECL)
 VKF_DEVICE_OPT(VKF_DECL)
-extern PFN_vkGetInstanceProcAddr vkGetInstanceProcAddr;
+extern VKF_VIS PFN_vkGetInstanceProcAddr vkGetInstanceProcAddr;
 #undef VKF_DECL
 
 int vkf_load_global(void);                 // loads vulkan-1.dll; 0 on success, -1 when there is no Vulkan loader

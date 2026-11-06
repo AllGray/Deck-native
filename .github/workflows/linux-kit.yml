@@ -1,0 +1,86 @@
+# The Linux game's tools (nxanalyze, nxlift, nxrt) and SDL3, built from source on Ubuntu 22.04 (glibc 2.35, docs/LINUX-PLAN.md L-D7) so they run on SteamOS.
+# Nothing of the game is involved: no dump, no game.so, no shaders.
+name: Linux kit
+
+on:
+  push:
+    branches: ['deck-native', 'mkw-*']
+    paths: ['windows/**', 'nxs2.py', '.github/workflows/linux-kit.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    container: ubuntu:22.04
+    timeout-minutes: 180
+    env:
+      LLVM_VERSION: 23.1.4
+      SDL3_VERSION: 3.4.18
+      VULKAN_SDK_VERSION: 1.4.363.0
+      NXW_TOOLCHAINS: /opt/toolchains
+      NXW_BUILD_ROOT: /opt/build
+    steps:
+      - name: System packages
+        run: |
+          apt-get update -qq
+          apt-get install -y -qq --no-install-recommends ca-certificates curl git xz-utils tar python3 python3-pip python3-venv \
+            build-essential g++-12 libstdc++-12-dev ninja-build pkg-config binutils libicu70 libtinfo5 libxml2 zlib1g-dev libzstd-dev \
+            libx11-dev libxext-dev libxcursor-dev libxi-dev libxrandr-dev libxss-dev libxtst-dev libxfixes-dev libxkbcommon-dev \
+            libwayland-dev wayland-protocols libdrm-dev libgbm-dev libegl-dev libgl-dev libasound2-dev libpulse-dev libpipewire-0.3-dev \
+            libudev-dev libdbus-1-dev
+          python3 -m pip install --quiet 'cmake>=3.28,<4' lz4 fonttools pillow
+
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4   # the shader translator nxs2.py setup installs runs on .NET 10
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Toolchains
+        run: |
+          mkdir -p "$NXW_TOOLCHAINS"
+          cd "$NXW_TOOLCHAINS"
+          curl -fsSL "https://github.com/llvm/llvm-project/releases/download/llvmorg-$LLVM_VERSION/LLVM-$LLVM_VERSION-Linux-X64.tar.xz" -o llvm.tar.xz
+          mkdir "llvm-$LLVM_VERSION" && tar -xf llvm.tar.xz --strip-components=1 -C "llvm-$LLVM_VERSION" && rm llvm.tar.xz
+          curl -fsSL "https://sdk.lunarg.com/sdk/download/$VULKAN_SDK_VERSION/linux/vulkansdk-linux-x86_64-$VULKAN_SDK_VERSION.tar.xz" -o vk.tar.xz
+          mkdir "vulkansdk-$VULKAN_SDK_VERSION" && tar -xf vk.tar.xz --strip-components=1 -C "vulkansdk-$VULKAN_SDK_VERSION" && rm vk.tar.xz
+          test -f "vulkansdk-$VULKAN_SDK_VERSION/x86_64/include/vulkan/vulkan.h"
+          "llvm-$LLVM_VERSION/bin/clang" --version
+
+      - name: SDL3 from its source release
+        run: |
+          cd /tmp
+          curl -fsSL "https://github.com/libsdl-org/SDL/releases/download/release-$SDL3_VERSION/SDL3-$SDL3_VERSION.tar.gz" | tar -xz
+          cmake -S "SDL3-$SDL3_VERSION" -B sdl-build -G Ninja -DCMAKE_BUILD_TYPE=Release -DSDL_SHARED=ON -DSDL_STATIC=OFF -DSDL_TESTS=OFF \
+            -DSDL_UNIX_CONSOLE_BUILD=OFF -DCMAKE_INSTALL_PREFIX="$NXW_TOOLCHAINS/SDL3-$SDL3_VERSION-linux" -DCMAKE_INSTALL_LIBDIR=lib
+          cmake --build sdl-build -j 4
+          cmake --install sdl-build
+
+      - name: nxnative (the MIT base the runtime is ported from)
+        run: |
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          python3 nxs2.py setup --no-ios
+
+      - name: Build nxrt, nxlift and nxanalyze
+        run: bash windows/scripts/build.sh -j 4 Release -- nxrt nxlift-cli nxanalyze-cli
+
+      - name: Check and collect
+        run: |
+          B="$NXW_BUILD_ROOT/linux-Release/bin"
+          ls -l "$B"
+          ldd "$B/nxrt" || true
+          if nm -D --defined-only "$B/nxrt" | grep -E ' [BbDd] vk'; then echo "::error::nxrt still exports Vulkan pointers"; exit 1; fi
+          objdump -T "$B/nxrt" | grep -oE 'GLIBC_[0-9.]+' | sort -Vu | tail -1
+          mkdir -p kit/nxshader
+          cp "$B/nxrt" "$B/nxlift" "$B/nxanalyze" kit/
+          cp -L "$NXW_TOOLCHAINS/SDL3-$SDL3_VERSION-linux/lib/libSDL3.so.0" kit/
+          cp windows/src/nxrt/gen/out/hle_inventory.tsv windows/scripts/play.sh kit/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-kit
+          path: kit
+          retention-days: 14

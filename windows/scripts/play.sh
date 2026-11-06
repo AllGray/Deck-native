@@ -183,6 +183,8 @@ CACHE=$WORK/cache TEMP=$WORK/temp LOGS=$WORK/logs
 [ -n "$DRYRUN" ] || mkdir -p "$CACHE" "$TEMP" "$LOGS"
 export NXRT_VK_CACHE_DIR=$CACHE
 export DM_AUDIO=$([ -n "$SILENT" ] && echo 0 || echo 1)
+# The game's audio blocks are 960 frames. With PipeWire's default 1024-frame period each block leaves a 64-frame gap (6.25 % silence, a buzz on the Steam Deck)
+export SDL_AUDIO_DEVICE_SAMPLE_FRAMES=${SDL_AUDIO_DEVICE_SAMPLE_FRAMES:-960}
 [ -n "$WINDOW" ] && export NXRT_VK_WINDOW=$WINDOW
 [ -n "$FULLSCREEN" ] && export NXRT_VK_FULLSCREEN=1
 [ -n "$PADCHECK" ] && export DM_PAD_CHECK=1 DM_RUMBLE_LOG=1 DM_MOTION_LOG=1
