@@ -70,7 +70,8 @@ jobs:
           # The vibration graph runs in the SDK (hle_offline.c): the patch's inert hooks must not reach the registry either
           sed -i '/HLE_FORCE("_ZN2nn3hid[^"]*Vibration.*inert/d' nxnative/dm/host/hle_offline.c
           H=windows/src/nxrt
-          python3 -I $H/gen/gen_hle.py --nxnative nxnative --port $H/host --port $H/hle --extra $H/tests/hle_sig_test.c --extra $H/hle/hle_codec_video.c --out $H/gen/out
+          cp $H/hle/hle_codec_video.c nxnative/dm/host/   # the generator lists hooks from nxnative's files; this one is not in the patch's commit
+          python3 -I $H/gen/gen_hle.py --nxnative nxnative --port $H/host --port $H/hle --extra $H/tests/hle_sig_test.c --out $H/gen/out
           git status --short -- $H/gen/out | head -30
           echo "::notice::HLE registry: $(grep -c . $H/gen/out/hle_inventory.tsv) lines; $(git diff --stat -- $H/gen/out | tail -1)"
 
