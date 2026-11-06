@@ -979,9 +979,40 @@ NVN(nvnCommandBufferSetViewports, void, NVNcommandBuffer *c, int first, int n, c
 }
 NVN(nvnCommandBufferSetScissor, void, NVNcommandBuffer *c, int x, int y, int w, int h) { *REC(c, OP_SCISSOR, p_scissor) = (p_scissor){x, y, w, h}; }
 NVN(nvnCommandBufferSetDepthRange, void, NVNcommandBuffer *c, float n, float f) { *REC(c, OP_DEPTH_RANGE, p_depth_range) = (p_depth_range){n, f}; }
+static __thread const prog_t *t_mesh_prog; static __thread int t_mesh_stages;
 NVN(nvnCommandBufferBindProgram, void, NVNcommandBuffer *c, const NVNprogram *p, int stages) {
     *REC(c, OP_BIND_PROGRAM, p_bind_program) = (p_bind_program){(const prog_t *)p, stages};
+    t_mesh_prog = (const prog_t *)p; t_mesh_stages = stages;
 }
+// Task and mesh draws: what the game sends (bring-up). NXRT_MESH_DUMP=<dir> keeps each program's stages
+static void mesh_probe(const char *what, uint64_t a, uint64_t b, uint64_t c_) {
+    static _Atomic uint64_t n; uint64_t i = atomic_fetch_add(&n, 1);
+    if (i < 40 || i % 20000 == 0) LOG("[nvn] %s #%llu (%#llx, %#llx, %#llx) program %p stages %#x", what, (unsigned long long)i, (unsigned long long)a, (unsigned long long)b, (unsigned long long)c_, (const void *)t_mesh_prog, t_mesh_stages);
+    const prog_t *p = t_mesh_prog; const char *dir = getenv("NXRT_MESH_DUMP");
+    if (!p || !dir) return;
+    static uint64_t seen[512]; static int nseen; static SRWLOCK lk = SRWLOCK_INIT;
+    AcquireSRWLockExclusive(&lk);
+    int dup = 0; for (int k = 0; k < nseen; k++) dup |= seen[k] == p->serial;
+    if (!dup && nseen < 512) seen[nseen++] = p->serial; else dup = 1;
+    ReleaseSRWLockExclusive(&lk);
+    if (dup) return;
+    LOG("[nvn] mesh program serial %llu: %d stages, bound with %#x", (unsigned long long)p->serial, (int)p->nstage, t_mesh_stages);
+    for (unsigned k = 0; k < p->nstage && k < 6; k++) {
+        const uint8_t *ct = p->sd[k].control; if (!ct) continue;
+        uint32_t nc; memcpy(&nc, ct + 0x44, 4); if (nc >= (1u << 24)) nc = 0;
+        char path[1024]; FILE *f;
+        snprintf(path, sizeof path, "%s/%llu-%u.ctl", dir, (unsigned long long)p->serial, k); if ((f = fopen(path, "wb"))) { fwrite(ct, 1, 0xe0, f); fclose(f); }
+        snprintf(path, sizeof path, "%s/%llu-%u.code", dir, (unsigned long long)p->serial, k); if (nc && p->sd[k].data && (f = fopen(path, "wb"))) { fwrite((const void *)(uintptr_t)p->sd[k].data, 1, nc, f); fclose(f); }
+    }
+}
+NVN(nvnCommandBufferDrawMeshTasks, void, NVNcommandBuffer *c, int first, int count) { (void)c; mesh_probe("DrawMeshTasks", first, count, 0); }
+NVN(nvnCommandBufferDrawMeshTasksIndirect, void, NVNcommandBuffer *c, uint64_t a) { (void)c; mesh_probe("DrawMeshTasksIndirect", a, 0, 0); }
+NVN(nvnCommandBufferMultiDrawMeshTasksIndirect, void, NVNcommandBuffer *c, uint64_t a, int n, int stride) { (void)c; mesh_probe("MultiDrawMeshTasksIndirect", a, n, stride); }
+NVN(nvnCommandBufferMultiDrawMeshTasksIndirectCount, void, NVNcommandBuffer *c, uint64_t a, uint64_t cnt, int n, int stride) { (void)c; mesh_probe("MultiDrawMeshTasksIndirectCount", a, cnt, ((uint64_t)n << 32) | (uint32_t)stride); }
+NVN(nvnCommandBufferDrawMeshTasks3D, void, NVNcommandBuffer *c, int x, int y, int z) { (void)c; mesh_probe("DrawMeshTasks3D", x, y, z); }
+NVN(nvnCommandBufferDrawMeshTasks3DIndirect, void, NVNcommandBuffer *c, uint64_t a) { (void)c; mesh_probe("DrawMeshTasks3DIndirect", a, 0, 0); }
+NVN(nvnCommandBufferMultiDrawMeshTasks3DIndirect, void, NVNcommandBuffer *c, uint64_t a, int n, int stride) { (void)c; mesh_probe("MultiDrawMeshTasks3DIndirect", a, n, stride); }
+NVN(nvnCommandBufferMultiDrawMeshTasks3DIndirectCount, void, NVNcommandBuffer *c, uint64_t a, uint64_t cnt, int n, int stride) { (void)c; mesh_probe("MultiDrawMeshTasks3DIndirectCount", a, cnt, ((uint64_t)n << 32) | (uint32_t)stride); }
 static void bind_state(NVNcommandBuffer *c, int kind, const void *st, size_t n) { p_bind_state *r = rec(c, OP_BIND_STATE, offsetof(p_bind_state, bytes) + n); r->kind = kind; memcpy(r->bytes, st, n); }   // only the state's own bytes (nvn_obj.h p_bind_state)
 NVN(nvnCommandBufferBindBlendState, void, NVNcommandBuffer *c, const NVNblendState *st) { bind_state(c, 0, st, sizeof(blend_st)); }
 NVN(nvnCommandBufferBindColorState, void, NVNcommandBuffer *c, const NVNcolorState *st) { bind_state(c, 1, st, sizeof(color_st)); }
