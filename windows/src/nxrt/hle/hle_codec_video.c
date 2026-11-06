@@ -189,7 +189,7 @@ static Result cv_dec_fin(void *t) {
     // The submission-ready event goes with the decoder, as in the SDK. Kept, it stayed in the host's bound-event table, so the next decoder initialised in the same memory found its
     // event "bound" and was not given one: the game had cleared that memory, and nn::os aborted on the uninitialised event (Donkey Kong Bananza, its second movie)
     static void (*destroy)(void *); if (!destroy && !(destroy = guest_sym("_ZN2nn2os18DestroySystemEventEPNS0_15SystemEventTypeE"))) die("nn::os::DestroySystemEvent missing");
-    destroy(d->event);
+    GUEST_CALL(destroy, (uint64_t)(uintptr_t)d->event);   // guest code: through the runtime on x86-64
     pthread_mutex_destroy(&d->mu); free(d); *(cv_dec **)t = NULL;
     return 0;
 }
@@ -438,7 +438,7 @@ HLE_FORCE("_ZN2nn6syncpt3sdk20CreateSyncPointEventEPNS1_18SyncPointEventTypeE", 
 }
 HLE_FORCE("_ZN2nn6syncpt3sdk25InitializeMultiWaitHolderEPNS_2os19MultiWaitHolderTypeEPNS1_18SyncPointEventTypeE", "links the event's SystemEvent", void, h_spt_holder, void *holder, void *e) {
     static void (*init)(void *, void *); if (!init && !(init = guest_sym("_ZN2nn2os25InitializeMultiWaitHolderEPNS0_19MultiWaitHolderTypeEPNS0_15SystemEventTypeE"))) die("nn::os::InitializeMultiWaitHolder(SystemEventType) missing");
-    init(holder, e);
+    GUEST_CALL(init, (uint64_t)(uintptr_t)(holder), (uint64_t)(uintptr_t)(e));
 }
 HLE_FORCE("_ZN2nn6syncpt3sdk21RequestSyncPointEventEPNS1_18SyncPointEventTypeERKNS1_15SyncPointHandleE", "signalled when the decoder fills the awaited buffer",
           Result, h_spt_request, void *e, const cv_sync *s) {
@@ -453,7 +453,7 @@ HLE_FORCE("_ZN2nn6syncpt3sdk20CancelSyncPointEventEPNS1_18SyncPointEventTypeE", 
 HLE_FORCE("_ZN2nn6syncpt3sdk21DestroySyncPointEventEPNS1_18SyncPointEventTypeE", "destroys the event's SystemEvent", void, h_spt_destroy, void *e) {
     spt_unarm(e);
     static void (*destroy)(void *); if (!destroy && !(destroy = guest_sym("_ZN2nn2os18DestroySystemEventEPNS0_15SystemEventTypeE"))) die("nn::os::DestroySystemEvent missing");
-    destroy(e); SPT(e)->magic = 0;
+    GUEST_CALL(destroy, (uint64_t)(uintptr_t)e); SPT(e)->magic = 0;
 }
 
 #include "hle_codec_video.adapters.inc"
