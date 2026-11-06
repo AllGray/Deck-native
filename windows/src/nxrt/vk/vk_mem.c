@@ -316,8 +316,17 @@ int vkm_addr(uint64_t addr, uint64_t len, VkBuffer *buf, VkDeviceSize *off) {
 
 // Sparse backing for [o, o+n) of the buffer: unbound granules get memory and are bound before anything is recorded against them (a bind is a queue
 // operation; it is waited for here, which happens once per 2 MB granule)
+static SRWLOCK g_bind_lk = SRWLOCK_INIT;
+static int pool_bind_locked(pool_t_ *p, uint64_t o, uint64_t n);
+// Several threads ask for ranges (the replay's uses, the recording layer's address lookups). Two placing one granule would be worse than wasteful: the second reads the section after the first emptied it
 static int pool_bind(pool_t_ *p, uint64_t o, uint64_t n) {
     if (!p->sparse) return 0;
+    AcquireSRWLockExclusive(&g_bind_lk);
+    int r = pool_bind_locked(p, o, n);
+    ReleaseSRWLockExclusive(&g_bind_lk);
+    return r;
+}
+static int pool_bind_locked(pool_t_ *p, uint64_t o, uint64_t n) {
     uint64_t g0 = o / g_gran, g1 = (o + n + g_gran - 1) / g_gran;
     VkMemoryRequirements mr; vkGetBufferMemoryRequirements(g_vk.dev, p->buf[0], &mr);
     VkMemoryRequirements gr = {g_gran, mr.alignment, mr.memoryTypeBits};
