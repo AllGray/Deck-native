@@ -219,7 +219,7 @@ class App(tk.Tk):
         m = re.match(r'^\[\d+:\d\d(?::\d\d)?\] (.*)', line)
         if m: self.last_stage = m.group(1)[:90]
         for key, pat in (('app', r'Mac app: (.*)'), ('ipa', r'IPA: (.*?) \('), ('xcode', r'Xcode project: (.*)'), ('signed', r'signed IPA: (.*?)  '),
-                         ('windows', r'Windows game: (.*?)  \(save')):
+                         ('windows', r'Windows game: (.*?)  \(')):
             m = re.search(pat, line)
             if m: self.result[key] = m.group(1)
         if line.startswith('[FAIL]'): self.result['fail'] = line[7:]
