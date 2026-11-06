@@ -739,7 +739,9 @@ void FnAnalyzer::special() {
         // x30 as a return address: at every return and tail branch it must be the caller's (x30 as a scratch register between a
         // prologue that saved it and an epilogue that restores it is ordinary register allocation)
         const FlowInfo fl = flow(I, pc(k));
-        const bool tail = fl.kind == Flow::b && !intra(fl.target);   // indirect branches are judged in indirect()
+        // A branch to UDF #0 past the function's end is __builtin_unreachable, not a tail call (Mario Kart World's main+0xebc4 to 0xf16c): x30 needs no checking there
+        const bool to_udf = fl.kind == Flow::b && fl.target + 4 <= c.img.size() && nxw::load_le<uint32_t>(c.img, size_t(fl.target)) == 0;
+        const bool tail = fl.kind == Flow::b && !intra(fl.target) && !to_udf;   // indirect branches are judged in indirect()
         if ((fl.kind == Flow::ret && fl.reg == 30) || tail || (fl.kind == Flow::br && fl.reg == 30 && !jts.count(k))) {
             uint32_t w = k;
             const Origin o = return_address(k, w);
