@@ -213,6 +213,7 @@ int vk_dev_open(const vk_dev_opts *o, const char *const *inst_exts, uint32_t n_i
     const char *sp = getenv("NXRT_VK_SPARSE");   // test switch (#12): 0 backs every memory pool fully at once instead of sparse granules on first use
     h->sparse_buffer = q_sparse && en.sparseBinding && en.sparseResidencyBuffer && !(sp && *sp == '0');
     h->sparse_aliased = h->sparse_buffer && en.sparseResidencyAliased;
+    h->sparse_image = q_sparse && en.sparseBinding && en.sparseResidencyImage2D;
     h->bc = en.textureCompressionBC; h->astc_ldr = en.textureCompressionASTC_LDR;
     h->mirror_clamp_edge = f12.samplerMirrorClampToEdge; h->minmax_filter = f12.samplerFilterMinmax;
     g_vk.f10 = en; g_vk.f11 = f11; g_vk.f12 = f12; g_vk.f13 = f13;

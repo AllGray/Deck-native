@@ -90,7 +90,7 @@ static void image_free(vkt_image *im) {
     if (im->present_view && im->present_view != im->view) vkDestroyImageView(g_vk.dev, im->present_view, NULL);
     if (im->view) vkDestroyImageView(g_vk.dev, im->view, NULL);
     if (im->img) vkDestroyImage(g_vk.dev, im->img, NULL);
-    vk_free_mem(&im->alloc);
+    if (!im->unbacked) vk_free_mem(&im->alloc);
     atomic_fetch_sub(&s_images, 1); atomic_fetch_sub(&s_bytes, im->alloc.size);
     free(im);
 }
@@ -117,6 +117,13 @@ static vkt_image *image_create(const tex_t *t, int cls) {
     }
     VkImageCreateFlags cf = (cube ? VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT : 0) | (!depth ? VK_IMAGE_CREATE_MUTABLE_FORMAT_BIT : 0);
     if (type == VK_IMAGE_TYPE_3D && !(fi->flags & VKF_COMPRESSED)) cf |= VK_IMAGE_CREATE_2D_ARRAY_COMPATIBLE_BIT;
+    // NVN's sparse textures (Mario Kart World's terrain: 8192x8192x68 arrays, several GB each) have no memory behind them yet: unbound pages read as zero, nothing is uploaded.
+    // Enough for the first pictures; the pages the game maps come next. NXRT_VK_SPARSE_TEX=0 backs them fully, as before
+    { const char *e = getenv("NXRT_VK_SPARSE_TEX");
+      if ((t->d.flags & NVN_TEXTURE_FLAGS_SPARSE) && type == VK_IMAGE_TYPE_2D && im->samples == VK_SAMPLE_COUNT_1_BIT && !depth && !(e && *e == '0') && g_vk.has.sparse_image) {
+          VkImageFormatProperties ip; VkImageCreateFlags sf = cf | VK_IMAGE_CREATE_SPARSE_BINDING_BIT | VK_IMAGE_CREATE_SPARSE_RESIDENCY_BIT;
+          if (vkGetPhysicalDeviceImageFormatProperties(g_vk.pd, fi->vk, type, VK_IMAGE_TILING_OPTIMAL, u, sf, &ip) == VK_SUCCESS) { cf = sf; im->unbacked = 1; }
+      } }
     // drop what this format cannot have in this combination (storage on an sRGB format, a sample count)
     for (int pass = 0; pass < 3; pass++) {
         VkImageFormatProperties ip;
@@ -129,8 +136,9 @@ static vkt_image *image_create(const tex_t *t, int cls) {
                             VK_IMAGE_TILING_OPTIMAL, u, VK_SHARING_MODE_EXCLUSIVE, 0, NULL, VK_IMAGE_LAYOUT_UNDEFINED};
     if (vkCreateImage(g_vk.dev, &ci, NULL, &im->img) != VK_SUCCESS) { VKRED("vkCreateImage %ux%ux%u format %s (%d) levels %u layers %u failed", im->w, im->h, im->depth, fi->name, fi->vk, im->levels, im->layers); free(im); return NULL; }
     VkMemoryRequirements mr; vkGetImageMemoryRequirements(g_vk.dev, im->img, &mr);
-    if (vk_alloc_mem(&mr, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, 0, &im->alloc)) { VKRED("no device memory for a %ux%u %s texture (%llu bytes)", im->w, im->h, fi->name, (unsigned long long)mr.size); vkDestroyImage(g_vk.dev, im->img, NULL); free(im); return NULL; }
-    vkBindImageMemory(g_vk.dev, im->img, im->alloc.mem, im->alloc.off);
+    if (im->unbacked) { static int n; if (n++ < 12) VKLOG("sparse texture %ux%ux%u layers %u %s: %.1f MB not backed", im->w, im->h, im->depth, im->layers, fi->name, mr.size / 1048576.0); }
+    else if (vk_alloc_mem(&mr, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, 0, &im->alloc)) { VKRED("no device memory for a %ux%u %s texture (%llu bytes)", im->w, im->h, fi->name, (unsigned long long)mr.size); vkDestroyImage(g_vk.dev, im->img, NULL); free(im); return NULL; }
+    if (!im->unbacked) vkBindImageMemory(g_vk.dev, im->img, im->alloc.mem, im->alloc.off);
     im->view = make_view(im, fi->vk, im->vtype, fi->swz, 0, im->levels, 0, im->layers, im->aspect & ~VK_IMAGE_ASPECT_STENCIL_BIT ? im->aspect & ~VK_IMAGE_ASPECT_STENCIL_BIT : im->aspect);
     VkFormat pf = vkf_unorm_of(fi->vk);
     im->present_view = pf != fi->vk ? make_view(im, pf, VK_IMAGE_VIEW_TYPE_2D, (VkComponentMapping){0}, 0, 1, 0, 1, VK_IMAGE_ASPECT_COLOR_BIT) : VK_NULL_HANDLE;
@@ -199,6 +207,7 @@ static void upgrade_add(vka_key k, vkt_image *im, uint32_t level, uint32_t layer
 
 // Every level and layer of t's storage into im, recorded into cb (whose submission owns the staging). Returns bytes uploaded, or -1
 static int64_t upload(vkt_image *im, const tex_t *t, VkCommandBuffer cb) {
+    if (im->unbacked) return 0;
     const vkf_info *fi = im->fi; uint64_t t0 = now_ns(); int64_t total = 0;
     VkImageAspectFlags all = im->aspect;
     vk_image_barrier(cb, im->img, all, im->content ? im->rest : VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
