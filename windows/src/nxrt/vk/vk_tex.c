@@ -124,7 +124,7 @@ static vkt_image *image_create(const tex_t *t, int cls) {
           VkImageFormatProperties ip; VkImageCreateFlags sf = cf | VK_IMAGE_CREATE_SPARSE_BINDING_BIT | VK_IMAGE_CREATE_SPARSE_RESIDENCY_BIT;
           VkResult fr = vkGetPhysicalDeviceImageFormatProperties(g_vk.pd, fi->vk, type, VK_IMAGE_TILING_OPTIMAL, u, sf, &ip);
           // RADV's emulated ASTC (vk_require_astc=true) cannot be sparse, and a whole 8192x8192x68 array of it would be 25 GB. Nothing is uploaded into an unbacked texture, so BC7 of
-          // the same size stands in for it. Views in the ASTC format fail and those draws go without
+          // the same size stands in for it. Views in the ASTC format become views in BC7
           if (fr != VK_SUCCESS && t->d.format >= 0x79 && t->d.format <= 0x94) {
               const vkf_info *bc = vkf_get((fi->flags & VKF_SRGB) ? NVN_FORMAT_BPTC_UNORM_SRGB : NVN_FORMAT_BPTC_UNORM);
               if (bc && vkGetPhysicalDeviceImageFormatProperties(g_vk.pd, bc->vk, type, VK_IMAGE_TILING_OPTIMAL, u, sf, &ip) == VK_SUCCESS) { fi = bc; im->fi = bc; fr = VK_SUCCESS; }
@@ -409,6 +409,8 @@ VkImageView vkt_view(vkt_image *im, const view_t *v, int set_swz, uint16_t swz) 
     if (bl >= im->levels) bl = im->levels - 1; if (!nl || bl + nl > im->levels) nl = im->levels - bl;
     if (b0 >= im->layers) b0 = im->layers - 1; if (!nly || b0 + nly > im->layers) nly = im->layers - b0;
     VkFormat f = vkf_view_format(im->d.format, fmt);   // the image's own fallback, whatever the view asks for
+    const vkf_info *of = vkf_get(im->d.format);
+    if (im->unbacked && of && of->vk != im->fi->vk) f = im->fi->vk;   // a stand-in (BC7 for ASTC): RADV's emulated ASTC view reads a plane this image lacks, a wild address and a GPU fault
     const vkf_info *vi = vkf_get(fmt); const VkComponentMapping *base = vi && f == vi->vk ? &vi->swz : &im->fi->swz;
     VkComponentMapping m = *base;
     if (set_swz) m = (VkComponentMapping){compose(nvn_swz(swz & 7), base), compose(nvn_swz(swz >> 3 & 7), base), compose(nvn_swz(swz >> 6 & 7), base), compose(nvn_swz(swz >> 9 & 7), base)};
