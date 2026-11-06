@@ -3,11 +3,7 @@
 # skip themselves (exit 77). The release itself is made by hand (docs/RELEASE-NOTES-1.1.0.md); this workflow publishes nothing.
 name: Windows tools
 
-on:
-  push:
-    paths: ['windows/**', 'tools/package_release.py', 'nxs2.py', '.github/workflows/windows-tools.yml']
-  pull_request:
-    paths: ['windows/**', 'tools/package_release.py', 'nxs2.py', '.github/workflows/windows-tools.yml']
+on:   # Deck-native builds for Linux (linux-kit.yml): this one runs only when started by hand
   workflow_dispatch:
 
 permissions:
