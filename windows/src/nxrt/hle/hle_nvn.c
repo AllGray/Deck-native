@@ -617,7 +617,7 @@ static int keys_hash(const NVNshaderData *sd, int mapped, uint8_t out[8]) {
     memcpy(&ncode, (const uint8_t *)sd->control + 0x704, 4);
     // SWITCH2 (private bring-up): GLSLC 0x00220015 control blocks are 0xe0 bytes (+4 = 0xc9, +8 = 0x11, +0x18 = the version); the code area is +0x40 (instructions and padding) plus +0x30 (the 0xe0 reflection trailer)
     int s2 = 0; { uint32_t a_, b_, v_; memcpy(&a_, (const uint8_t *)sd->control + 4, 4); memcpy(&b_, (const uint8_t *)sd->control + 8, 4); memcpy(&v_, (const uint8_t *)sd->control + 0x18, 4);
-      if (a_ == 0xc9 && (b_ == 0x11 || b_ == 0xb) && v_ == 0x00220015) { uint32_t p_; memcpy(&p_, (const uint8_t *)sd->control + 0x44, 4); ncode = p_;   /* +0x44 only: the 0xe0 trailer never reaches GPU memory (the next object follows the padding) */ s2 = 1; } }
+      if (a_ == 0xc9 && (b_ == 0x11 || b_ == 0xb) /* SDK 21 leaves the version field (+0x18) at 0 (Mario Kart World), so only the NVN2 magic decides */) { uint32_t p_; memcpy(&p_, (const uint8_t *)sd->control + 0x44, 4); ncode = p_;   /* +0x44 only: the 0xe0 trailer never reaches GPU memory (the next object follows the padding) */ s2 = 1; } }
     int code = sd->data && ncode && ncode < (1u << 24);
     if (mapped && !(code && gfx_addr(sd->data, ncode, &mb, &mo))) return 0;
     // Control +0x20 holds the section's own length: sections of at least 0x880 bytes (all of Mario's, Engage's, Dread's and 13 Sentinels') use the first 0x880; SDK 10's 3D World has 0x850-byte ones followed by other data, so only their own length is used (shader_split.py ctl_len)
@@ -651,7 +651,7 @@ NVN(nvnProgramSetShaders, NVNboolean, NVNprogram *p, int n, const NVNshaderData 
     k->ok = 0;
     for (int i = 0; i < n; i++) {
         // SWITCH2 (private bring-up): with a Switch 2 control block the code area is not final at SetShaders (4 of 6 keys hashed here differed from the code at the first draw); key it lazily in prog_key
-        int s2_ = 0; if (sd[i].control) { uint32_t a_, b_, v_; memcpy(&a_, (const uint8_t *)sd[i].control + 4, 4); memcpy(&b_, (const uint8_t *)sd[i].control + 8, 4); memcpy(&v_, (const uint8_t *)sd[i].control + 0x18, 4); s2_ = a_ == 0xc9 && (b_ == 0x11 || b_ == 0xb) && v_ == 0x00220015; }
+        int s2_ = 0; if (sd[i].control) { uint32_t a_, b_, v_; memcpy(&a_, (const uint8_t *)sd[i].control + 4, 4); memcpy(&b_, (const uint8_t *)sd[i].control + 8, 4); memcpy(&v_, (const uint8_t *)sd[i].control + 0x18, 4); s2_ = a_ == 0xc9 && (b_ == 0x11 || b_ == 0xb) /* SDK 21 leaves the version field (+0x18) at 0 (Mario Kart World), so only the NVN2 magic decides */; }
         if (!s2_ && keys_hash(&sd[i], 1, k->key[i])) k->ok |= (uint8_t)(1u << i);
         // Diagnostic: trace the loader of selected shader keys (comma-separated hex).
         if (trace && (k->ok & (1u << i))) {
