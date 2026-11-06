@@ -1524,7 +1524,7 @@ void vkr_frame(uint64_t frame) {
     if (g_td_frame && frame == g_td_frame + 1 && g_ntd) {   // the dump frame's images, now that its work is done
         vks_finish();
         for (int i = 0; i < g_ntd; i++) {
-            vkt_image *im = g_td[i]; if (im->w > 4096 || im->h > 4096) continue;   // a dump of 16384x16384 takes more memory than there is char path[1200]; const char *lp = nxrt_log_path();
+            vkt_image *im = g_td[i]; if (im->w > 4096 || im->h > 4096) continue; /* a dump of 16384x16384 takes more memory than there is */ char path[1200]; const char *lp = nxrt_log_path();
             for (unsigned z = 0; z < (im->vtype == VK_IMAGE_VIEW_TYPE_3D ? (im->depth > 4 ? 4 : im->depth) : 1); z++) {
                 snprintf(path, sizeof path, "%s.tex-%llu-ser%llu-%s-%ux%u-z%u.png", lp && *lp ? lp : "nxrt", (unsigned long long)g_td_frame, (unsigned long long)im->serial, im->fi->name, im->w, im->h, z);
                 VKLOG("texture dump: ser%llu %s %ux%ux%u %s", (unsigned long long)im->serial, im->fi->name, im->w, im->h, im->depth, vks_dump_image(im, z, path) ? "not dumped" : path);
