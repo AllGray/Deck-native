@@ -426,7 +426,7 @@ static int pool_bind_locked(pool_t_ *p, uint64_t o, uint64_t n) {
             for (int i = 0; i < nf; i++) {
                 uint64_t at = fresh[i] * g_gran;
                 if (at >= p->win_lo[k] && at < p->win_lo[k] + p->win_n[k] && nb < 64)
-                    binds[nb++] = (VkSparseMemoryBind){at - p->win_lo[k], g_gran, p->gran[fresh[i]].mem, p->gran[fresh[i]].off, 0};
+                    binds[nb++] = (VkSparseMemoryBind){at - p->win_lo[k], p->placed ? p->gran[fresh[i]].size : g_gran, p->gran[fresh[i]].mem, p->gran[fresh[i]].off, 0};   // a placed pool's last object is shorter
             }
             if (nb > first) bis[nbi++] = (VkSparseBufferMemoryBindInfo){p->buf[k], (uint32_t)(nb - first), binds + first};
         }

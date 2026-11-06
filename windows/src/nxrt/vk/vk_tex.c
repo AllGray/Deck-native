@@ -122,7 +122,14 @@ static vkt_image *image_create(const tex_t *t, int cls) {
     { const char *e = getenv("NXRT_VK_SPARSE_TEX");
       if ((t->d.flags & NVN_TEXTURE_FLAGS_SPARSE) && type == VK_IMAGE_TYPE_2D && im->samples == VK_SAMPLE_COUNT_1_BIT && !depth && !(e && *e == '0') && g_vk.has.sparse_image) {
           VkImageFormatProperties ip; VkImageCreateFlags sf = cf | VK_IMAGE_CREATE_SPARSE_BINDING_BIT | VK_IMAGE_CREATE_SPARSE_RESIDENCY_BIT;
-          if (vkGetPhysicalDeviceImageFormatProperties(g_vk.pd, fi->vk, type, VK_IMAGE_TILING_OPTIMAL, u, sf, &ip) == VK_SUCCESS) { cf = sf; im->unbacked = 1; }
+          VkResult fr = vkGetPhysicalDeviceImageFormatProperties(g_vk.pd, fi->vk, type, VK_IMAGE_TILING_OPTIMAL, u, sf, &ip);
+          // RADV's emulated ASTC (vk_require_astc=true) cannot be sparse, and a whole 8192x8192x68 array of it would be 25 GB. Nothing is uploaded into an unbacked texture, so BC7 of
+          // the same size stands in for it. Views in the ASTC format fail and those draws go without
+          if (fr != VK_SUCCESS && t->d.format >= 0x79 && t->d.format <= 0x94) {
+              const vkf_info *bc = vkf_get((fi->flags & VKF_SRGB) ? NVN_FORMAT_BPTC_UNORM_SRGB : NVN_FORMAT_BPTC_UNORM);
+              if (bc && vkGetPhysicalDeviceImageFormatProperties(g_vk.pd, bc->vk, type, VK_IMAGE_TILING_OPTIMAL, u, sf, &ip) == VK_SUCCESS) { fi = bc; im->fi = bc; fr = VK_SUCCESS; }
+          }
+          if (fr == VK_SUCCESS) { cf = sf; im->unbacked = 1; }
       } }
     // drop what this format cannot have in this combination (storage on an sRGB format, a sample count)
     for (int pass = 0; pass < 3; pass++) {
