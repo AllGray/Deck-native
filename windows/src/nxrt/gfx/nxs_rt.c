@@ -178,7 +178,7 @@ void nxs_rt_wait_idle(uint64_t timeout_ns) {
 static int dump(const char *key, const NVNshaderData *sd) {
     if (!sd->control) return 0;
     const uint8_t *c = sd->control; uint32_t a, b, v, ncode; memcpy(&a, c + 4, 4); memcpy(&b, c + 8, 4); memcpy(&v, c + 0x18, 4); memcpy(&ncode, c + 0x704, 4);
-    int s2 = a == 0xc9 && (b == 0x11 || b == 0xb) && v == 0x00220015;
+    int s2 = a == 0xc9 && (b == 0x11 || b == 0xb); (void)v;   // SDK 21 leaves the version field at 0 (Mario Kart World)
     if (s2) memcpy(&ncode, c + 0x44, 4);
     if (!sd->data || !ncode || ncode >= (1u << 24)) return 0;
     uint8_t ctl[0x880] = {0}; memcpy(ctl, c, s2 ? 0xe0 : 0x880);
