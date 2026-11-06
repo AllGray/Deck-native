@@ -108,6 +108,11 @@ static vkt_image *image_create(const tex_t *t, int cls) {
     if (im->levels > maxl) im->levels = maxl;
     im->samples = t->d.samples > 1 ? (VkSampleCountFlagBits)t->d.samples : VK_SAMPLE_COUNT_1_BIT;
     im->aspect = vkf_aspect(fi->vk);
+    // NXRT_VK_TEX_MAX (default 1024, 0 = all): a handheld's 800 lines never show the top levels of the game's big compressed textures, and they are most of its memory
+    { static int tmax = -1; if (tmax < 0) { const char *e = getenv("NXRT_VK_TEX_MAX"); tmax = e && *e ? atoi(e) : 1024; }
+      if (tmax > 0 && cls == VKT_STORAGE && (fi->flags & VKF_COMPRESSED) && type == VK_IMAGE_TYPE_2D && !(t->d.flags & NVN_TEXTURE_FLAGS_SPARSE))
+          while (im->levels - im->drop > 1 && (mip(im->w, im->drop) > (uint32_t)tmax || mip(im->h, im->drop) > (uint32_t)tmax)) im->drop++;
+      if (im->drop) { im->w = mip(im->w, im->drop); im->h = mip(im->h, im->drop); im->levels -= im->drop; } }
     VkImageUsageFlags u = VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
     int depth = (fi->flags & (VKF_DEPTH | VKF_STENCIL)) != 0;
     if (cls == VKT_GPU && !(fi->flags & VKF_COMPRESSED)) {   // NVN has no flag for "render target": every uncompressed GPU texture may be one
@@ -225,7 +230,7 @@ static int64_t upload(vkt_image *im, const tex_t *t, VkCommandBuffer cb) {
     for (uint32_t level = 0; level < im->levels; level++)
         for (uint32_t layer = 0; layer < im->layers; layer++) {
             s2tex_surface s; uint64_t base; size_t row = 0;
-            int k = nvn_texio_surface(t, level, layer, &s, &base, &row);
+            int k = nvn_texio_surface(t, level + im->drop, layer, &s, &base, &row);
             if (k < 0) { if (!level) { static int n; if (n++ < 8) VKRED("texture %ux%u format %s: level %u layer %u is not addressable in its storage", im->w, im->h, fi->name, level, layer); } continue; }
             uint32_t lw = mip(im->w, level), lh = im->vtype == VK_IMAGE_VIEW_TYPE_1D || im->vtype == VK_IMAGE_VIEW_TYPE_1D_ARRAY ? 1 : mip(im->h, level), ld = is3d ? mip(im->depth, level) : 1;
             size_t lrow = (size_t)s.width * s.bytes_per_block, lsize = lrow * s.height * s.depth;
@@ -407,6 +412,7 @@ VkImageView vkt_view(vkt_image *im, const view_t *v, int set_swz, uint16_t swz) 
     int fmt = v && v->set_format ? v->format : im->d.format;
     uint32_t bl = v && v->set_levels ? v->base_level : 0, nl = v && v->set_levels ? v->nlevels : im->levels;
     uint32_t b0 = v && v->set_layers ? v->min_layer : 0, nly = v && v->set_layers ? v->nlayers : im->layers;
+    if (im->drop && v && v->set_levels) { if (bl >= im->drop) bl -= im->drop; else { nl = nl > im->drop - bl ? nl - (im->drop - bl) : 1; bl = 0; } }
     if (bl >= im->levels) bl = im->levels - 1; if (!nl || bl + nl > im->levels) nl = im->levels - bl;
     if (b0 >= im->layers) b0 = im->layers - 1; if (!nly || b0 + nly > im->layers) nly = im->layers - b0;
     VkFormat f = vkf_view_format(im->d.format, fmt);   // the image's own fallback, whatever the view asks for
@@ -593,7 +599,7 @@ int vkt_samp_copy(int id, samp_par *out) {
 }
 
 int vkt_readback_region(vkt_image *im, unsigned level, unsigned layer, const NVNcopyRegion *r, uint8_t *dst, size_t size) {
-    if (!im || level >= im->levels || r->width <= 0 || r->height <= 0) return -1;
+    if (!im || im->drop || level >= im->levels || r->width <= 0 || r->height <= 0) return -1;
     VkBufferCreateInfo bci = {VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO, NULL, 0, size, VK_BUFFER_USAGE_TRANSFER_DST_BIT, VK_SHARING_MODE_EXCLUSIVE, 0, NULL};
     VkBuffer b; vk_alloc m;
     if (vkCreateBuffer(g_vk.dev, &bci, NULL, &b) != VK_SUCCESS) return -1;
@@ -616,7 +622,7 @@ int vkt_readback_region(vkt_image *im, unsigned level, unsigned layer, const NVN
 }
 
 int vkt_readback(vkt_image *im, unsigned level, unsigned layer, uint8_t *dst, size_t size) {
-    if (!im || level >= im->levels || layer >= im->layers) return -1;
+    if (!im || im->drop || level >= im->levels || layer >= im->layers) return -1;
     VkBufferCreateInfo bci = {VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO, NULL, 0, size, VK_BUFFER_USAGE_TRANSFER_DST_BIT, VK_SHARING_MODE_EXCLUSIVE, 0, NULL};
     VkBuffer b; vk_alloc m;
     if (vkCreateBuffer(g_vk.dev, &bci, NULL, &b) != VK_SUCCESS) return -1;

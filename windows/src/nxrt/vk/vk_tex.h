@@ -15,6 +15,7 @@ extern "C" {
 enum { VKT_GPU = 0, VKT_STORAGE = 1, VKT_NVIEWS = 48 };   // content owned by the GPU (render targets, storage images, copies) / read from guest memory
 typedef struct vkt_image {
     int unbacked;                        // a sparse texture with no pages bound: reads zero
+    uint32_t drop;                       // top levels of the game's texture left out (NXRT_VK_TEX_MAX): the image's level 0 is its level `drop`
     // identity
     const pool_t *pool; int64_t off; uint8_t *mem; nvn_texdesc d; int cls, has_layout;
     uint64_t storage;                    // bytes of storage it reads (t->L.size)

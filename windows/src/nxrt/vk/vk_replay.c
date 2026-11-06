@@ -1190,6 +1190,8 @@ static void copy_b2t(const p_copy_b2t *c) {
     g_st.tex_copies++;
     if (im->fi->conv != VKF_COPY) { RED_ONCE(80, "buffer→texture copy into a format the device stores converted (%s): not copied", im->fi->name); return; }
     unsigned level = c->has_view && c->view.set_levels ? c->view.base_level : 0, layer0 = c->has_view && c->view.set_layers ? c->view.min_layer : 0;
+    if (level < im->drop) return;   // a level left out (NXRT_VK_TEX_MAX)
+    level -= im->drop;
     if (level >= im->levels) return;
     size_t row, img; uint32_t rt, ir;
     if (!copy_layout(im, &c->r, &row, &img, &rt, &ir)) { RED_ONCE(81, "buffer→texture copy with strides Vulkan cannot express"); return; }
@@ -1197,7 +1199,7 @@ static void copy_b2t(const p_copy_b2t *c) {
     VkBuffer b; VkDeviceSize o;
     if (!vkm_use(c->src, img * nz, &b, &o)) { RED_ONCE(82, "buffer→texture copy source is in no memory pool"); return; }
     // a storage-backed texture gets the bytes in its storage too (hle_nvn.c nvn_tex_mirror_b2t), or the next upload from there would drop them
-    if (im->cls == VKT_STORAGE && !is3d && nvn_tex_mirror_b2t(t, level, layer0, &c->r, (const uint8_t *)(uintptr_t)c->src, row, img)) RED_ONCE(83, "a buffer→texture copy into a storage-backed texture could not be written into its storage");
+    if (im->cls == VKT_STORAGE && !is3d && nvn_tex_mirror_b2t(t, level + im->drop, layer0, &c->r, (const uint8_t *)(uintptr_t)c->src, row, img)) RED_ONCE(83, "a buffer→texture copy into a storage-backed texture could not be written into its storage");
     pass_end();
     VkCommandBuffer cb = vks_cb(); barrier_all(cb);
     VkImageLayout l = xfer_in(cb, im, 1);
@@ -1215,6 +1217,7 @@ static void copy_t2b(const p_copy_b2t *c) {
     g_st.tex_copies++;
     if (im->fi->conv != VKF_COPY) { RED_ONCE(84, "texture→buffer copy from a format the device stores converted (%s): not copied", im->fi->name); return; }
     unsigned level = c->has_view && c->view.set_levels ? c->view.base_level : 0, layer0 = c->has_view && c->view.set_layers ? c->view.min_layer : 0;
+    if (im->drop) return;
     if (level >= im->levels) return;
     size_t row, img; uint32_t rt, ir;
     if (!copy_layout(im, &c->r, &row, &img, &rt, &ir)) { RED_ONCE(85, "texture→buffer copy with strides Vulkan cannot express"); return; }
@@ -1268,6 +1271,7 @@ static void copy_t2t(const p_copy_t2t *c) {
     g_st.tex_copies++;
     unsigned sl = c->has_sv && c->sv.set_levels ? c->sv.base_level : 0, dl = c->has_dv && c->dv.set_levels ? c->dv.base_level : 0;
     unsigned sz0 = c->has_sv && c->sv.set_layers ? c->sv.min_layer : 0, dz0 = c->has_dv && c->dv.set_layers ? c->dv.min_layer : 0;
+    if (s->drop || d->drop) { RED_ONCE(121, "a copy from or to a texture whose top levels are left out (NXRT_VK_TEX_MAX): not copied"); return; }
     if (sl >= s->levels || dl >= d->levels) return;
     int s3 = st->d.target == NVN_TEXTURE_TARGET_3D, d3 = dt->d.target == NVN_TEXTURE_TARGET_3D, nz = c->sr.depth > 0 ? c->sr.depth : 1;
     int mirror = (c->flags & (NVN_COPY_FLAGS_MIRROR_X_BIT | NVN_COPY_FLAGS_MIRROR_Y_BIT)) != 0, linear = (c->flags & NVN_COPY_FLAGS_LINEAR_FILTER_BIT) != 0;
