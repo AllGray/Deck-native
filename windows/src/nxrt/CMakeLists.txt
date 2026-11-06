@@ -3,7 +3,7 @@
 set(NXRT_HLE
   hle/hle_sdkinit.c hle/hle_offline.c hle/hle_net.c hle/hle_nvdrv.c hle/hle_account.c hle/hle_friends.c hle/hle_time.c hle/hle_table.c hle/hle_nvn.c
   hle/hle_fs.c hle/hle_oe.c hle/hle_sdk16.c hle/hle_hid.c hle/hle_touch.c hle/hle_haptics.c hle/hle_nv.c hle/hle_vi.c
-  hle/hle_audio.c hle/audio_silent.c hle/hle_audren.c hle/hle_misc.c hle/hle_sf.c hle/hle_codec.c hle/hle_swkbd.c)
+  hle/hle_audio.c hle/audio_silent.c hle/hle_audren.c hle/hle_misc.c hle/hle_sf.c hle/hle_codec_video.c hle/hle_movie_yuv.c hle/hle_movie_avc_stub.c hle/hle_codec.c hle/hle_swkbd.c)
 # The platform's own files: Win32, or Linux (docs/LINUX-PLAN.md: plat/linux/windows.h gives the rest of nxrt the Win32 subset it uses)
 if(WIN32)
   set(NXRT_PLAT plat/plat_win32.c host/addrspace.c host/prof.c hle/save_txn.c front/text_input_win.c)
@@ -50,6 +50,9 @@ function(nxrt_executable name)
   set_target_properties(${name} PROPERTIES C_STANDARD 11 C_EXTENSIONS ON)
 endfunction()
 
+if(NOT WIN32)
+  target_link_libraries(nxrt_core PRIVATE -l:libvpx.a)   # VP9 for the Switch 2 video decoder hooks
+endif()
 nxrt_executable(nxrt tools/nxrt_main.c)
 set_target_properties(nxrt PROPERTIES ENABLE_EXPORTS ON)   # nxrt.lib: what the game DLL links against
 

@@ -34,7 +34,7 @@ jobs:
             build-essential g++-12 libstdc++-12-dev ninja-build pkg-config binutils libicu70 libtinfo5 libxml2 zlib1g-dev libzstd-dev \
             libx11-dev libxext-dev libxcursor-dev libxi-dev libxrandr-dev libxss-dev libxtst-dev libxfixes-dev libxkbcommon-dev \
             libwayland-dev wayland-protocols libdrm-dev libgbm-dev libegl-dev libgl-dev libasound2-dev libpulse-dev libpipewire-0.3-dev \
-            libudev-dev libdbus-1-dev
+            libudev-dev libdbus-1-dev libvpx-dev
           python3 -m pip install --quiet 'cmake>=3.28,<4' lz4 fonttools pillow
 
       - uses: actions/checkout@v4
@@ -70,7 +70,7 @@ jobs:
           # The vibration graph runs in the SDK (hle_offline.c): the patch's inert hooks must not reach the registry either
           sed -i '/HLE_FORCE("_ZN2nn3hid[^"]*Vibration.*inert/d' nxnative/dm/host/hle_offline.c
           H=windows/src/nxrt
-          python3 -I $H/gen/gen_hle.py --nxnative nxnative --port $H/host --port $H/hle --extra $H/tests/hle_sig_test.c --out $H/gen/out
+          python3 -I $H/gen/gen_hle.py --nxnative nxnative --port $H/host --port $H/hle --extra $H/tests/hle_sig_test.c --extra $H/hle/hle_codec_video.c --out $H/gen/out
           git status --short -- $H/gen/out | head -30
           echo "::notice::HLE registry: $(grep -c . $H/gen/out/hle_inventory.tsv) lines; $(git diff --stat -- $H/gen/out | tail -1)"
 
