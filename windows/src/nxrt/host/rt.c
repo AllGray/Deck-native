@@ -395,6 +395,11 @@ void rt_trap(NxwGuestCpu *cpu, uint64_t pc, uint32_t why) {
     crash_report(msg, NULL);
     ExitProcess(67);
 }
+void rt_setjmp(NxwGuestCpu *cpu) {
+    /* Mario Kart World's fonts: the TrueType interpreter's fnt_Execute sets a jump for its error path. Normal runs never jump, and longjmp reports and stops */
+    static int once; if (!once) { once = 1; LOG("setjmp: answered 0; a longjmp would stop the game (DESIGN D5)"); }
+    cpu->x[0] = 0;
+}
 void rt_nonlocal(NxwGuestCpu *cpu) {
     /* the lifter's context functions arrive with cpu->pc = the function itself (sdk's DispatchFiberContext, UserExceptionHandler, longjmp, jumpto) */
     char fn[160]; nxrt_symbolize(cpu->pc, fn, sizeof fn);

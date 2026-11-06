@@ -29,6 +29,8 @@ void rt_yield(NxwGuestCpu *cpu, uint32_t kind, uint64_t site);
 /* The four sdk functions that rewrite SP or x30 (DispatchFiberContext, UserExceptionHandler, longjmp, libunwind's jumpto) are
    lifted as a call of this with cpu->pc = the function and the state in cpu: a report and a stop until DESIGN D5's bridge */
 NXW_NORETURN void rt_nonlocal(NxwGuestCpu *cpu);
+/* setjmp: answers 0. A later longjmp stops in rt_nonlocal, so no state needs saving yet. The state is in cpu. */
+void rt_setjmp(NxwGuestCpu *cpu);
 /* Function-entry tracing: lifted functions call rt_trace_entry(cpu, entry) on entry while rt_trace_on is non-zero (objects
    lifted with Options::entry_trace). It must not change cpu. */
 extern volatile uint8_t rt_trace_on;

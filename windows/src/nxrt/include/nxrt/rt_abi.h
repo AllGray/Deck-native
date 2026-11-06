@@ -83,6 +83,9 @@ NXRT_NORETURN NXRT_API void rt_trap(NxwGuestCpu *cpu, uint64_t pc, uint32_t why)
 /* A pending non-local transfer (cpu->unwind_pc / unwind_sp: EH resume, longjmp). v0 reports and stops (DESIGN D5, M2 report). */
 NXRT_NORETURN NXRT_API void rt_nonlocal(NxwGuestCpu *cpu);
 
+/* setjmp: answers 0. A later longjmp stops in rt_nonlocal, so no state needs saving yet. */
+NXRT_API void rt_setjmp(NxwGuestCpu *cpu);
+
 /* Spin-loop back edges, YIELD and WFE (DESIGN D9): a host yield or a short sleep with nxnative's back-off, and a safepoint where a thread
    another thread paused with SetThreadActivity stops. kind: NXRT_YIELD_*; site: the loop head's guest address (0 when unknown).
    Not in research/03's list: added so spin loops have one entry point. */
