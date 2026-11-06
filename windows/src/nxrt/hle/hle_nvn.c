@@ -1005,6 +1005,14 @@ static void mesh_probe(const char *what, uint64_t a, uint64_t b, uint64_t c_) {
         snprintf(path, sizeof path, "%s/%llu-%u.code", dir, (unsigned long long)p->serial, k); if (nc && p->sd[k].data && (f = fopen(path, "wb"))) { fwrite((const void *)(uintptr_t)p->sd[k].data, 1, nc, f); fclose(f); }
     }
 }
+typedef void (*NVNT_nvnCommandBufferDrawMeshTasks)(NVNcommandBuffer *, int, int);
+typedef void (*NVNT_nvnCommandBufferDrawMeshTasksIndirect)(NVNcommandBuffer *, uint64_t);
+typedef void (*NVNT_nvnCommandBufferMultiDrawMeshTasksIndirect)(NVNcommandBuffer *, uint64_t, int, int);
+typedef void (*NVNT_nvnCommandBufferMultiDrawMeshTasksIndirectCount)(NVNcommandBuffer *, uint64_t, uint64_t, int, int);
+typedef void (*NVNT_nvnCommandBufferDrawMeshTasks3D)(NVNcommandBuffer *, int, int, int);
+typedef void (*NVNT_nvnCommandBufferDrawMeshTasks3DIndirect)(NVNcommandBuffer *, uint64_t);
+typedef void (*NVNT_nvnCommandBufferMultiDrawMeshTasks3DIndirect)(NVNcommandBuffer *, uint64_t, int, int);
+typedef void (*NVNT_nvnCommandBufferMultiDrawMeshTasks3DIndirectCount)(NVNcommandBuffer *, uint64_t, uint64_t, int, int);
 NVN(nvnCommandBufferDrawMeshTasks, void, NVNcommandBuffer *c, int first, int count) { (void)c; mesh_probe("DrawMeshTasks", first, count, 0); }
 NVN(nvnCommandBufferDrawMeshTasksIndirect, void, NVNcommandBuffer *c, uint64_t a) { (void)c; mesh_probe("DrawMeshTasksIndirect", a, 0, 0); }
 NVN(nvnCommandBufferMultiDrawMeshTasksIndirect, void, NVNcommandBuffer *c, uint64_t a, int n, int stride) { (void)c; mesh_probe("MultiDrawMeshTasksIndirect", a, n, stride); }
