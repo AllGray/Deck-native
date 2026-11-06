@@ -822,10 +822,20 @@ static void bind_vertex_buffers(VkCommandBuffer cb, uint32_t used, int use_zero)
     }
     if (use_zero) { VkDeviceSize o = 0, n = ZERO_SIZE; vkCmdBindVertexBuffers2(cb, 16, 1, &R0.zero, &o, &n, NULL); }
 }
+#ifdef _WIN32
 static int read_u32(uint64_t a, uint32_t *v) {   // guest memory, guarded
     __try { memcpy(v, (const void *)(uintptr_t)a, 4); return 1; }
     __except (GetExceptionCode() == EXCEPTION_ACCESS_VIOLATION ? EXCEPTION_EXECUTE_HANDLER : EXCEPTION_CONTINUE_SEARCH) { return 0; }
 }
+#else
+static int read_u32(uint64_t a, uint32_t *v) {   // guest memory, guarded
+    plat_guard g; PLAT_GUARD_PUSH(&g);
+    if (sigsetjmp(g.jb, 0)) return 0;
+    memcpy(v, (const void *)(uintptr_t)a, 4);
+    PLAT_GUARD_POP(&g);
+    return 1;
+}
+#endif
 // Indirect quads (#17, #20, F-22): the GPU writes their arguments earlier in the same submission, so at recording guest memory held 0 or a stale count and the
 // effect was not drawn (or kept the GPU busy). A one-thread dispatch (shaders/quad_args.comp) turns them into an indexed indirect draw over R0.quads on the GPU,
 // outside the pass: the draw reopens it, loading what the targets hold. 0 when it cannot be made (the draw is skipped)
