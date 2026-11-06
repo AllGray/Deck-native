@@ -38,6 +38,7 @@ FLOAT = {'float': 4, 'double': 8}
 STRUCTS = {
     'NVNseparateTextureHandle': (8, 'int'), 'NVNseparateSamplerHandle': (8, 'int'), 'NVNcounterData': (16, 'int'),
     'GLSLCversion': (0x34, 'int'),                                            # glslcGetVersion's result, through x8 (hle_glslc.c)
+    'cv_pref': (24, 'int'), 'cv_sync': (16, 'int'),                           # hle_codec_video.c: the decode image preference (x8) and nn::gs::NativeSyncHandle
     'NxrtTestFloat4': (16, 'f32'), 'NxrtTestDouble2': (16, 'f64'),            # tests only: the float-aggregate paths
 }
 
