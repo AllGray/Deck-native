@@ -13,7 +13,7 @@ void dm_guest_write_prepare(void *addr, size_t len);   // host/crash.c: unprotec
 int dm_guest_readable_run(uint64_t a, uint64_t *end);   // host/hle_svc.c: what VirtualQuery tells on Windows
 #endif
 
-enum { PAGE = 4096, GRAN = 2u << 20, HOT_STREAK = 3, HOT_COOL_FRAMES = 240, MAXPOOL = 4096, RUN_MAX = 1024, MAXWIN = 32 };
+enum { PAGE = 4096, GRAN = 2u << 20, HOT_STREAK = 3, HOT_COOL_FRAMES = 240, MAXPOOL = 32768, RUN_MAX = 1024, MAXWIN = 32 };
 // A pool larger than the device's largest buffer (AMD: 2 GiB; the game's biggest pool is 3.4 GiB) gets several buffers, windows over it. With sparse
 // binding and aliasing the windows overlap and share the same memory, so any range up to the overlap fits in one of them; otherwise they are side by side.
 typedef struct {
