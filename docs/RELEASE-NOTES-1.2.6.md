@@ -161,7 +161,7 @@ The game's **Link Play → Local connection** works between our builds: Windows,
 
 ## Upgrading
 
-- **From 1.2.0, 1.2.1, 1.2.2, 1.2.3 or 1.2.4:** see "Getting it" under 1.2.5 (Mac users coming from 1.2.0 also see 1.2.1's).
+- **From 1.2.0, 1.2.1, 1.2.2, 1.2.3, 1.2.4 or 1.2.5:** see "Getting it" under 1.2.6 (Mac users coming from 1.2.0 also see 1.2.1's).
 - **From 1.1.x:** see "Getting it" under 1.2.0. On Windows, Setup once and Build again (nothing is recompiled); on the Mac, Setup once and Build again, then install the new iPhone app over the old one.
 - **From 1.0.x, Mac / iPhone:** unzip the new download, run Setup once in it, build again with your dump: only what changed is redone, and your recorded shaders stay. Install the new iPhone app **over** the old one (never delete the app first: that deletes its save); the game files on the phone only need copying again if you moved to another update of the game. Mac saves live outside the app. Steps: the README's "Updating from an older version".
 - **From 1.0.x, Windows (iPhone builder):** the same. The Windows game is new: tick "Windows: play on this PC".
