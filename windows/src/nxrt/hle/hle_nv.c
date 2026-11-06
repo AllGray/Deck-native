@@ -34,6 +34,10 @@ HLE_FORCE("_ZN2nv22DumpGraphicsMemoryInfoEv", WHY "; the dump goes to the host l
 }
 
 // ---------- From BananaNative (MIT, moceure), ported for Mario Kart World 1.8.0 on x86-64 ----------
+// nv::InitCheck tests the SDK's flag, which nv::InitializeGraphics sets, and that runs on the host (Mario Kart World's movie library calls it)
+HLE_FORCE("_ZN2nv9InitCheckEv", "graphics initialised check; nv::InitializeGraphics recorded on the host", void, h_nv_InitCheck, void) {
+    if (!g_nv_pool.inited) die("nv::InitCheck: graphics not initialised (nv::InitializeGraphics was not called)");
+}
 HLE_FORCE("_ZN2nn2gs3sdk30CheckGraphicsSystemInitializedEPKcm", "the graphics system's boot is nv::InitializeGraphics, recorded on the host", void, h_gs_CheckInit, const char *who, uint64_t n) {
     if (!g_nv_pool.inited) die("%.*s: the graphics system is not booted (nv::InitializeGraphics was not called)", (int)(n < 64 ? n : 64), who ? who : "?");
 }
