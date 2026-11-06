@@ -152,6 +152,7 @@ The game's **Link Play → Local connection** works between our builds: Windows,
 - **Windows: if the game still freezes for you**, please open an issue with the newest log from `%LOCALAPPDATA%\Pokopia Native\<game version>\logs\`: since 1.2.4 it names the graphics program the card was running when it stopped.
 - The Windows game was developed and tested on one PC (Windows 11, NVIDIA). AMD cards needed the 1.2.2 fix above and are otherwise untested, as are Intel GPUs; please report how it runs.
 - Physical controllers on Windows were tested with SDL's virtual pads only; `-PadCheck` logs everything for a report.
+- **Windows: the Display tab's 30 fps choice has no effect yet**; the game runs at 60. Making it work needs the game's own frame limiter, as on the Mac (thanks to Quantumenis for spotting it).
 - The first start on Windows draws some effects late while the run-time shaders are translated (about 150, once).
 - **Windows: areas past the first towns** still build their graphics the first time you visit them (short freezes, once: they are kept for later starts). The list grows with each update. Game version 1.0.5 has no list yet.
 - The Expansion Pass (DLC) is not supported yet.

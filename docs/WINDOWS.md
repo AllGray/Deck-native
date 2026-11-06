@@ -78,7 +78,7 @@ Double-click **`<build folder>\out\Play Pokopia <version>.cmd`** (or **Play** in
   keyboard is best for this one).
 - **The picture:** the same window's **Display** tab sets the console mode (docked draws at 1920x1080, handheld at
   1280x720 and is lighter), window or full screen and the window size, **Upscaling** (Sharp, the default, or Standard)
-  with its **Sharpness**, 60 or 30 fps, and vsync. Upscaling matters when the window is larger than the game's picture,
+  with its **Sharpness**, 60 or 30 fps (30 has no effect yet: the game runs at 60), and vsync. Upscaling matters when the window is larger than the game's picture,
   as in full screen on a 1440p or 4K screen: Sharp keeps it crisp where Standard is softer. Saved for this PC in
   `%APPDATA%\Pokopia Native\display.json`. The game itself does not draw above 1080p yet.
 - Switches for the launcher go after its name in a terminal: `-Fullscreen`, `-Window 1600x900`, `-Silent`, `-PadCheck`
