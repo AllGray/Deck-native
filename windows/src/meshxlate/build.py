@@ -4,7 +4,7 @@ import os,re,subprocess,sys,glob,concurrent.futures as cf
 R="/run/media/deck/SDCard/mkw-native"; T=R+"/tc"; X=T+"/mx"; E=R+"/egl/src"; ME=R+"/src/windows/src/meshxlate"
 CXX=T+"/llvm-23.1.4/bin/clang++"
 BASE=["--target=x86_64-linux-gnu","--sysroot="+T+"/sysroot","-std=c++23","-O1","-g0","-w","-DFMT_HEADER_ONLY","-DSIRIT_USE_SYSTEM_SPIRV_HEADERS","-fexceptions","-fPIC",
- "-I"+ME+"/shim","-I"+E,"-I"+X+"/boost","-I"+X+"/fmt/include","-I"+X+"/sirit/include","-I"+X+"/sirit/src","-I"+X+"/spirv-headers/include","-I"+X+"/spirv-headers/include/spirv/unified1"]
+ "-I"+ME+"/shim","-include",ME+"/shim/mx_prelude.h","-I"+E,"-I"+X+"/boost","-I"+X+"/fmt/include","-I"+X+"/sirit/include","-I"+X+"/sirit/src","-I"+X+"/spirv-headers/include","-I"+X+"/spirv-headers/include/spirv/unified1"]
 src=[f for f in glob.glob(E+"/shader_recompiler/**/*.cpp",recursive=True) if "/glsl/" not in f and "/glasm/" not in f]
 src+=glob.glob(X+"/sirit/src/**/*.cpp",recursive=True)+[ME+"/main.cpp"]
 extra=[E+"/common/"+n for n in ("assert.cpp",) if False]
