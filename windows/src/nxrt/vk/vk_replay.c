@@ -143,11 +143,11 @@ static int mkbuf(VkDeviceSize n, VkBufferUsageFlags u, VkMemoryPropertyFlags wan
 // ---------- Binding state (nvn_mtl.m's S and R: per queue, kept across submissions) ----------
 typedef struct rs {
     uint64_t serial;
-    const prog_t *bst[5]; const prog_t *cprog;
+    const prog_t *bst[5]; const prog_t *cprog, *mprog;
     blend_st blend[8]; color_st color; chmask_st chmask; ms_st ms; poly_st poly; ds_st ds;
     va_st attr[16]; int nattr; vs_st stream[16]; int nstream; NVNbufferRange vbuf[16];
-    p_bind_buf ubo[6][16], ssbo[6][16];
-    uint64_t tex[6][NTEX], samp[6][128], img[6][32];
+    p_bind_buf ubo[8][16], ssbo[8][16];   // 6 and 7: NVN2 task and mesh stages
+    uint64_t tex[8][NTEX], samp[8][128], img[8][32];
     uint32_t st_vmask[2], st_wmask[2], st_ref[2];
     p_poly_offset po; float vp[16][4]; float dr[2]; int has_vp, depth_clamp; uint8_t vp_sw[16][4];
     float blend_color[4], alpha_ref; int64_t copy_stride, copy_img_stride;
@@ -175,14 +175,14 @@ static rs *rs_get(uint64_t serial) {
 }
 
 // ---------- Programs: the shader of each NVN stage, cached by program serial ----------
-typedef struct { const vks_shader *sh[6]; } progc;
+typedef struct { const vks_shader *sh[8]; } progc;
 static vk_hmap g_progc = {8};
 static const vks_shader *prog_stage(const prog_t *p, int stage) {
     if (!p || !p->serial) return NULL;
     progc *c = vk_hm_get(&g_progc, &p->serial);
     if (c && c->sh[stage]) return c->sh[stage];
     if (!c) { c = calloc(1, sizeof *c); vk_hm_put(&g_progc, &p->serial, c); }
-    for (unsigned i = 0; i < p->nstage && i < 6; i++) { const vks_shader *s = vksh_get(p, i); if (s && s->stage >= 0 && s->stage < 6) c->sh[s->stage] = s; }
+    for (unsigned i = 0; i < p->nstage && i < 6; i++) { const vks_shader *s = vksh_get(p, i); if (s && s->stage >= 0 && s->stage < 8) c->sh[s->stage] = s; }
     return c->sh[stage];
 }
 
@@ -879,19 +879,29 @@ static int quad_args(uint64_t ind, VkBuffer *ab, VkDeviceSize *ao) {
     RED_ONCE(57, "indirect quads: their arguments are turned into an indexed draw on the GPU (at most 65536 quads and instances)");
     return 1;
 }
+// NVN2 task / mesh draws go through draw() with g_dm set: the task shader in slot 3, the mesh shader in slot 0, their bindings from NVN stages g_ts_st / g_ms_st
+static const p_draw_mesh *g_dm; static int g_ts_st = 6, g_ms_st = 7;
 static void draw(const p_draw *dw, const p_draw_idx *di) {
     if (S->render_skip) { g_st.draws_skipped++; return; }
-    int prim = dw ? dw->prim : di->prim, expand;
-    uint64_t ind = dw ? dw->ind : di->ind, mdi = dw ? dw->mdi_cnt : di->mdi_cnt; int mdi_i = dw ? dw->mdi_i : di->mdi_i;
+    const int mesh = g_dm != NULL;
+    int prim = dw ? dw->prim : di ? di->prim : NVN_DRAW_PRIMITIVE_TRIANGLES, expand;
+    uint64_t ind = dw ? dw->ind : di ? di->ind : 0, mdi = dw ? dw->mdi_cnt : di ? di->mdi_cnt : 0; int mdi_i = dw ? dw->mdi_i : di ? di->mdi_i : 0;
     if (mdi) { uint32_t cnt; if (read_u32(mdi, &cnt) && (uint32_t)mdi_i >= cnt) return;
         RED_ONCE(52, "an indirect-count multi-draw: its count is read from guest memory at replay (a count the GPU writes in the same submission is missed)"); }
     VkPrimitiveTopology topo = vkp_topology(prim, &expand);
     if (expand == VKP_EXPAND_UNSUPPORTED || expand == VKP_EXPAND_LINE_LOOP) { static int n; if (n++ < 4) VKRED("primitive type %d is not drawn", prim); g_st.draws_skipped++; return; }
     if (S->poly.cull == NVN_FACE_FRONT_AND_BACK && !S->rast_discard) return;
     const vks_shader *sh[5] = {0};
-    for (int s = 0; s < 5; s++) if (S->bst[s]) sh[s] = prog_stage(S->bst[s], s);
+    if (mesh) {
+        const prog_t *mp = S->mprog ? S->mprog : S->bst[1];
+        if (!g_vk.has.mesh || !vkCmdDrawMeshTasksEXT) { RED_ONCE(122, "task / mesh draws: the device has no VK_EXT_mesh_shader"); g_st.draws_skipped++; return; }
+        sh[0] = prog_stage(mp, VKS_MS); sh[3] = prog_stage(mp, VKS_TS); sh[1] = prog_stage(mp, VKS_FS);
+        if (!sh[0]) { g_st.skip_no_shader++; g_st.draws_skipped++; return; }
+    } else {
+        for (int s = 0; s < 5; s++) if (S->bst[s]) sh[s] = prog_stage(S->bst[s], s);
+    }
     if (!sh[0] || (S->bst[1] && !sh[1] && !S->rast_discard)) { g_st.skip_no_shader++; g_st.draws_skipped++; return; }
-    sh[0] = vin_shader(sh[0]);
+    if (!mesh) sh[0] = vin_shader(sh[0]);
     if (S->rast_discard) sh[1] = NULL;
     VkBuffer qab = VK_NULL_HANDLE; VkDeviceSize qao = 0;   // indirect quads: the indexed draw's arguments, made on the GPU before the pass opens
     if (dw && ind && expand == VKP_EXPAND_QUADS && !quad_args(ind, &qab, &qao)) { g_st.draws_skipped++; return; }
@@ -953,8 +963,8 @@ static void draw(const p_draw *dw, const p_draw_idx *di) {
     if (!g_vkp_dyn.a2c) k.a2c = S->ms.a2c != 0;
     if (!g_vkp_dyn.polygon_mode) k.poly = (uint8_t)S->poly.mode;
     if (!g_vkp_dyn.depth_clamp) k.depth_clamp = S->depth_clamp != 0 && g_vk.f10.depthClamp;
-    uint32_t used; int use_zero;
-    set_vertex_input(cb, sh[0], &k, &used, &use_zero);
+    uint32_t used = 0; int use_zero = 0;
+    if (!mesh) set_vertex_input(cb, sh[0], &k, &used, &use_zero);
     VkPipelineLayout layout;
     VkPipeline pipe = vkp_graphics(&k, &layout);
     if (!pipe) { g_st.skip_no_pipeline++; g_st.draws_skipped++; return; }
@@ -964,7 +974,7 @@ static void draw(const p_draw *dw, const p_draw_idx *di) {
     vkCmdSetViewportWithCount(cb, 1, &vp); vkCmdSetScissorWithCount(cb, 1, &sc);
     vkCmdSetLineWidth(cb, 1.0f);
     vkCmdSetCullMode(cb, vkp_cull(S->poly.cull)); vkCmdSetFrontFace(cb, vkp_front_face(S->poly.front, g_queue_origin_ll));
-    vkCmdSetPrimitiveTopology(cb, topo);
+    if (!mesh) vkCmdSetPrimitiveTopology(cb, topo);
     int cls = vkp_topology_class(topo), pm = S->poly.mode;
     int bias = (S->poly.offset_en & (cls == 0 || pm == NVN_POLYGON_MODE_POINT ? 1 : cls == 1 || pm == NVN_POLYGON_MODE_LINE ? 2 : 4)) != 0;
     vkCmdSetDepthBiasEnable(cb, bias); vkCmdSetDepthBias(cb, S->po.units, g_vk.f10.depthBiasClamp ? S->po.clamp : 0.0f, S->po.factor);
@@ -983,7 +993,7 @@ static void draw(const p_draw *dw, const p_draw_idx *di) {
     if (restart && ((di->itype == NVN_INDEX_TYPE_UNSIGNED_BYTE && S->restart.index != 0xff) || (di->itype == NVN_INDEX_TYPE_UNSIGNED_SHORT && S->restart.index != 0xffff) || (di->itype == NVN_INDEX_TYPE_UNSIGNED_INT && S->restart.index != 0xffffffffu)))
         RED_ONCE(57, "primitive restart index %#x is not the index type's largest value: Vulkan restarts only there", S->restart.index);
     if (restart && (cls != 1 && cls != 2 ? 1 : topo == VK_PRIMITIVE_TOPOLOGY_LINE_LIST || topo == VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST || topo == VK_PRIMITIVE_TOPOLOGY_POINT_LIST) && !g_vk.has.prim_list_restart) restart = 0;
-    vkCmdSetPrimitiveRestartEnable(cb, restart);
+    if (!mesh) vkCmdSetPrimitiveRestartEnable(cb, restart);
     if (g_vkp_dyn.blend_enable && P.ncolor) vkCmdSetColorBlendEnableEXT(cb, 0, (uint32_t)P.ncolor, ben);
     if (g_vkp_dyn.blend_eq && P.ncolor) vkCmdSetColorBlendEquationEXT(cb, 0, (uint32_t)P.ncolor, beq);
     if (g_vkp_dyn.write_mask && P.ncolor) vkCmdSetColorWriteMaskEXT(cb, 0, (uint32_t)P.ncolor, wm);
@@ -992,17 +1002,18 @@ static void draw(const p_draw *dw, const p_draw_idx *di) {
     if (g_vkp_dyn.a2c) vkCmdSetAlphaToCoverageEnableEXT(cb, S->ms.a2c != 0);
     if (g_vkp_dyn.polygon_mode) vkCmdSetPolygonModeEXT(cb, vkp_polygon_mode(S->poly.mode));
     if (g_vkp_dyn.depth_clamp) vkCmdSetDepthClampEnableEXT(cb, S->depth_clamp != 0 && g_vk.f10.depthClamp);
-    bind_vertex_buffers(cb, used, use_zero);
+    if (!mesh) bind_vertex_buffers(cb, used, use_zero);
     // the draw's base instance for c0 + 0x644 (an indirect draw's from its record in guest memory)
-    g_draw_binst = (uint32_t)(dw ? dw->base_instance : di->base_instance);
+    g_draw_binst = (uint32_t)(dw ? dw->base_instance : di ? di->base_instance : 0);
     if (ind) { uint32_t bi; if (read_u32(ind + (dw ? 12 : 16), &bi)) g_draw_binst = bi; }
     int swrites = 0;
     for (int s = 0; s < 5; s++) if (sh[s]) {
-        VkDescriptorSet ds = write_set(sh[s], s, &swrites);
+        VkDescriptorSet ds = write_set(sh[s], mesh && s == 0 ? g_ms_st : mesh && s == 3 ? g_ts_st : s, &swrites);
         if (!ds) { g_st.draws_skipped++; return; }
         vkCmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, layout, (uint32_t)sh[s]->set, 1, &ds, 0, NULL);
     }
-    if (g_pd) {
+    if (g_pd && mesh) PD("draw mesh ms=%s ts=%s fs=%s groups %d,%d,%d first %d", sh[0]->key, sh[3] ? sh[3]->key : "-", sh[1] ? sh[1]->key : "-", g_dm->x, g_dm->y, g_dm->z, g_dm->first);
+    if (g_pd && !mesh) {
         char b[400]; int o = 0;
         for (int i = 0; i < P.ncolor; i++) o += snprintf(b + o, sizeof b - o, " a%d{en%d wm%x %d,%d,%d/%d,%d,%d raw%#llx}", i, (int)ben[i], (unsigned)wm[i], beq[i].srcColorBlendFactor, beq[i].dstColorBlendFactor, beq[i].colorBlendOp,
                                                          beq[i].srcAlphaBlendFactor, beq[i].dstAlphaBlendFactor, beq[i].alphaBlendOp, (unsigned long long)*(const uint64_t *)&S->blend[i]);
@@ -1041,6 +1052,12 @@ static void draw(const p_draw *dw, const p_draw_idx *di) {
     }
     if (S->vis_on && P.query < 0) { int q = q_alloc(); if (q >= 0) { vkCmdBeginQuery(cb, R0.qp, (uint32_t)q, 0); P.query = q; g_st.queries++; } }
     // the draw
+    if (mesh) {
+        vk_checkpoint(cb, 'd', sh[0]->key, 1, 0, 0, 0);
+        if (g_dm->first) RED_ONCE(123, "a task / mesh draw from workgroup %d: drawn from 0", g_dm->first);
+        if (g_dm->x > 0 && g_dm->y > 0 && g_dm->z > 0) vkCmdDrawMeshTasksEXT(cb, (uint32_t)g_dm->x, (uint32_t)g_dm->y, (uint32_t)g_dm->z);
+        g_st.draws++; return;
+    }
     uint32_t inst = (uint32_t)((dw ? dw->instances : di->instances) > 0 ? (dw ? dw->instances : di->instances) : 1);
     vk_checkpoint(cb, 'd', sh[1] ? sh[1]->key : sh[0]->key, inst, 0, 0, ind != 0);
     if (dw) {
@@ -1375,6 +1392,7 @@ static void state_op(uint32_t op, const void *a) {
     case OP_BIND_PROGRAM: { const p_bind_program *bp = a;
         if (bp->stages & 0x20) S->cprog = bp->prog;
         for (int st = 0; st < 5; st++) if (bp->stages >> st & 1) S->bst[st] = bp->prog;
+        if (bp->stages & 0xc0) S->mprog = bp->prog;   // task / mesh bits
         break; }
     case OP_BIND_STATE: {
         const p_bind_state *b = a; blend_st bs;
@@ -1390,15 +1408,15 @@ static void state_op(uint32_t op, const void *a) {
     case OP_BIND_VATTR: { const p_bind_vattr *b = a; if (b->n >= 0 && b->n <= 16) { memcpy(S->attr, b->st, 4 * (size_t)b->n); S->nattr = b->n; } break; }
     case OP_BIND_VSTREAM: { const p_bind_vstream *b = a; if (b->n >= 0 && b->n <= 16) { memcpy(S->stream, b->st, 8 * (size_t)b->n); S->nstream = b->n; } break; }
     case OP_BIND_VBUF: case OP_BIND_VBUF1: { p_bind_vbuf tmp; const p_bind_vbuf *b = vbuf_rec(op, a, &tmp); if (b->first >= 0 && b->first + b->n <= 16) memcpy(&S->vbuf[b->first], b->r, sizeof *b->r * (size_t)b->n); break; }
-    case OP_BIND_UBO: case OP_BIND_UBO_SMALL: { p_bind_buf tmp; const p_bind_buf *b = bind_buf_rec(op, a, &tmp); if (b->stage >= 0 && b->stage < 6 && b->index >= 0 && b->index < 16) S->ubo[b->stage][b->index] = *b; break; }
-    case OP_BIND_SSBO: { const p_bind_buf *b = a; if (b->stage >= 0 && b->stage < 6 && b->index >= 0 && b->index < 16) S->ssbo[b->stage][b->index] = *b; break; }
+    case OP_BIND_UBO: case OP_BIND_UBO_SMALL: { p_bind_buf tmp; const p_bind_buf *b = bind_buf_rec(op, a, &tmp); if (b->stage >= 0 && b->stage < 8 && b->index >= 0 && b->index < 16) S->ubo[b->stage][b->index] = *b; break; }
+    case OP_BIND_SSBO: { const p_bind_buf *b = a; if (b->stage >= 0 && b->stage < 8 && b->index >= 0 && b->index < 16) S->ssbo[b->stage][b->index] = *b; break; }
     case OP_BIND_TEX: case OP_BIND_TEX1: { p_bind_handles t1; const p_bind_handles *b = bind_rec(op, a, &t1);
         if (b->n < 0 || b->n > 32) { RED_ONCE(110, "a bind record holding count %d: overwritten after it was recorded", b->n); break; }
         bind_handles_fresh(b);
-        if (b->stage >= 0 && b->stage < 6 && b->first >= 0 && b->first + b->n <= NTEX) memcpy(&S->tex[b->stage][b->first], b->h, 8 * (size_t)b->n);
+        if (b->stage >= 0 && b->stage < 8 && b->first >= 0 && b->first + b->n <= NTEX) memcpy(&S->tex[b->stage][b->first], b->h, 8 * (size_t)b->n);
         break; }
-    case OP_BIND_SAMP: { const p_bind_handles *b = a; bind_handles_fresh(b); if (b->stage >= 0 && b->stage < 6 && b->first >= 0 && b->first + b->n <= 128) memcpy(&S->samp[b->stage][b->first], b->h, 8 * (size_t)b->n); break; }
-    case OP_BIND_IMG: { const p_bind_handles *b = a; bind_handles_fresh(b); if (b->stage >= 0 && b->stage < 6 && b->first >= 0 && b->first + b->n <= 32) memcpy(&S->img[b->stage][b->first], b->h, 8 * (size_t)b->n); break; }
+    case OP_BIND_SAMP: { const p_bind_handles *b = a; bind_handles_fresh(b); if (b->stage >= 0 && b->stage < 8 && b->first >= 0 && b->first + b->n <= 128) memcpy(&S->samp[b->stage][b->first], b->h, 8 * (size_t)b->n); break; }
+    case OP_BIND_IMG: { const p_bind_handles *b = a; bind_handles_fresh(b); if (b->stage >= 0 && b->stage < 8 && b->first >= 0 && b->first + b->n <= 32) memcpy(&S->img[b->stage][b->first], b->h, 8 * (size_t)b->n); break; }
     case OP_STENCIL: { const p_stencil *b = a; for (int f = 0; f < 2; f++) if (b->face & (1 << f)) { if (b->which == 0) S->st_vmask[f] = (uint32_t)b->value_mask; else if (b->which == 1) S->st_wmask[f] = (uint32_t)b->mask; else S->st_ref[f] = (uint32_t)b->ref; } break; }
     case OP_POLY_OFFSET: S->po = *(const p_poly_offset *)a; break;
     case OP_VIEWPORTS: { const p_viewports *b = a; for (int i = 0; i < b->n && b->first + i < 16; i++) memcpy(S->vp[b->first + i], b->v[i], 16); S->has_vp = 1; break; }
@@ -1466,6 +1484,11 @@ static int walk(const uint8_t *p, int depth, uint64_t *budget) {
         case OP_CLEAR_DS: clear_ds((const p_clear_ds *)a); break;
         case OP_DRAW: { p_draw t; draw(draw_rec(a, h.size, &t), NULL); break; }
         case OP_DRAW_IDX: { p_draw_idx t; draw(NULL, draw_idx_rec(a, h.size, &t)); break; }
+        case OP_DRAW_MESH: {
+            static int init; if (!init) { init = 1; const char *e = getenv("NXRT_MESH_STAGES"); if (e) sscanf(e, "%d,%d", &g_ts_st, &g_ms_st);
+                VKLOG("task / mesh draws: bindings of NVN stages %d (task) and %d (mesh), NXRT_MESH_STAGES; bound now: 6 ubo %d ssbo %d, 7 ubo %d ssbo %d", g_ts_st, g_ms_st,
+                      !!S->ubo[6][3].addr + !!S->ubo[6][0].addr, !!S->ssbo[6][6].addr, !!S->ubo[7][3].addr + !!S->ubo[7][0].addr, !!S->ssbo[7][6].addr); }
+            g_dm = (const p_draw_mesh *)a; draw(NULL, NULL); g_dm = NULL; break; }
         case OP_DISPATCH: dispatch((const p_dispatch *)a); break;
         case OP_BARRIER: pass_end(); g_st.barriers++; break;
         case OP_COPY_B2T: copy_b2t((const p_copy_b2t *)a); break;

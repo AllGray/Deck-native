@@ -15,10 +15,11 @@ static uint64_t g_loaded, g_failed;
 static struct { VkBuffer buf; vk_alloc mem; VkDeviceSize used, size; } g_c1;   // the c1 bank (host-visible, written once per shader)
 static vks_shader g_failed_mark;
 
-int vksh_set_of(int stage) { return stage == VKS_CS ? 0 : stage == VKS_VS ? 0 : stage == VKS_FS ? 1 : stage == VKS_GS ? 2 : stage == VKS_TCS ? 3 : 4; }
+int vksh_set_of(int stage) { return stage == VKS_CS ? 0 : stage == VKS_VS ? 0 : stage == VKS_MS ? 0 : stage == VKS_FS ? 1 : stage == VKS_GS ? 2 : stage == VKS_TCS || stage == VKS_TS ? 3 : 4; }
 VkShaderStageFlagBits vksh_vk_stage(int stage) {
     switch (stage) {
     case VKS_VS: return VK_SHADER_STAGE_VERTEX_BIT; case VKS_FS: return VK_SHADER_STAGE_FRAGMENT_BIT; case VKS_GS: return VK_SHADER_STAGE_GEOMETRY_BIT;
+    case VKS_TS: return VK_SHADER_STAGE_TASK_BIT_EXT; case VKS_MS: return VK_SHADER_STAGE_MESH_BIT_EXT;
     case VKS_TCS: return VK_SHADER_STAGE_TESSELLATION_CONTROL_BIT; case VKS_TES: return VK_SHADER_STAGE_TESSELLATION_EVALUATION_BIT; default: return VK_SHADER_STAGE_COMPUTE_BIT;
     }
 }
@@ -552,6 +553,7 @@ static int hexval(char c) { return c >= '0' && c <= '9' ? c - '0' : c >= 'a' && 
 
 // ---------- From a module and its reflection ----------
 static int stage_of(const char *s) {
+    if (!strcmp(s, "ts")) return VKS_TS; if (!strcmp(s, "ms")) return VKS_MS;
     return !strcmp(s, "vs") ? VKS_VS : !strcmp(s, "ps") ? VKS_FS : !strcmp(s, "gs") ? VKS_GS : !strcmp(s, "cs") ? VKS_CS : !strcmp(s, "hs") || !strcmp(s, "tcs") ? VKS_TCS : !strcmp(s, "ds") || !strcmp(s, "tes") ? VKS_TES : -1;
 }
 static VkDescriptorType desc_type(const char *d) {
@@ -588,7 +590,7 @@ vks_shader *vksh_make(const char *key, const uint8_t *spv, size_t spv_size, cons
     size_t nw = spv_size / 4;
     uint32_t *w = malloc(spv_size); memcpy(w, spv, spv_size);
     if (vkspv_set_descriptor_set(w, nw, (uint32_t)s->set) < 0) { free(w); *why = "malformed SPIR-V"; goto fail; }
-    if (s->stage != VKS_FS && s->stage != VKS_CS && g_vk.props.limits.maxCombinedClipAndCullDistances) {
+    if (s->stage != VKS_FS && s->stage != VKS_CS && s->stage != VKS_TS && s->stage != VKS_MS && g_vk.props.limits.maxCombinedClipAndCullDistances) {
         size_t tn = vkspv_trim_cull(&w, nw, g_vk.props.limits.maxCombinedClipAndCullDistances);
         if (tn) nw = tn; else { static int n; if (n++ < 4) VKRED("shader %s: more clip and cull distances than the device takes, and the cull ones are used", key); }
     }

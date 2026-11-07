@@ -235,6 +235,16 @@ def cmd_ondemand(a):
     key = a.key.lower()
     ctl_p, code_p = os.path.join(a.dump, key + '.ctl'), os.path.join(a.dump, key + '.code')
     if not (os.path.exists(ctl_p) and os.path.exists(code_p)): print(f'[RED] ondemand {key}: no dump {ctl_p} / .code'); return 2
+    with open(ctl_p, 'rb') as f: ctl = f.read(0xe0)
+    if len(ctl) >= 0x58 and int.from_bytes(ctl[0x54:0x58], 'little') in (0x60000, 0x70000):   # a task or mesh program: meshxlate (Eglantine's recompiler)
+        mx = os.environ.get('NXRT_MESHXLATE', '')
+        if not mx or not os.path.exists(mx): print(f'[RED] ondemand {key}: a task / mesh program and no NXRT_MESHXLATE'); return 4
+        vk = os.path.join(a.cache, 'vk'); os.makedirs(vk, exist_ok=True)
+        r = subprocess.run([mx, ctl_p, code_p, os.path.join(vk, key + '.spv.tmp'), os.path.join(vk, key + '.json.tmp')], capture_output=True, text=True)
+        print(r.stdout.strip(), r.stderr.strip())
+        if r.returncode: return 4
+        os.replace(os.path.join(vk, key + '.spv.tmp'), os.path.join(vk, key + '.spv')); os.replace(os.path.join(vk, key + '.json.tmp'), os.path.join(vk, key + '.json'))
+        return 0
     tools, py = os.path.join(a.installer, 'tools'), sys.executable
     ampere = os.environ.get('AMPERE_LOWER') or next((p for p in (os.path.join(a.installer, 'ampere-lower', 'windows', 'ampere-lower.exe'),   # as the installer ships it
                                                              os.path.join(a.installer, 'ampere-lower', 'ampere-lower.exe'),

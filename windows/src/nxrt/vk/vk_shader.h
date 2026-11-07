@@ -9,7 +9,7 @@
 extern "C" {
 #endif
 
-enum { VKS_VS = 0, VKS_FS = 1, VKS_GS = 2, VKS_TCS = 3, VKS_TES = 4, VKS_CS = 5 };   // NVNshaderStage
+enum { VKS_VS = 0, VKS_FS = 1, VKS_GS = 2, VKS_TCS = 3, VKS_TES = 4, VKS_CS = 5, VKS_TS = 6, VKS_MS = 7 };   // TS / MS: NVN2 task and mesh (meshxlate)   // NVNshaderStage
 enum { VKB_SUPPORT = 1, VKB_CBUF, VKB_C1, VKB_DRV, VKB_SBUF, VKB_TEX, VKB_TBUF, VKB_IMG, VKB_UNKNOWN };
 enum { VKB_SAMP_NONE = 0, VKB_SAMP_TEX, VKB_SAMP_SLOT, VKB_SAMP_ID };   // where a combined image sampler's sampler comes from
 enum { VKS_CT_FLOAT = 0, VKS_CT_UINT, VKS_CT_INT };

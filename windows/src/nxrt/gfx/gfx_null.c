@@ -186,7 +186,7 @@ static int walk(const uint8_t *p, int depth, uint64_t *budget) {
                 if (guest_range(d, n, "uniform update")) { dm_guest_write_prepare((void *)(uintptr_t)d, (size_t)n); memcpy((void *)(uintptr_t)d, a + 16, (size_t)n); }
                 break; }
             case OP_CLEAR_BUF: { const p_clear_buf *cb = (const p_clear_buf *)a; gfx_sub_fill(cb->addr, cb->size, cb->value); break; }
-            case OP_DRAW: case OP_DRAW_IDX: case OP_DRAW_TEX: atomic_fetch_add(&g_n.draws, 1); break;
+            case OP_DRAW: case OP_DRAW_IDX: case OP_DRAW_TEX: case OP_DRAW_MESH: atomic_fetch_add(&g_n.draws, 1); break;
             case OP_DISPATCH: atomic_fetch_add(&g_n.dispatches, 1); break;
             case OP_COPY_B2T: case OP_COPY_T2B: case OP_COPY_T2T: case OP_CLEAR_TEX: atomic_fetch_add(&g_n.tex_ops, 1); break;
             case OP_BIND_PROGRAM: if (g_bind_hook) { const p_bind_program *bp = (const p_bind_program *)a; if (bp->prog) g_bind_hook(bp->prog, bp->stages); } break;

@@ -260,8 +260,10 @@ VkPipeline vkp_graphics(const vkp_gkey *k, VkPipelineLayout *layout) {
         VK_DYNAMIC_STATE_PRIMITIVE_TOPOLOGY, VK_DYNAMIC_STATE_DEPTH_TEST_ENABLE, VK_DYNAMIC_STATE_DEPTH_WRITE_ENABLE, VK_DYNAMIC_STATE_DEPTH_COMPARE_OP,
         VK_DYNAMIC_STATE_DEPTH_BOUNDS_TEST_ENABLE, VK_DYNAMIC_STATE_STENCIL_TEST_ENABLE, VK_DYNAMIC_STATE_STENCIL_OP, VK_DYNAMIC_STATE_RASTERIZER_DISCARD_ENABLE,
         VK_DYNAMIC_STATE_DEPTH_BIAS_ENABLE, VK_DYNAMIC_STATE_PRIMITIVE_RESTART_ENABLE};
-    for (unsigned i = 0; i < sizeof always / sizeof *always; i++) dyn[nd++] = always[i];
-    if (g_vkp_dyn.vertex_input) dyn[nd++] = VK_DYNAMIC_STATE_VERTEX_INPUT_EXT;
+    const int mesh = k->sh[0] && k->sh[0]->stage == VKS_MS;
+    for (unsigned i = 0; i < sizeof always / sizeof *always; i++)
+        if (!mesh || (always[i] != VK_DYNAMIC_STATE_PRIMITIVE_TOPOLOGY && always[i] != VK_DYNAMIC_STATE_PRIMITIVE_RESTART_ENABLE)) dyn[nd++] = always[i];
+    if (g_vkp_dyn.vertex_input && !mesh) dyn[nd++] = VK_DYNAMIC_STATE_VERTEX_INPUT_EXT;
     if (g_vkp_dyn.blend_enable && k->ncolor) dyn[nd++] = VK_DYNAMIC_STATE_COLOR_BLEND_ENABLE_EXT;
     if (g_vkp_dyn.blend_eq && k->ncolor) dyn[nd++] = VK_DYNAMIC_STATE_COLOR_BLEND_EQUATION_EXT;
     if (g_vkp_dyn.write_mask && k->ncolor) dyn[nd++] = VK_DYNAMIC_STATE_COLOR_WRITE_MASK_EXT;
@@ -270,12 +272,12 @@ VkPipeline vkp_graphics(const vkp_gkey *k, VkPipelineLayout *layout) {
     if (g_vkp_dyn.a2c) dyn[nd++] = VK_DYNAMIC_STATE_ALPHA_TO_COVERAGE_ENABLE_EXT;
     if (g_vkp_dyn.polygon_mode) dyn[nd++] = VK_DYNAMIC_STATE_POLYGON_MODE_EXT;
     if (g_vkp_dyn.depth_clamp) dyn[nd++] = VK_DYNAMIC_STATE_DEPTH_CLAMP_ENABLE_EXT;
-    if (g_vkp_dyn.patch_points && k->sh[3]) dyn[nd++] = VK_DYNAMIC_STATE_PATCH_CONTROL_POINTS_EXT;
+    if (g_vkp_dyn.patch_points && k->sh[3] && !mesh) dyn[nd++] = VK_DYNAMIC_STATE_PATCH_CONTROL_POINTS_EXT;
     VkPipelineDynamicStateCreateInfo dy = {VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO, NULL, 0, nd, dyn};
     VkFormat cf[8]; for (int i = 0; i < k->ncolor; i++) cf[i] = (VkFormat)k->cfmt[i];
     VkPipelineRenderingCreateInfo ri = {VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO, NULL, 0, k->ncolor, cf,
                                         k->has_depth ? (VkFormat)k->dfmt : VK_FORMAT_UNDEFINED, k->has_stencil ? (VkFormat)k->dfmt : VK_FORMAT_UNDEFINED};
-    VkGraphicsPipelineCreateInfo ci = {VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO, &ri, 0, ns, st, g_vkp_dyn.vertex_input ? NULL : &vi, &ia, k->sh[3] ? &ts : NULL, &vp, &rs, &ms, &ds, &cb, &dy, *layout, VK_NULL_HANDLE, 0, VK_NULL_HANDLE, -1};
+    VkGraphicsPipelineCreateInfo ci = {VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO, &ri, 0, ns, st, g_vkp_dyn.vertex_input || mesh ? NULL : &vi, mesh ? NULL : &ia, k->sh[3] && !mesh ? &ts : NULL, &vp, &rs, &ms, &ds, &cb, &dy, *layout, VK_NULL_HANDLE, 0, VK_NULL_HANDLE, -1};
     VkPipeline p = VK_NULL_HANDLE;
     VkResult r = *layout ? vkCreateGraphicsPipelines(g_vk.dev, g_vk.pcache, 1, &ci, NULL, &p) : VK_ERROR_INITIALIZATION_FAILED;
     note_time(t0);

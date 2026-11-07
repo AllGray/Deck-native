@@ -163,6 +163,7 @@ int vk_dev_open(const vk_dev_opts *o, const char *const *inst_exts, uint32_t n_i
         {VK_EXT_VERTEX_INPUT_DYNAMIC_STATE_EXTENSION_NAME, NULL, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VERTEX_INPUT_DYNAMIC_STATE_FEATURES_EXT, sizeof(VkPhysicalDeviceVertexInputDynamicStateFeaturesEXT), &h->vertex_input_dynamic},   // the replay (M5-C)
         {VK_EXT_MAP_MEMORY_PLACED_EXTENSION_NAME, NULL, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MAP_MEMORY_PLACED_FEATURES_EXT, sizeof(VkPhysicalDeviceMapMemoryPlacedFeaturesEXT), &h->placed},   // vk_mem.c: pools at their guest addresses
         {VK_EXT_DEVICE_ADDRESS_BINDING_REPORT_EXTENSION_NAME, NULL, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ADDRESS_BINDING_REPORT_FEATURES_EXT, sizeof(VkPhysicalDeviceAddressBindingReportFeaturesEXT), &g_addrbind_feat},   // NXRT_VK_ADDRLOG
+        {VK_EXT_MESH_SHADER_EXTENSION_NAME, NULL, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MESH_SHADER_FEATURES_EXT, sizeof(VkPhysicalDeviceMeshShaderFeaturesEXT), &h->mesh},   // NVN2 task / mesh draws
         {VK_EXT_DEVICE_FAULT_EXTENSION_NAME, NULL, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FAULT_FEATURES_EXT, sizeof(VkPhysicalDeviceFaultFeaturesEXT), &h->device_fault},   // vk_lost's report
     };
     enum { NEF = sizeof ef / sizeof *ef };
@@ -233,6 +234,9 @@ int vk_dev_open(const vk_dev_opts *o, const char *const *inst_exts, uint32_t n_i
             VkPhysicalDeviceProvokingVertexFeaturesEXT *x = (void *)fs[i]; x->transformFeedbackPreservesProvokingVertex = x->transformFeedbackPreservesProvokingVertex && h->xfb; h->provoking_last = x->provokingVertexLast != 0; continue; }
         if (ef[i].st == VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ADDRESS_BINDING_REPORT_FEATURES_EXT) {
             VkPhysicalDeviceAddressBindingReportFeaturesEXT *x = (void *)fs[i]; x->reportAddressBinding = x->reportAddressBinding && g_addrlog; g_addrbind_feat = x->reportAddressBinding != 0; continue; }
+        if (ef[i].st == VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MESH_SHADER_FEATURES_EXT) {
+            VkPhysicalDeviceMeshShaderFeaturesEXT *x = (void *)fs[i]; x->multiviewMeshShader = 0; x->primitiveFragmentShadingRateMeshShader = 0; x->meshShaderQueries = 0;
+            h->mesh = x->meshShader && x->taskShader; continue; }
         if (ef[i].st == VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FAULT_FEATURES_EXT) {
             VkPhysicalDeviceFaultFeaturesEXT *x = (void *)fs[i]; x->deviceFaultVendorBinary = 0; h->device_fault = x->deviceFault != 0; continue; }
         *ef[i].flag = count_true(fs[i], ef[i].size) > 0;

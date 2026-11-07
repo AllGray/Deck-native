@@ -987,7 +987,7 @@ NVN(nvnCommandBufferBindProgram, void, NVNcommandBuffer *c, const NVNprogram *p,
 // Task and mesh draws: what the game sends (bring-up). NXRT_MESH_DUMP=<dir> keeps each program's stages
 static void mesh_probe(const char *what, uint64_t a, uint64_t b, uint64_t c_) {
     static _Atomic uint64_t n; uint64_t i = atomic_fetch_add(&n, 1);
-    if (i < 40 || i % 20000 == 0) LOG("[nvn] %s #%llu (%#llx, %#llx, %#llx) program %p stages %#x", what, (unsigned long long)i, (unsigned long long)a, (unsigned long long)b, (unsigned long long)c_, (const void *)t_mesh_prog, t_mesh_stages);
+    if (i < 4 || i % 100000 == 0) LOG("[nvn] %s #%llu (%#llx, %#llx, %#llx) program %p stages %#x", what, (unsigned long long)i, (unsigned long long)a, (unsigned long long)b, (unsigned long long)c_, (const void *)t_mesh_prog, t_mesh_stages);
     const prog_t *p = t_mesh_prog; const char *dir = getenv("NXRT_MESH_DUMP");
     if (!p || !dir) return;
     static uint64_t seen[512]; static int nseen; static SRWLOCK lk = SRWLOCK_INIT;
@@ -1013,11 +1013,11 @@ typedef void (*NVNT_nvnCommandBufferDrawMeshTasks3D)(NVNcommandBuffer *, int, in
 typedef void (*NVNT_nvnCommandBufferDrawMeshTasks3DIndirect)(NVNcommandBuffer *, uint64_t);
 typedef void (*NVNT_nvnCommandBufferMultiDrawMeshTasks3DIndirect)(NVNcommandBuffer *, uint64_t, int, int);
 typedef void (*NVNT_nvnCommandBufferMultiDrawMeshTasks3DIndirectCount)(NVNcommandBuffer *, uint64_t, uint64_t, int, int);
-NVN(nvnCommandBufferDrawMeshTasks, void, NVNcommandBuffer *c, int first, int count) { (void)c; mesh_probe("DrawMeshTasks", first, count, 0); }
+NVN(nvnCommandBufferDrawMeshTasks, void, NVNcommandBuffer *c, int first, int count) { mesh_probe("DrawMeshTasks", first, count, 0); *REC(c, OP_DRAW_MESH, p_draw_mesh) = (p_draw_mesh){first, count, 1, 1}; }
 NVN(nvnCommandBufferDrawMeshTasksIndirect, void, NVNcommandBuffer *c, uint64_t a) { (void)c; mesh_probe("DrawMeshTasksIndirect", a, 0, 0); }
 NVN(nvnCommandBufferMultiDrawMeshTasksIndirect, void, NVNcommandBuffer *c, uint64_t a, int n, int stride) { (void)c; mesh_probe("MultiDrawMeshTasksIndirect", a, n, stride); }
 NVN(nvnCommandBufferMultiDrawMeshTasksIndirectCount, void, NVNcommandBuffer *c, uint64_t a, uint64_t cnt, int n, int stride) { (void)c; mesh_probe("MultiDrawMeshTasksIndirectCount", a, cnt, ((uint64_t)n << 32) | (uint32_t)stride); }
-NVN(nvnCommandBufferDrawMeshTasks3D, void, NVNcommandBuffer *c, int x, int y, int z) { (void)c; mesh_probe("DrawMeshTasks3D", x, y, z); }
+NVN(nvnCommandBufferDrawMeshTasks3D, void, NVNcommandBuffer *c, int x, int y, int z) { mesh_probe("DrawMeshTasks3D", x, y, z); *REC(c, OP_DRAW_MESH, p_draw_mesh) = (p_draw_mesh){0, x, y, z}; }
 NVN(nvnCommandBufferDrawMeshTasks3DIndirect, void, NVNcommandBuffer *c, uint64_t a) { (void)c; mesh_probe("DrawMeshTasks3DIndirect", a, 0, 0); }
 NVN(nvnCommandBufferMultiDrawMeshTasks3DIndirect, void, NVNcommandBuffer *c, uint64_t a, int n, int stride) { (void)c; mesh_probe("MultiDrawMeshTasks3DIndirect", a, n, stride); }
 NVN(nvnCommandBufferMultiDrawMeshTasks3DIndirectCount, void, NVNcommandBuffer *c, uint64_t a, uint64_t cnt, int n, int stride) { (void)c; mesh_probe("MultiDrawMeshTasks3DIndirectCount", a, cnt, ((uint64_t)n << 32) | (uint32_t)stride); }

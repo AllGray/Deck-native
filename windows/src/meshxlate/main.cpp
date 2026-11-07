@@ -115,14 +115,21 @@ int main(int argc, char **argv) {
         std::string j = fmt::format("{{\"stage\":\"{}\",\"entry\":\"main\",\"local_size\":[{},{},{}],\"bindings\":[", st == Stage::Task ? "ts" : "ms", program.workgroup_size[0], program.workgroup_size[1], program.workgroup_size[2]);
         u32 b = 0; bool first = true;
         auto add = [&](const std::string &desc, const std::string &nvn) { j += fmt::format("{}{{\"set\":0,\"binding\":{},\"descriptor\":\"{}\",\"count\":1,\"nvn\":{{{}}}}}", first ? "" : ",", b++, desc, nvn); first = false; };
-        for (const auto &d : in.constant_buffer_descriptors) add("uniform_buffer", fmt::format("\"kind\":\"cbuf\",\"bank\":{},\"reg\":{}", d.index, d.index));
-        const u32 base = st == Stage::Task ? 0x110 : 0x310;
+        // constant banks as nxs_refl.py maps them: 3..16 are NVN's uniform slots 0..13, 1 the program's constants, 0 and 2 the driver's banks
+        std::string drv;
+        for (const auto &d : in.constant_buffer_descriptors) {
+            if (d.index >= 3 && d.index <= 16) add("uniform_buffer", fmt::format("\"kind\":\"cbuf\",\"reg\":{}", d.index - 3));
+            else if (d.index == 1) add("uniform_buffer", "\"kind\":\"c1\",\"bank\":1");
+            else { add("uniform_buffer", fmt::format("\"kind\":\"drvcb\",\"bank\":{}", d.index)); drv += fmt::format("{}\"{}\":{{}}", drv.empty() ? "" : ",", d.index); }
+        }
+        const u32 base = st == Stage::Task ? 0x610 : 0x710;   // the storage slots' rows in driver bank 0 (16 bytes each; Mario Kart World's programs read rows 6 and 7)
         for (const auto &d : in.storage_buffers_descriptors) add("storage_buffer", fmt::format("\"kind\":\"sbuf\",\"reg\":{},\"rw\":{},\"bank\":{},\"c0_offset\":{}", (d.cbuf_offset - base) / 0x10, d.is_written ? "true" : "false", d.cbuf_index, d.cbuf_offset));
         for (const auto &d : in.texture_buffer_descriptors) add("uniform_texel_buffer", fmt::format("\"kind\":\"tbuf\",\"reg\":{}", d.cbuf_offset));
         for (const auto &d : in.image_buffer_descriptors) add("storage_texel_buffer", fmt::format("\"kind\":\"img\",\"reg\":{}", d.cbuf_offset));
         for (const auto &d : in.texture_descriptors) add("combined_image_sampler", fmt::format("\"kind\":\"tex\",\"reg\":{},\"bank\":{}", d.cbuf_offset, d.cbuf_index));
         for (const auto &d : in.image_descriptors) add("storage_image", fmt::format("\"kind\":\"img\",\"reg\":{},\"bank\":{}", d.cbuf_offset, d.cbuf_index));
-        j += fmt::format("],\"mesh\":{{\"max_vertices\":{},\"max_primitives\":{},\"payload_words\":{},\"vertex_lines\":{},\"primitive_lines\":{}}}}}\n", program.mesh.max_vertices, program.mesh.max_primitives, program.mesh.payload_words, program.mesh.vertex_lines.size(), program.mesh.primitive_lines.size());
+        j += "],\"drv_reads\":{" + drv + "}";
+        j += fmt::format(",\"mesh\":{{\"max_vertices\":{},\"max_primitives\":{},\"payload_words\":{},\"vertex_lines\":{},\"primitive_lines\":{}}}}}\n", program.mesh.max_vertices, program.mesh.max_primitives, program.mesh.payload_words, program.mesh.vertex_lines.size(), program.mesh.primitive_lines.size());
         std::ofstream(argv[4]) << j;
         std::printf("OK %s %zu words, %u bindings\n", st == Stage::Task ? "task" : "mesh", spv.size(), b);
         return 0;
