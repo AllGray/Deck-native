@@ -243,6 +243,10 @@ def cmd_ondemand(a):
         r = subprocess.run([mx, ctl_p, code_p, os.path.join(vk, key + '.spv.tmp'), os.path.join(vk, key + '.json.tmp')], capture_output=True, text=True)
         print(r.stdout.strip(), r.stderr.strip())
         if r.returncode: return 4
+        cp = os.path.join(vk, 'CHAIN'); chain = open(cp).read().strip() if os.path.exists(cp) else ''   # the runtime loads only entries of the current chain
+        with open(os.path.join(vk, key + '.json.tmp')) as f: meta = json.load(f)
+        meta['cache'] = {'chain': chain, 'via': 'meshxlate'}
+        with open(os.path.join(vk, key + '.json.tmp'), 'w') as f: json.dump(meta, f)
         os.replace(os.path.join(vk, key + '.spv.tmp'), os.path.join(vk, key + '.spv')); os.replace(os.path.join(vk, key + '.json.tmp'), os.path.join(vk, key + '.json'))
         return 0
     tools, py = os.path.join(a.installer, 'tools'), sys.executable
