@@ -87,7 +87,7 @@ Profile radv_profile() {
     p.supported_subgroup_stages = ~0u; p.support_typeless_image_loads = true; p.support_demote_to_helper_invocation = true;
     p.support_int64_atomics = true; p.support_derivative_control = true; p.support_multi_viewport = true;
     p.support_viewport_index_layer_non_geometry = true; p.support_explicit_workgroup_layout = false;
-    p.warp_factor = 1.0f; p.has_broken_spirv_clamp = false; p.lower_left_origin_mode = false;
+    p.has_broken_spirv_clamp = false; p.lower_left_origin_mode = false;
     return p;
 }
 }
