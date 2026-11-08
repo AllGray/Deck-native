@@ -882,7 +882,12 @@ static int quad_args(uint64_t ind, VkBuffer *ab, VkDeviceSize *ao) {
 // NVN2 task / mesh draws go through draw() with g_dm set: the task shader in slot 3, the mesh shader in slot 0, their bindings from NVN stages g_ts_st / g_ms_st
 static const p_draw_mesh *g_dm; static int g_ts_st = 6, g_ms_st = 7;
 static void draw(const p_draw *dw, const p_draw_idx *di) {
-    if (S->render_skip) { g_st.draws_skipped++; return; }
+    if (S->render_skip) {
+        g_st.draws_skipped++;
+        static _Atomic int n; if (atomic_fetch_add(&n, 1) < 80)
+            VKLOG("draw skipped by render_cond: target c0=ser%llu %ux%u (ncolor %d)", P.ncolor && P.ci[0] ? (unsigned long long)P.ci[0]->serial : 0ull, P.w, P.h, P.ncolor);
+        return;
+    }
     const int mesh = g_dm != NULL;
     int prim = dw ? dw->prim : di ? di->prim : NVN_DRAW_PRIMITIVE_TRIANGLES, expand;
     uint64_t ind = dw ? dw->ind : di ? di->ind : 0, mdi = dw ? dw->mdi_cnt : di ? di->mdi_cnt : 0; int mdi_i = dw ? dw->mdi_i : di ? di->mdi_i : 0;
@@ -1452,11 +1457,15 @@ static void set_rt(const p_set_rt *r) {
     S->dview = r->dview; S->has_dview = r->has_dview;
 }
 static void render_cond(const p_render_cond *rc) {   // nvn_mtl.m OP_RENDER_COND: the counters as guest memory holds them at replay
-    if (rc->mode >= 2) { S->render_skip = rc->mode == 3; return; }
+    if (rc->mode >= 2) { S->render_skip = rc->mode == 3;
+        static _Atomic int n; if (atomic_fetch_add(&n, 1) < 80) VKLOG("render_cond mode=%d (fixed): skip=%d", rc->mode, S->render_skip);
+        return; }
     uint64_t x = 0, y = 0; uint32_t lo = 0, hi = 0; int known = 1;
     known &= read_u32(rc->addr, &lo) && read_u32(rc->addr + 4, &hi); x = (uint64_t)hi << 32 | lo;
     known &= read_u32(rc->addr + 16, &lo) && read_u32(rc->addr + 20, &hi); y = (uint64_t)hi << 32 | lo;
     S->render_skip = known && (rc->mode ? x == y : x != y);
+    { static _Atomic int n; if (atomic_fetch_add(&n, 1) < 80)
+        VKLOG("render_cond mode=%d addr=%#llx known=%d x=%llu y=%llu: skip=%d", rc->mode, (unsigned long long)rc->addr, known, (unsigned long long)x, (unsigned long long)y, S->render_skip); }
 }
 
 // ---------- The record walk (nvn_mtl.m mtl_exec; the framing checks of track B's walk) ----------
