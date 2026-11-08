@@ -1020,7 +1020,13 @@ static void draw(const p_draw *dw, const p_draw_idx *di) {
     int swrites = 0;
     for (int s = 0; s < 5; s++) if (sh[s]) {
         VkDescriptorSet ds = write_set(sh[s], mesh && s == 0 ? g_ms_st : mesh && s == 3 ? g_ts_st : s, &swrites);
-        if (!ds) { g_st.draws_skipped++; return; }
+        if (!ds) {
+            g_st.draws_skipped++;
+            static _Atomic int n; if (atomic_fetch_add(&n, 1) < 80)
+                VKLOG("draw dropped: write_set failed for stage %d (vs=%s fs=%s), target c0=ser%llu %ux%u", s, sh[0]->key, sh[1] ? sh[1]->key : "-",
+                      P.ncolor && P.ci[0] ? (unsigned long long)P.ci[0]->serial : 0ull, P.w, P.h);
+            return;
+        }
         vkCmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, layout, (uint32_t)sh[s]->set, 1, &ds, 0, NULL);
     }
     if (g_pd && mesh) PD("draw mesh ms=%s ts=%s fs=%s groups %d,%d,%d first %d", sh[0]->key, sh[3] ? sh[3]->key : "-", sh[1] ? sh[1]->key : "-", g_dm->x, g_dm->y, g_dm->z, g_dm->first);
