@@ -900,7 +900,13 @@ static void draw(const p_draw *dw, const p_draw_idx *di) {
     } else {
         for (int s = 0; s < 5; s++) if (S->bst[s]) sh[s] = prog_stage(S->bst[s], s);
     }
-    if (!sh[0] || (S->bst[1] && !sh[1] && !S->rast_discard)) { g_st.skip_no_shader++; g_st.draws_skipped++; return; }
+    if (!sh[0] || (S->bst[1] && !sh[1] && !S->rast_discard)) {
+        g_st.skip_no_shader++; g_st.draws_skipped++;
+        static _Atomic int n; if (atomic_fetch_add(&n, 1) < 60)
+            VKLOG("skipped (no shader): vs=%llu fs=%llu target c0=ser%llu %ux%u (ncolor %d)", S->bst[0] ? S->bst[0]->serial : 0, S->bst[1] ? S->bst[1]->serial : 0,
+                  P.ncolor && P.ci[0] ? (unsigned long long)P.ci[0]->serial : 0ull, P.w, P.h, P.ncolor);
+        return;
+    }
     if (!mesh) sh[0] = vin_shader(sh[0]);
     if (S->rast_discard) sh[1] = NULL;
     VkBuffer qab = VK_NULL_HANDLE; VkDeviceSize qao = 0;   // indirect quads: the indexed draw's arguments, made on the GPU before the pass opens
