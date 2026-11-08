@@ -30,3 +30,4 @@
 #define DM_GAME_LOOK_CAM ""
 #define DM_GAME_OPMODE 1                     // op_mode: console (game.py's default)
 #define DM_GAME_PERF_BOOST 0                 // perf_mode: follow
+#define DM_GAME_RENDER_COND 1                // test: the scene->HUD composite may be wrapped in SetRenderEnable(Conditional); without this it is always drawn, never skipped
