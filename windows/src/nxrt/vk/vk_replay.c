@@ -265,7 +265,12 @@ static void pass_targets(void) {
             (S->has_cview[j] && S->cview[j].set_layers ? S->cview[j].min_layer : 0) == (S->has_cview[i] && S->cview[i].set_layers ? S->cview[i].min_layer : 0);
         if (dup) { RED_ONCE(10, "the same texture level is attached at two colour slots: only the first is attached (nvn_mtl.m rt_dup_slot)"); continue; }
         vkt_image *im = vkt_resolve(t);
-        if (!im) continue;
+        if (!im) {
+            static _Atomic int n; if (atomic_fetch_add(&n, 1) < 80)
+                VKLOG("render target slot %d: vkt_resolve failed (ser=%llu target=%d format=%#x %ux%u pool=%p off=%#llx)", i, (unsigned long long)t->serial, t->d.target, t->d.format,
+                      t->d.width, t->d.height, (const void *)t->pool, (unsigned long long)t->off);
+            continue;
+        }
         if (!(im->usage & VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT)) {
             static int n; if (n++ < 8) VKRED("render target ser=%llu %ux%u format %#x (%s) cannot be a colour attachment here (%s): draws to it are lost",
                                              (unsigned long long)t->serial, t->d.width, t->d.height, t->d.format, im->fi->name, im->cls == VKT_STORAGE ? "its content comes from its storage" : "the format cannot");
@@ -917,7 +922,12 @@ static void draw(const p_draw *dw, const p_draw_idx *di) {
     VkBuffer qab = VK_NULL_HANDLE; VkDeviceSize qao = 0;   // indirect quads: the indexed draw's arguments, made on the GPU before the pass opens
     if (dw && ind && expand == VKP_EXPAND_QUADS && !quad_args(ind, &qab, &qao)) { g_st.draws_skipped++; return; }
     // the render pass, its scissor and viewport (nvn_mtl.m draw_: viewport flipped for the lower-left origin there; Vulkan's y axis runs the other way)
-    if (!P.open && !pass_begin()) { g_st.skip_no_target++; g_st.draws_skipped++; return; }
+    if (!P.open && !pass_begin()) {
+        g_st.skip_no_target++; g_st.draws_skipped++;
+        static _Atomic int n; if (atomic_fetch_add(&n, 1) < 80)
+            VKLOG("draw dropped: pass_begin failed (nrt=%d has_dt=%d vs=%s fs=%s)", S->nrt, S->has_dt, sh[0] ? sh[0]->key : "-", sh[1] ? sh[1]->key : "-");
+        return;
+    }
     uint32_t tw = P.any ? P.w : (uint32_t)(S->vp[0][0] + S->vp[0][2]), th = P.any ? P.h : (uint32_t)(S->vp[0][1] + S->vp[0][3]);
     VkRect2D sc; if (!scissor_rect(tw, th, &sc)) { if (!S->rast_discard) return; sc = (VkRect2D){{0, 0}, {tw, th}}; }
     VkViewport vp = S->has_vp ? (VkViewport){S->vp[0][0], S->vp[0][1], S->vp[0][2], S->vp[0][3], S->dr[0], S->dr[1]} : (VkViewport){0, 0, (float)tw, (float)th, S->dr[0], S->dr[1]};
