@@ -48,6 +48,7 @@ def vk_tool(name):
 
 
 def chain_id(xl):
+    if os.environ.get("NXSHADER_CHAIN"): return os.environ["NXSHADER_CHAIN"]   # pinned: a translator fix that keeps the cached translations
     return C.sha(C.LAYOUT, xl.id, 'front', FRONT_VERSION, *[p.ident() for p in S.DEFAULT_PASSES], 'reflect', C.REFLECT_VERSION)[:16]
 
 
@@ -233,6 +234,7 @@ def cmd_ondemand(a):
     """the run-time path: a dump the game made → the installer's lowering steps in a scratch build folder → the chain → the cache"""
     below_normal()
     key = a.key.lower()
+    if os.path.exists(os.path.join(a.cache, "vk.aside", key + ".spv")): print(f"ondemand {key}: set aside, not translated"); return 3
     ctl_p, code_p = os.path.join(a.dump, key + '.ctl'), os.path.join(a.dump, key + '.code')
     if not (os.path.exists(ctl_p) and os.path.exists(code_p)): print(f'[RED] ondemand {key}: no dump {ctl_p} / .code'); return 2
     with open(ctl_p, 'rb') as f: ctl = f.read(0xe0)

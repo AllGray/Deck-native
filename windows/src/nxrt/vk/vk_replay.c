@@ -186,7 +186,7 @@ static const vks_shader *prog_stage(const prog_t *p, int stage) {
     if (!c) { c = calloc(1, sizeof *c); vk_hm_put(&g_progc, &p->serial, c); }
     int any = 0;
     for (unsigned i = 0; i < p->nstage && i < 6; i++) { const vks_shader *s = vksh_get(p, i); if (s && s->stage >= 0 && s->stage < 8) { c->sh[s->stage] = s; any = 1; } }
-    if (!any && !c->diag) {   // once per program: why none of its stages resolved
+    if (!c->sh[stage] && !c->diag) {   // once per program: the stage a draw wants did not resolve (all stages listed)
         c->diag = 1;
         VKLOG("program ser%llu: no stage resolved (nstage %u, wanted stage %d)", (unsigned long long)p->serial, p->nstage, stage);
         for (unsigned i = 0; i < p->nstage && i < 6; i++) { uint8_t k[8]; int kok = prog_key(p, i, k); const nxs_shader *n = NULL; int r = nxs_resolve(p, i, &n);
@@ -250,6 +250,15 @@ static void pass_end(void) {
     vkCmdEndRendering(cb);
     P.open = 0;
     wb_flush();
+    static uint64_t pi_ser = (uint64_t)-1; static unsigned pi_n;   // NXRT_VK_PASSIMG=<serial>: in the texdump frame, that image after every pass
+    if (pi_ser == (uint64_t)-1) { const char *e = getenv("NXRT_VK_PASSIMG"); pi_ser = e ? strtoull(e, NULL, 0) : 0; }
+    if (pi_ser && g_td_on && pi_n < 200) {
+        vkt_image *im = P.ncolor ? P.ci[0] : NULL;   // the pass's first colour target, when at least <PASSIMG> wide
+        if (im && im->w >= pi_ser && !(im->aspect & VK_IMAGE_ASPECT_DEPTH_BIT)) { char path[1200]; const char *lp = nxrt_log_path(); vks_finish();
+            snprintf(path, sizeof path, "%s.passimg-%03u-ser%llu.png", lp && *lp ? lp : "nxrt", pi_n, (unsigned long long)im->serial);
+            VKLOG("pass image %u: %s", pi_n, vks_dump_image(im, 0, path) ? "not dumped" : path); }
+        pi_n++;
+    }
 }
 // An attachment's view: one level, the layers the NVN view names (else all from its first), the view's format through the image's fallback, identity swizzle
 static VkImageView att_view(vkt_image *im, const tex_t *t, const view_t *v, int has_v, int depth, uint32_t *w, uint32_t *h, uint32_t *nl, VkFormat *fmt, uint32_t *lv, uint32_t *l0) {
@@ -1157,8 +1166,15 @@ static void dispatch(const p_dispatch *dp) {
     if (!cs || !S->cprog) { g_st.skip_no_shader++; pd_dispatch_skipped(dp, "no shader"); return; }
     VkPipelineLayout layout; VkPipeline pipe = vkp_compute(cs, &layout);
     if (!pipe) { pd_dispatch_skipped(dp, "no pipeline"); return; }
+    // A storage buffer the game leaves unbound reads zeros on the console (an NVN range of size 0); here it is the sink, which holds other shaders' leftovers. MKW's
+    // compute queue polls such a slot for 0 (ede15d9d01ed7c17: 0 = done) and spun forever: the sink is zeroed before a dispatch that has one
+    { const char *sk = getenv("NXRT_VK_SKIP_CS");   // NXRT_VK_SKIP_CS=key,key: compute shaders not dispatched (MKW's compute-queue pollers, which wait on another queue)
+      if (sk && strstr(sk, cs->key)) { static int n; if (n++ < 5) VKLOG("dispatch of %s skipped (NXRT_VK_SKIP_CS)", cs->key); pd_dispatch_skipped(dp, "NXRT_VK_SKIP_CS"); return; } }
+    int unbound = 0;
+    for (int i = 0; i < cs->nb; i++) if (cs->b[i].kind == VKB_SBUF && cs->b[i].reg >= 0 && cs->b[i].reg < 16 && !S->ssbo[5][cs->b[i].reg].addr) unbound = 1;
     pass_end();
     VkCommandBuffer cb = vks_cb();
+    if (unbound) { barrier_all(cb); vkCmdFillBuffer(cb, R0.sink, 0, ZERO_SIZE, 0); barrier_all(cb); }
     g_dispatch_dim[0] = (uint32_t)dp->x; g_dispatch_dim[1] = (uint32_t)dp->y; g_dispatch_dim[2] = (uint32_t)dp->z;
     if (dp->ind) for (int i = 0; i < 3; i++) read_u32(dp->ind + 4 * i, &g_dispatch_dim[i]);   // for c0's dispatch words: the record as guest memory holds it now
     int swrites = 0;
@@ -1176,6 +1192,8 @@ static void dispatch(const p_dispatch *dp) {
             else if (bb->kind == VKB_DRV) PD("  b%u drv c%d read %d (s2 %d ssbo %u tex %u n %u)", bb->binding, bb->bank, cs->drv_read[bb->bank], cs->s2cs, cs->s2_ssbo_base, cs->s2_tex_base, cs->s2_ntex);
         }
     }
+    { extern uint64_t vk_ck_addr[2]; int n = 0; vk_ck_addr[0] = vk_ck_addr[1] = 0;   // the dispatch's first two storage buffers, for the lost-device report
+      for (int i = 0; i < cs->nb && n < 2; i++) if (cs->b[i].kind == VKB_SBUF) vk_ck_addr[n++] = S->ssbo[5][cs->b[i].reg].addr; }
     vk_checkpoint(cb, 'c', cs->key, g_dispatch_dim[0], g_dispatch_dim[1], g_dispatch_dim[2], dp->ind != 0);
     if (dp->ind) { VkBuffer b; VkDeviceSize o; if (!vkm_use(dp->ind, 12, &b, &o)) { RED_ONCE(70, "indirect dispatch arguments are in no memory pool"); return; } vkCmdDispatchIndirect(cb, b, o); }
     else if (dp->x > 0 && dp->y > 0 && dp->z > 0) vkCmdDispatch(cb, (uint32_t)dp->x, (uint32_t)dp->y, (uint32_t)dp->z);
@@ -1588,7 +1606,12 @@ void vkr_sub_end(void) {
     vks_post_fn(subres_done, r);
     P.valid = 0;
 }
-void vkr_queue_activate(uint64_t serial) { S = rs_get(serial); P.valid = 0; }
+uint64_t vk_cur_queue;   // the NVN queue the replay records for now (named in the lost-device report)
+void vkr_queue_activate(uint64_t serial) {
+    static uint64_t seen[16]; static int ns; int k = 0; for (; k < ns; k++) if (seen[k] == serial) break;
+    if (k == ns && ns < 16) { seen[ns++] = serial; VKLOG("NVN queue ser%llu submits (queue %d of the run)", (unsigned long long)serial, ns); }
+    vk_cur_queue = serial; S = rs_get(serial); P.valid = 0;
+}
 void vkr_queue_forget(uint64_t serial) {
     for (rs **pp = &g_states; *pp; pp = &(*pp)->next) if ((*pp)->serial == serial) { rs *s = *pp; *pp = s->next; if (S == s) S = NULL; free(s); break; }
 }

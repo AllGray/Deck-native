@@ -300,6 +300,9 @@ VkPipeline vkp_compute(const vks_shader *cs, VkPipelineLayout *layout) {
     uint64_t t0 = now_ns();
     VkComputePipelineCreateInfo ci = {VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO, NULL, 0,
                                       {VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, NULL, 0, VK_SHADER_STAGE_COMPUTE_BIT, cs->mod, "main", NULL}, *layout, VK_NULL_HANDLE, -1};
+    // The guest's shaders are written for 32-wide warps (ballot / vote / shuffle loops over the lanes): on a GPU that runs compute 64 wide by default (AMD), ask for 32
+    VkPipelineShaderStageRequiredSubgroupSizeCreateInfo rss = {VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_REQUIRED_SUBGROUP_SIZE_CREATE_INFO, NULL, 32};
+    if (g_vk.f13.subgroupSizeControl && !getenv("NXRT_VK_NO_WAVE32")) ci.stage.pNext = &rss;
     VkPipeline p = VK_NULL_HANDLE;
     VkResult r = *layout ? vkCreateComputePipelines(g_vk.dev, g_vk.pcache, 1, &ci, NULL, &p) : VK_ERROR_INITIALIZATION_FAILED;
     note_time(t0);
