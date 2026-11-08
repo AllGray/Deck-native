@@ -45,7 +45,7 @@ def main():
                 if not code_p.exists() or code_p.stat().st_size < 16:
                     nocode += 1; continue
                 ctl = c.read_bytes()[:0xe0]; code = code_p.read_bytes()
-                if struct.unpack_from("<I", ctl, 8)[0] not in (0x11, 0xb):   # control block versions seen: 0x11 (most), 0xb (6 of 71 requests)
+                if struct.unpack_from("<I", ctl, 8)[0] not in (0x11, 0xb, 0x7):   # control block versions seen: 0x11 (most), 0xb (6 of 71 requests)
                     nocode += 1; continue
                 gpu_len = struct.unpack_from("<I", ctl, 0x44)[0]
                 code = code[:gpu_len]

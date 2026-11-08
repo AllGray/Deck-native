@@ -449,3 +449,199 @@ NXRT_API void adapter__ZN2nn4pctl27CheckStereoVisionPermissionEb(NxwGuestCpu *cp
     x[0] = (uint64_t)r;
 }
 
+NXRT_API void adapter__ZN2nn4chat10InitializeEv(NxwGuestCpu *cpu) {
+    uint64_t *x = cpu->x; (void)x;
+    h_chat_Init();
+}
+
+NXRT_API void adapter__ZN2nn4chat10IsChattingEv(NxwGuestCpu *cpu) {
+    uint64_t *x = cpu->x; (void)x;
+    unsigned r = h_chat_IsChatting();
+    x[0] = (uint64_t)r;
+}
+
+NXRT_API void adapter__ZN2nn4chat20SetScreenSharingModeENS0_17ScreenSharingModeE(NxwGuestCpu *cpu) {
+    uint64_t *x = cpu->x; (void)x;
+    int a0 = (int)x[0];
+    h_chat_ShareMode(a0);
+}
+
+NXRT_API void adapter__ZN2nn4chat28AttachToRoomInfoChangedEventEPNS_2os11SystemEventE(NxwGuestCpu *cpu) {
+    uint64_t *x = cpu->x; (void)x;
+    void * a0 = (void *)(uintptr_t)x[0];
+    uint32_t r = h_chat_RoomEv(a0);
+    x[0] = (uint64_t)r;
+}
+
+NXRT_API void adapter__ZN2nn4chat13SetSharingKeyERKNS0_10SharingKeyE(NxwGuestCpu *cpu) {
+    uint64_t *x = cpu->x; (void)x;
+    const void * a0 = (const void *)(uintptr_t)x[0];
+    uint32_t r = h_chat_SetKey(a0);
+    x[0] = (uint64_t)r;
+}
+
+NXRT_API void adapter__ZN2nn4chat15ClearSharingKeyEv(NxwGuestCpu *cpu) {
+    uint64_t *x = cpu->x; (void)x;
+    uint32_t r = h_chat_ClearKey();
+    x[0] = (uint64_t)r;
+}
+
+NXRT_API void adapter__ZN2nn4chat11GetRoomInfoEPNS0_8RoomInfoE(NxwGuestCpu *cpu) {
+    uint64_t *x = cpu->x; (void)x;
+    void * a0 = (void *)(uintptr_t)x[0];
+    uint32_t r = h_chat_RoomInfo(a0);
+    x[0] = (uint64_t)r;
+}
+
+NXRT_API void adapter__ZN2nn4chat13ShowChatStartERKNS_7account3UidE(NxwGuestCpu *cpu) {
+    uint64_t *x = cpu->x; (void)x;
+    const void * a0 = (const void *)(uintptr_t)x[0];
+    uint32_t r = h_chat_ShowStart(a0);
+    x[0] = (uint64_t)r;
+}
+
+NXRT_API void adapter__ZN2nn4chat22ShowCameraSharingGuideEv(NxwGuestCpu *cpu) {
+    uint64_t *x = cpu->x; (void)x;
+    uint32_t r = h_chat_ShowGuide();
+    x[0] = (uint64_t)r;
+}
+
+NXRT_API void adapter__ZN2nn4chat36ShowLocalCameraConfigurationVersion0ENS0_25CameraImageProcessingModeE(NxwGuestCpu *cpu) {
+    uint64_t *x = cpu->x; (void)x;
+    int a0 = (int)x[0];
+    uint32_t r = h_chat_ShowCamCfg(a0);
+    x[0] = (uint64_t)r;
+}
+
+NXRT_API void adapter__ZN2nn4chat46BeginFullScreenWithLocalCameraAvailableSectionEb(NxwGuestCpu *cpu) {
+    uint64_t *x = cpu->x; (void)x;
+    unsigned a0 = (unsigned)x[0];
+    h_chat_FsBegin(a0);
+}
+
+NXRT_API void adapter__ZN2nn4chat44EndFullScreenWithLocalCameraAvailableSectionEv(NxwGuestCpu *cpu) {
+    uint64_t *x = cpu->x; (void)x;
+    h_chat_FsEnd();
+}
+
+NXRT_API void adapter__ZN2nn4chat35CalculateLocalCameraVideoBufferSizeEiii(NxwGuestCpu *cpu) {
+    uint64_t *x = cpu->x; (void)x;
+    int a0 = (int)x[0];
+    int a1 = (int)x[1];
+    int a2 = (int)x[2];
+    uint64_t r = h_chat_LocalSize(a0, a1, a2);
+    x[0] = (uint64_t)r;
+}
+
+NXRT_API void adapter__ZN2nn4chat36CalculateRemoteCameraVideoBufferSizeEiii(NxwGuestCpu *cpu) {
+    uint64_t *x = cpu->x; (void)x;
+    int a0 = (int)x[0];
+    int a1 = (int)x[1];
+    int a2 = (int)x[2];
+    uint64_t r = h_chat_RemoteSize(a0, a1, a2);
+    x[0] = (uint64_t)r;
+}
+
+NXRT_API void adapter__ZN2nn4chat33InitializeLocalCameraVideoStorageEPNS0_20LocalCameraVideoTypeEiiiPvm(NxwGuestCpu *cpu) {
+    uint64_t *x = cpu->x; (void)x;
+    void * a0 = (void *)(uintptr_t)x[0];
+    int a1 = (int)x[1];
+    int a2 = (int)x[2];
+    int a3 = (int)x[3];
+    void * a4 = (void *)(uintptr_t)x[4];
+    uint64_t a5 = (uint64_t)x[5];
+    uint32_t r = h_chat_LocalInit(a0, a1, a2, a3, a4, a5);
+    x[0] = (uint64_t)r;
+}
+
+NXRT_API void adapter__ZN2nn4chat34InitializeRemoteCameraVideoStorageEPNS0_21RemoteCameraVideoTypeEiiiPvm(NxwGuestCpu *cpu) {
+    uint64_t *x = cpu->x; (void)x;
+    void * a0 = (void *)(uintptr_t)x[0];
+    int a1 = (int)x[1];
+    int a2 = (int)x[2];
+    int a3 = (int)x[3];
+    void * a4 = (void *)(uintptr_t)x[4];
+    uint64_t a5 = (uint64_t)x[5];
+    uint32_t r = h_chat_RemoteInit(a0, a1, a2, a3, a4, a5);
+    x[0] = (uint64_t)r;
+}
+
+NXRT_API void adapter__ZN2nn4chat31FinalizeLocalCameraVideoStorageEPNS0_20LocalCameraVideoTypeE(NxwGuestCpu *cpu) {
+    uint64_t *x = cpu->x; (void)x;
+    void * a0 = (void *)(uintptr_t)x[0];
+    h_chat_LocalFini(a0);
+}
+
+NXRT_API void adapter__ZN2nn4chat32FinalizeRemoteCameraVideoStorageEPNS0_21RemoteCameraVideoTypeE(NxwGuestCpu *cpu) {
+    uint64_t *x = cpu->x; (void)x;
+    void * a0 = (void *)(uintptr_t)x[0];
+    h_chat_RemoteFini(a0);
+}
+
+NXRT_API void adapter__ZN2nn4chat25GetLocalCameraImageHandleEPKNS0_20LocalCameraVideoTypeEi(NxwGuestCpu *cpu) {
+    uint64_t *x = cpu->x; (void)x;
+    const void * a0 = (const void *)(uintptr_t)x[0];
+    int a1 = (int)x[1];
+    uint32_t r = h_chat_LocalImg(a0, a1);
+    x[0] = (uint64_t)r;
+}
+
+NXRT_API void adapter__ZN2nn4chat26GetRemoteCameraImageHandleEPKNS0_21RemoteCameraVideoTypeEi(NxwGuestCpu *cpu) {
+    uint64_t *x = cpu->x; (void)x;
+    const void * a0 = (const void *)(uintptr_t)x[0];
+    int a1 = (int)x[1];
+    uint32_t r = h_chat_RemoteImg(a0, a1);
+    x[0] = (uint64_t)r;
+}
+
+NXRT_API void adapter__ZN2nn4chat25StartLocalCameraStreamingEv(NxwGuestCpu *cpu) {
+    uint64_t *x = cpu->x; (void)x;
+    uint32_t r = h_chat_LocalStart();
+    x[0] = (uint64_t)r;
+}
+
+NXRT_API void adapter__ZN2nn4chat24StopLocalCameraStreamingEv(NxwGuestCpu *cpu) {
+    uint64_t *x = cpu->x; (void)x;
+    uint32_t r = h_chat_LocalStop();
+    x[0] = (uint64_t)r;
+}
+
+NXRT_API void adapter__ZN2nn4chat26StartRemoteCameraStreamingERKNS_7account23NetworkServiceAccountIdE(NxwGuestCpu *cpu) {
+    uint64_t *x = cpu->x; (void)x;
+    const void * a0 = (const void *)(uintptr_t)x[0];
+    uint32_t r = h_chat_RemoteStart(a0);
+    x[0] = (uint64_t)r;
+}
+
+NXRT_API void adapter__ZN2nn4chat25StopRemoteCameraStreamingERKNS_7account23NetworkServiceAccountIdE(NxwGuestCpu *cpu) {
+    uint64_t *x = cpu->x; (void)x;
+    const void * a0 = (const void *)(uintptr_t)x[0];
+    uint32_t r = h_chat_RemoteStop(a0);
+    x[0] = (uint64_t)r;
+}
+
+NXRT_API void adapter__ZN2nn4chat27RequestNextLocalCameraImageEPNS_2gs16NativeSyncHandleEPNS0_20LocalCameraVideoTypeEiS2_(NxwGuestCpu *cpu) {
+    uint64_t *x = cpu->x; (void)x;
+    void * a0 = (void *)(uintptr_t)x[0];
+    void * a1 = (void *)(uintptr_t)x[1];
+    int a2 = (int)x[2];
+    uint32_t r = h_chat_LocalNext(a0, a1, a2);
+    x[0] = (uint64_t)r;
+}
+
+NXRT_API void adapter__ZN2nn4chat28RequestNextRemoteCameraImageEPNS_2gs16NativeSyncHandleEPNS0_21RemoteCameraVideoTypeEiS2_RKNS_7account23NetworkServiceAccountIdE(NxwGuestCpu *cpu) {
+    uint64_t *x = cpu->x; (void)x;
+    void * a0 = (void *)(uintptr_t)x[0];
+    void * a1 = (void *)(uintptr_t)x[1];
+    int a2 = (int)x[2];
+    uint32_t r = h_chat_RemoteNext(a0, a1, a2);
+    x[0] = (uint64_t)r;
+}
+
+NXRT_API void adapter__ZN2nn6camera3sdk19CreateCameraContextEPNS_5gsdrv18UniqueNativeHandleE(NxwGuestCpu *cpu) {
+    uint64_t *x = cpu->x; (void)x;
+    uint32_t * a0 = (uint32_t *)(uintptr_t)x[0];
+    uint32_t r = h_cam_Context(a0);
+    x[0] = (uint64_t)r;
+}
+

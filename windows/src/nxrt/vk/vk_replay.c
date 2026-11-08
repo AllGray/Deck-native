@@ -4,6 +4,7 @@
 // winding rules (draw_), clears with their scissor and channel mask (OP_CLEAR_COLOR / OP_CLEAR_DS), copies (copy_b2t / copy_t2b / copy_t2t) with the
 // storage mirror of storage-backed textures, counters (occlusion queries summed from reset to report). The Vulkan side is ours: dynamic rendering, one
 // descriptor set per stage, extended dynamic state, the pool mirrors of vk_mem.c and the images of vk_tex.c, GENERAL as the resting layout of GPU images.
+#include "../gfx/nxs_rt.h"
 #include "vk_replay.h"
 #include "vk_submit.h"
 #include "vk_mem.h"
@@ -148,6 +149,7 @@ typedef struct rs {
     va_st attr[16]; int nattr; vs_st stream[16]; int nstream; NVNbufferRange vbuf[16];
     p_bind_buf ubo[8][16], ssbo[8][16];   // 6 and 7: NVN2 task and mesh stages
     uint64_t tex[8][NTEX], samp[8][128], img[8][32];
+    uint8_t push_gfx[PUSH_GFX_MAX];   // NVN2 push block of graphics shaders (constant bank 24)
     uint32_t st_vmask[2], st_wmask[2], st_ref[2];
     p_poly_offset po; float vp[16][4]; float dr[2]; int has_vp, depth_clamp; uint8_t vp_sw[16][4];
     float blend_color[4], alpha_ref; int64_t copy_stride, copy_img_stride;
@@ -175,14 +177,22 @@ static rs *rs_get(uint64_t serial) {
 }
 
 // ---------- Programs: the shader of each NVN stage, cached by program serial ----------
-typedef struct { const vks_shader *sh[8]; } progc;
+typedef struct { const vks_shader *sh[8];  int diag; } progc;
 static vk_hmap g_progc = {8};
 static const vks_shader *prog_stage(const prog_t *p, int stage) {
     if (!p || !p->serial) return NULL;
     progc *c = vk_hm_get(&g_progc, &p->serial);
     if (c && c->sh[stage]) return c->sh[stage];
     if (!c) { c = calloc(1, sizeof *c); vk_hm_put(&g_progc, &p->serial, c); }
-    for (unsigned i = 0; i < p->nstage && i < 6; i++) { const vks_shader *s = vksh_get(p, i); if (s && s->stage >= 0 && s->stage < 8) c->sh[s->stage] = s; }
+    int any = 0;
+    for (unsigned i = 0; i < p->nstage && i < 6; i++) { const vks_shader *s = vksh_get(p, i); if (s && s->stage >= 0 && s->stage < 8) { c->sh[s->stage] = s; any = 1; } }
+    if (!any && !c->diag) {   // once per program: why none of its stages resolved
+        c->diag = 1;
+        VKLOG("program ser%llu: no stage resolved (nstage %u, wanted stage %d)", (unsigned long long)p->serial, p->nstage, stage);
+        for (unsigned i = 0; i < p->nstage && i < 6; i++) { uint8_t k[8]; int kok = prog_key(p, i, k); const nxs_shader *n = NULL; int r = nxs_resolve(p, i, &n);
+            VKLOG("  stage %u: key %s%02x%02x%02x%02x%02x%02x%02x%02x control %p data %#llx resolve %d shader %p", i, kok ? "" : "(none) ", k[0], k[1], k[2], k[3], k[4], k[5], k[6], k[7],
+                  p->sd[i].control, (unsigned long long)p->sd[i].data, r, (const void *)n); }
+    }
     return c->sh[stage];
 }
 
@@ -703,6 +713,10 @@ static VkDescriptorSet write_set(const vks_shader *sh, int st, int *swrites) {
             if (b->kind == VKB_SUPPORT) *o = (VkDescriptorBufferInfo){R0.support, 0, SUPPORT_SIZE};
             else if (b->kind == VKB_CBUF) { if (b->reg >= 0 && b->reg < 16) *o = ubo_info(&S->ubo[st][b->reg]); }
             else if (b->kind == VKB_C1) { if (sh->c1buf) *o = (VkDescriptorBufferInfo){sh->c1buf, sh->c1off, (sh->c1_len + 15) & ~15u}; }
+            else if (b->kind == VKB_DRV && b->bank == 24) {   // NVN2 push block (PushGraphicsConstants), a 4 KB window with the pushed bytes at its start
+                VkBuffer ab; VkDeviceSize ao; uint8_t *d = arena(4096, g_vk.props.limits.minUniformBufferOffsetAlignment, &ab, &ao);
+                if (d) { memset(d, 0, 4096); memcpy(d, S->push_gfx, PUSH_GFX_MAX); *o = (VkDescriptorBufferInfo){ab, ao, 4096}; }
+            }
             else if (b->kind == VKB_DRV && (b->bank == 0 || b->bank == 2) && sh->drv_read[b->bank]) {
                 VkBuffer ab; VkDeviceSize ao; uint8_t *d = arena(DMSH_DRV_SIZE, g_vk.props.limits.minUniformBufferOffsetAlignment, &ab, &ao);
                 if (d) { drv_fill(d, sh, st, b->bank); *o = (VkDescriptorBufferInfo){ab, ao, DMSH_DRV_SIZE}; }
@@ -915,6 +929,12 @@ static void draw(const p_draw *dw, const p_draw_idx *di) {
         static _Atomic int n; if (atomic_fetch_add(&n, 1) < 60)
             VKLOG("skipped (no shader): vs=%llu fs=%llu target c0=ser%llu %ux%u (ncolor %d)", S->bst[0] ? S->bst[0]->serial : 0, S->bst[1] ? S->bst[1]->serial : 0,
                   P.ncolor && P.ci[0] ? (unsigned long long)P.ci[0]->serial : 0ull, P.w, P.h, P.ncolor);
+        if (g_pd) {   // a skipped draw is otherwise missing from the pass dump: its program state and the raw texture slots of every stage
+            PD("draw SKIPPED (no shader) vs=%llu fs=%llu cprog=%llu mprog=%llu prim=%d count=%d mesh=%d target c0=ser%llu %ux%u", S->bst[0] ? S->bst[0]->serial : 0ull, S->bst[1] ? S->bst[1]->serial : 0ull,
+               S->cprog ? S->cprog->serial : 0ull, S->mprog ? S->mprog->serial : 0ull, prim, dw ? dw->count : di ? di->count : -1, mesh, P.ncolor && P.ci[0] ? (unsigned long long)P.ci[0]->serial : 0ull, P.w, P.h);
+            for (int s = 0; s < 5; s++) for (unsigned reg = 0; reg < 8; reg++) { uint64_t h = tex_slot_h(s, reg); int tid = (int)(h & 0xfffff); vkt_reg r;
+                if (tid > 0 && vkt_reg_copy(tid, &r)) PD("  skipped st%d tex slot%u tid=%d ser%llu fmt%#x %ux%u", s, reg, tid, (unsigned long long)r.t.serial, r.t.d.format, r.t.d.width, r.t.d.height); }
+        }
         return;
     }
     if (!mesh) sh[0] = vin_shader(sh[0]);
@@ -1124,11 +1144,19 @@ static void draw(const p_draw *dw, const p_draw_idx *di) {
 }
 
 // ---------- Compute (nvn_mtl.m dispatch) ----------
+static void pd_dispatch_skipped(const p_dispatch *dp, const char *why) {   // a skipped dispatch is otherwise missing from the pass dump: its program and raw slots
+    if (!g_pd) return;
+    PD("dispatch SKIPPED (%s) cprog=%llu groups %d,%d,%d ind=%#llx caller=%#llx", why, S->cprog ? (unsigned long long)S->cprog->serial : 0ull, dp->x, dp->y, dp->z, (unsigned long long)dp->ind, (unsigned long long)dp->caller);
+    for (unsigned reg = 0; reg < 32; reg++) { vkt_reg r; uint64_t h = reg < 8 ? tex_slot_h(VKS_CS, reg) : 0; int tid = (int)(h & 0xfffff);
+        if (tid > 0 && vkt_reg_copy(tid, &r)) PD("  skipped cs tex slot%u tid=%d ser%llu fmt%#x %ux%u", reg, tid, (unsigned long long)r.t.serial, r.t.d.format, r.t.d.width, r.t.d.height);
+        tid = (int)(S->img[VKS_CS][reg] & 0xfffff);
+        if (tid > 0 && vkt_reg_copy(tid, &r)) PD("  skipped cs img slot%u tid=%d ser%llu fmt%#x %ux%u", reg, tid, (unsigned long long)r.t.serial, r.t.d.format, r.t.d.width, r.t.d.height); }
+}
 static void dispatch(const p_dispatch *dp) {
     const vks_shader *cs = S->cprog ? prog_stage(S->cprog, VKS_CS) : NULL;
-    if (!cs) { g_st.skip_no_shader++; return; }
+    if (!cs || !S->cprog) { g_st.skip_no_shader++; pd_dispatch_skipped(dp, "no shader"); return; }
     VkPipelineLayout layout; VkPipeline pipe = vkp_compute(cs, &layout);
-    if (!pipe) return;
+    if (!pipe) { pd_dispatch_skipped(dp, "no pipeline"); return; }
     pass_end();
     VkCommandBuffer cb = vks_cb();
     g_dispatch_dim[0] = (uint32_t)dp->x; g_dispatch_dim[1] = (uint32_t)dp->y; g_dispatch_dim[2] = (uint32_t)dp->z;
@@ -1417,6 +1445,7 @@ static void state_op(uint32_t op, const void *a) {
     case OP_SCISSOR: S->sc = *(const p_scissor *)a; S->has_sc = 1; break;
     case OP_SET_TEX_POOL: case OP_SET_SAMP_POOL: { int tex = op == OP_SET_TEX_POOL, b = nvn_dpool_base(((const p_set_pool *)a)->pool, tex); if (tex) S->tex_base = b; else S->samp_base = b; break; }
     case OP_BIND_PROGRAM: { const p_bind_program *bp = a;
+        if (g_pd) PD("bind program ser%llu stages %#x nstage %u", bp->prog ? (unsigned long long)bp->prog->serial : 0ull, (unsigned)bp->stages, bp->prog ? bp->prog->nstage : 0u);
         if (bp->stages & 0x20) S->cprog = bp->prog;
         for (int st = 0; st < 5; st++) if (bp->stages >> st & 1) S->bst[st] = bp->prog;
         if (bp->stages & 0xc0) S->mprog = bp->prog;   // task / mesh bits
@@ -1452,6 +1481,7 @@ static void state_op(uint32_t op, const void *a) {
     case OP_VP_SWIZZLE: { const p_vp_swizzle *b = a; if (b->first >= 0 && b->first + b->n <= 16) memcpy(S->vp_sw[b->first], b->sw, 4 * (size_t)b->n); break; }
     case OP_BLEND_COLOR: memcpy(S->blend_color, ((const p_blend_color *)a)->rgba, 16); break;
     case OP_ALPHA_REF: S->alpha_ref = ((const p_alpha_ref *)a)->ref; break;
+    case OP_PUSH_GFX: { const p_push_gfx *b = a; if (b->off < PUSH_GFX_MAX) memcpy(S->push_gfx + b->off, b->d, b->off + b->n <= PUSH_GFX_MAX ? b->n : PUSH_GFX_MAX - b->off); break; }
     case OP_COPY_STRIDE: { const p_copy_stride *cs = a; if (cs->image) S->copy_img_stride = cs->stride; else S->copy_stride = cs->stride; break; }
     case OP_TF_STATE: { const p_tf_state *b = a; S->tf_on = b->what == 0 || b->what == 3; if (S->tf_on) RED_ONCE(111, "transform feedback is not captured yet"); break; }
     case OP_PRIM_RESTART: S->restart = *(const p_prim_restart *)a; break;

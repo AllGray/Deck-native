@@ -97,6 +97,8 @@ NXRT_API void adapter__ZN2nn5audio39AcquireAudioDeviceNotificationForOutputEPNS_
 NXRT_API void adapter__ZN2nn5audio38AcquireAudioDeviceNotificationForInputEPNS_2os11SystemEventE(NxwGuestCpu *cpu);
 NXRT_API void adapter__ZN2nn5audio36AcquireAudioDeviceSwitchNotificationEPNS_2os11SystemEventE(NxwGuestCpu *cpu);
 NXRT_API void adapter__ZN2nn5audio21GetActiveChannelCountEv(NxwGuestCpu *cpu);
+NXRT_API void adapter__ZN2nn5audio40SetDeviceOutputVolumeAutoTuneModeEnabledEb(NxwGuestCpu *cpu);
+NXRT_API void adapter__ZN2nn5audio39IsDeviceOutputVolumeAutoTuneModeEnabledEv(NxwGuestCpu *cpu);
 NXRT_API void adapter__ZN2nn5codec19HardwareOpusDecoderC1Ei(NxwGuestCpu *cpu);
 NXRT_API void adapter__ZN2nn5codec36GetHardwareOpusDecoderWorkBufferSizeEiii(NxwGuestCpu *cpu);
 NXRT_API void adapter__ZN2nn5codec36GetHardwareOpusDecoderWorkBufferSizeEii(NxwGuestCpu *cpu);
@@ -118,6 +120,87 @@ NXRT_API void adapter__ZN2nn5codec50GetHardwareOpusMultiStreamDecoderStereoStrea
 NXRT_API void adapter__ZN2nn5codec35ResetHardwareOpusMultiStreamDecoderEPNS0_34HardwareOpusMultiStreamDecoderTypeE(NxwGuestCpu *cpu);
 NXRT_API void adapter__ZN2nn5codec44DecodeOpusMultiStreamInterleavedWithHardwareEPNS0_34HardwareOpusMultiStreamDecoderTypeEPmPiPsmPKvm(NxwGuestCpu *cpu);
 NXRT_API void adapter__ZN2nn5codec47GetHardwareOpusMultiStreamDecoderProcessingTimeEPKNS0_34HardwareOpusMultiStreamDecoderTypeE(NxwGuestCpu *cpu);
+NXRT_API void adapter__ZN2nn5codec5video10InitializeEv(NxwGuestCpu *cpu);
+NXRT_API void adapter__ZN2nn5codec5video8FinalizeEv(NxwGuestCpu *cpu);
+NXRT_API void adapter__ZN2nn5codec25MakeDecodeImagePreferenceEttNS0_24VideoDecoderOutputFormatENS0_9CodecModeE(NxwGuestCpu *cpu);
+NXRT_API void adapter__ZN2nn5codec31CalculateDecoderImagePoolBufferEPmS1_RKNS0_27VideoDecoderImagePreferenceEj(NxwGuestCpu *cpu);
+NXRT_API void adapter__ZN2nn5codec26InitializeDecoderImagePoolEPNS0_25VideoDecoderImagePoolTypeEPvmRKNS0_27VideoDecoderImagePreferenceEjNS0_9CodecModeE(NxwGuestCpu *cpu);
+NXRT_API void adapter__ZN2nn5codec24FinalizeDecoderImagePoolEPNS0_25VideoDecoderImagePoolTypeE(NxwGuestCpu *cpu);
+NXRT_API void adapter__ZN2nn5codec36GetDecoderImagePoolNativeImageHandleEPKNS0_25VideoDecoderImagePoolTypeEj(NxwGuestCpu *cpu);
+NXRT_API void adapter__ZN2nn5codec26ReadDecoderOutputImageRgbaEPKNS0_25VideoDecoderImagePoolTypeEjttttPvmm(NxwGuestCpu *cpu);
+NXRT_API void adapter__ZN2nn5codec26ReadDecoderOutputImageNv12EPKNS0_25VideoDecoderImagePoolTypeEjttttPvmmS4_mm(NxwGuestCpu *cpu);
+NXRT_API void adapter__ZN2nn5codec14StopVp9DecoderEPNS0_14Vp9DecoderTypeE(NxwGuestCpu *cpu);
+NXRT_API void adapter__ZN2nn5codec15FlushVp9DecoderEPNS0_14Vp9DecoderTypeE(NxwGuestCpu *cpu);
+NXRT_API void adapter__ZN2nn5codec15StartVp9DecoderEPNS0_14Vp9DecoderTypeE(NxwGuestCpu *cpu);
+NXRT_API void adapter__ZN2nn5codec18FinalizeVp9DecoderEPNS0_14Vp9DecoderTypeE(NxwGuestCpu *cpu);
+NXRT_API void adapter__ZN2nn5codec20InitializeVp9DecoderEPNS0_14Vp9DecoderTypeEPvmmttjNS0_23VideoDecoderInputFormatENS0_24VideoDecoderOutputFormatE(NxwGuestCpu *cpu);
+NXRT_API void adapter__ZN2nn5codec20InitializeVp9DecoderEPNS0_14Vp9DecoderTypeEmttjNS0_23VideoDecoderInputFormatENS0_24VideoDecoderOutputFormatE(NxwGuestCpu *cpu);
+NXRT_API void adapter__ZN2nn5codec24RegisterVp9DecoderBufferEPNS0_14Vp9DecoderTypeEjPNS0_25VideoDecoderImagePoolTypeEj(NxwGuestCpu *cpu);
+NXRT_API void adapter__ZN2nn5codec26UnregisterVp9DecoderBufferEPNS0_14Vp9DecoderTypeEj(NxwGuestCpu *cpu);
+NXRT_API void adapter__ZN2nn5codec27SubmitVp9DecoderInputBufferEPmPNS0_14Vp9DecoderTypeEPKvmNS_8TimeSpanEb(NxwGuestCpu *cpu);
+NXRT_API void adapter__ZN2nn5codec29AcquireVp9DecoderOutputBufferEPjPNS_2gs16NativeSyncHandleEPNS0_14Vp9DecoderTypeE(NxwGuestCpu *cpu);
+NXRT_API void adapter__ZN2nn5codec29CalculateVp9DecoderWorkBufferEPmS1_mtt(NxwGuestCpu *cpu);
+NXRT_API void adapter__ZN2nn5codec29ReleaseVp9DecoderOutputBufferEPNS0_14Vp9DecoderTypeEjNS_2gs16NativeSyncHandleE(NxwGuestCpu *cpu);
+NXRT_API void adapter__ZN2nn5codec33GetVp9DecoderSubmissionReadyEventEPPNS_2os15SystemEventTypeEPNS0_14Vp9DecoderTypeE(NxwGuestCpu *cpu);
+NXRT_API void adapter__ZN2nn5codec35GetVp9DecoderOutputBufferPropertiesEPtS1_S1_S1_PNS_8TimeSpanEPbPNS0_14Vp9DecoderTypeEj(NxwGuestCpu *cpu);
+NXRT_API void adapter__ZN2nn5codec36SubmitEncryptedVp9DecoderInputBufferEPmPNS0_14Vp9DecoderTypeEPKNS0_18EncryptionPropertyEPKvmNS_8TimeSpanEb(NxwGuestCpu *cpu);
+NXRT_API void adapter__ZN2nn5codec14StopVp8DecoderEPNS0_14Vp8DecoderTypeE(NxwGuestCpu *cpu);
+NXRT_API void adapter__ZN2nn5codec15FlushVp8DecoderEPNS0_14Vp8DecoderTypeE(NxwGuestCpu *cpu);
+NXRT_API void adapter__ZN2nn5codec15StartVp8DecoderEPNS0_14Vp8DecoderTypeE(NxwGuestCpu *cpu);
+NXRT_API void adapter__ZN2nn5codec18FinalizeVp8DecoderEPNS0_14Vp8DecoderTypeE(NxwGuestCpu *cpu);
+NXRT_API void adapter__ZN2nn5codec20InitializeVp8DecoderEPNS0_14Vp8DecoderTypeEPvmmttjNS0_23VideoDecoderInputFormatENS0_24VideoDecoderOutputFormatE(NxwGuestCpu *cpu);
+NXRT_API void adapter__ZN2nn5codec20InitializeVp8DecoderEPNS0_14Vp8DecoderTypeEmttjNS0_23VideoDecoderInputFormatENS0_24VideoDecoderOutputFormatE(NxwGuestCpu *cpu);
+NXRT_API void adapter__ZN2nn5codec24RegisterVp8DecoderBufferEPNS0_14Vp8DecoderTypeEjPNS0_25VideoDecoderImagePoolTypeEj(NxwGuestCpu *cpu);
+NXRT_API void adapter__ZN2nn5codec26UnregisterVp8DecoderBufferEPNS0_14Vp8DecoderTypeEj(NxwGuestCpu *cpu);
+NXRT_API void adapter__ZN2nn5codec27SubmitVp8DecoderInputBufferEPmPNS0_14Vp8DecoderTypeEPKvmNS_8TimeSpanEb(NxwGuestCpu *cpu);
+NXRT_API void adapter__ZN2nn5codec29AcquireVp8DecoderOutputBufferEPjPNS_2gs16NativeSyncHandleEPNS0_14Vp8DecoderTypeE(NxwGuestCpu *cpu);
+NXRT_API void adapter__ZN2nn5codec29CalculateVp8DecoderWorkBufferEPmS1_mtt(NxwGuestCpu *cpu);
+NXRT_API void adapter__ZN2nn5codec29ReleaseVp8DecoderOutputBufferEPNS0_14Vp8DecoderTypeEjNS_2gs16NativeSyncHandleE(NxwGuestCpu *cpu);
+NXRT_API void adapter__ZN2nn5codec33GetVp8DecoderSubmissionReadyEventEPPNS_2os15SystemEventTypeEPNS0_14Vp8DecoderTypeE(NxwGuestCpu *cpu);
+NXRT_API void adapter__ZN2nn5codec35GetVp8DecoderOutputBufferPropertiesEPtS1_S1_S1_PNS_8TimeSpanEPbPNS0_14Vp8DecoderTypeEj(NxwGuestCpu *cpu);
+NXRT_API void adapter__ZN2nn5codec36SubmitEncryptedVp8DecoderInputBufferEPmPNS0_14Vp8DecoderTypeEPKNS0_18EncryptionPropertyEPKvmNS_8TimeSpanEb(NxwGuestCpu *cpu);
+NXRT_API void adapter__ZN2nn5codec15StopH264DecoderEPNS0_15H264DecoderTypeE(NxwGuestCpu *cpu);
+NXRT_API void adapter__ZN2nn5codec16FlushH264DecoderEPNS0_15H264DecoderTypeE(NxwGuestCpu *cpu);
+NXRT_API void adapter__ZN2nn5codec16StartH264DecoderEPNS0_15H264DecoderTypeE(NxwGuestCpu *cpu);
+NXRT_API void adapter__ZN2nn5codec19FinalizeH264DecoderEPNS0_15H264DecoderTypeE(NxwGuestCpu *cpu);
+NXRT_API void adapter__ZN2nn5codec21InitializeH264DecoderEPNS0_15H264DecoderTypeEPvmmttjNS0_23VideoDecoderInputFormatENS0_24VideoDecoderOutputFormatEPKvm(NxwGuestCpu *cpu);
+NXRT_API void adapter__ZN2nn5codec21InitializeH264DecoderEPNS0_15H264DecoderTypeEmttjNS0_23VideoDecoderInputFormatENS0_24VideoDecoderOutputFormatEPKvm(NxwGuestCpu *cpu);
+NXRT_API void adapter__ZN2nn5codec25RegisterH264DecoderBufferEPNS0_15H264DecoderTypeEjPNS0_25VideoDecoderImagePoolTypeEj(NxwGuestCpu *cpu);
+NXRT_API void adapter__ZN2nn5codec27UnregisterH264DecoderBufferEPNS0_15H264DecoderTypeEj(NxwGuestCpu *cpu);
+NXRT_API void adapter__ZN2nn5codec28SubmitH264DecoderInputBufferEPmPNS0_15H264DecoderTypeEPKvmNS_8TimeSpanEb(NxwGuestCpu *cpu);
+NXRT_API void adapter__ZN2nn5codec30AcquireH264DecoderOutputBufferEPjPNS_2gs16NativeSyncHandleEPNS0_15H264DecoderTypeE(NxwGuestCpu *cpu);
+NXRT_API void adapter__ZN2nn5codec30CalculateH264DecoderWorkBufferEPmS1_mtt(NxwGuestCpu *cpu);
+NXRT_API void adapter__ZN2nn5codec30ReleaseH264DecoderOutputBufferEPNS0_15H264DecoderTypeEjNS_2gs16NativeSyncHandleE(NxwGuestCpu *cpu);
+NXRT_API void adapter__ZN2nn5codec34GetH264DecoderSubmissionReadyEventEPPNS_2os15SystemEventTypeEPNS0_15H264DecoderTypeE(NxwGuestCpu *cpu);
+NXRT_API void adapter__ZN2nn5codec36GetH264DecoderOutputBufferPropertiesEPtS1_S1_S1_PNS_8TimeSpanEPbPNS0_15H264DecoderTypeEj(NxwGuestCpu *cpu);
+NXRT_API void adapter__ZN2nn5codec37SubmitEncryptedH264DecoderInputBufferEPmPNS0_15H264DecoderTypeEPKNS0_18EncryptionPropertyEPKvmNS_8TimeSpanEb(NxwGuestCpu *cpu);
+NXRT_API void adapter__ZN2nn5codec21InitializeH264DecoderEPNS0_15H264DecoderTypeEPvmmttjNS0_23VideoDecoderInputFormatENS0_24VideoDecoderOutputFormatENS0_22VideoDecoderOutputModeEPKvm(NxwGuestCpu *cpu);
+NXRT_API void adapter__ZN2nn5codec29CalculateAv1DecoderWorkBufferEPmS1_mtt(NxwGuestCpu *cpu);
+NXRT_API void adapter__ZN2nn5codec20InitializeAv1DecoderEPNS0_14Av1DecoderTypeEPvmmttjNS0_23VideoDecoderInputFormatENS0_24VideoDecoderOutputFormatE(NxwGuestCpu *cpu);
+NXRT_API void adapter__ZN2nn5codec20InitializeAv1DecoderEPNS0_14Av1DecoderTypeEmttjNS0_23VideoDecoderInputFormatENS0_24VideoDecoderOutputFormatE(NxwGuestCpu *cpu);
+NXRT_API void adapter__ZN2nn5codec18FinalizeAv1DecoderEPNS0_14Av1DecoderTypeE(NxwGuestCpu *cpu);
+NXRT_API void adapter__ZN2nn5codec25MakeDecodeImagePreferenceEttNS0_24VideoDecoderOutputFormatENS0_15ImageTilingModeE(NxwGuestCpu *cpu);
+NXRT_API void adapter__ZN2nn5codec26InitializeDecoderImagePoolEPNS0_25VideoDecoderImagePoolTypeEPvmRKNS0_27VideoDecoderImagePreferenceEj(NxwGuestCpu *cpu);
+NXRT_API void adapter__ZN2nn5codec33GetVp9DecoderSubmissionReadyEventEPNS0_14Vp9DecoderTypeE(NxwGuestCpu *cpu);
+NXRT_API void adapter__ZN2nn5codec34InitializeVp9DecoderByRemoteMemoryEPNS0_14Vp9DecoderTypeEmttjNS0_23VideoDecoderInputFormatENS0_24VideoDecoderOutputFormatENS0_22VideoDecoderOutputModeE(NxwGuestCpu *cpu);
+NXRT_API void adapter__ZN2nn5codec36InitializeVp9DecoderByTransferMemoryEPNS0_14Vp9DecoderTypeEPvmmttjNS0_23VideoDecoderInputFormatENS0_24VideoDecoderOutputFormatENS0_22VideoDecoderOutputModeE(NxwGuestCpu *cpu);
+NXRT_API void adapter__ZN2nn5codec33GetVp8DecoderSubmissionReadyEventEPNS0_14Vp8DecoderTypeE(NxwGuestCpu *cpu);
+NXRT_API void adapter__ZN2nn5codec34InitializeVp8DecoderByRemoteMemoryEPNS0_14Vp8DecoderTypeEmttjNS0_23VideoDecoderInputFormatENS0_24VideoDecoderOutputFormatENS0_22VideoDecoderOutputModeE(NxwGuestCpu *cpu);
+NXRT_API void adapter__ZN2nn5codec36InitializeVp8DecoderByTransferMemoryEPNS0_14Vp8DecoderTypeEPvmmttjNS0_23VideoDecoderInputFormatENS0_24VideoDecoderOutputFormatENS0_22VideoDecoderOutputModeE(NxwGuestCpu *cpu);
+NXRT_API void adapter__ZN2nn5codec37InitializeH264DecoderByTransferMemoryEPNS0_15H264DecoderTypeEPvmmttjNS0_23VideoDecoderInputFormatENS0_24VideoDecoderOutputFormatENS0_22VideoDecoderOutputModeEPKvm(NxwGuestCpu *cpu);
+NXRT_API void adapter__ZN2nn5codec35InitializeH264DecoderByRemoteMemoryEPNS0_15H264DecoderTypeEmttjNS0_23VideoDecoderInputFormatENS0_24VideoDecoderOutputFormatENS0_22VideoDecoderOutputModeEPKvm(NxwGuestCpu *cpu);
+NXRT_API void adapter__ZN2nn5codec34GetH264DecoderSubmissionReadyEventEPNS0_15H264DecoderTypeE(NxwGuestCpu *cpu);
+NXRT_API void adapter__ZN2nn5codec31InitializeDecoderAliasImagePoolEPNS0_25VideoDecoderImagePoolTypeENS_2gs17NativeImageHandleEj(NxwGuestCpu *cpu);
+NXRT_API void adapter__ZN2nn5codec36InitializeAv1DecoderByTransferMemoryEPNS0_14Av1DecoderTypeEPvmmttjNS0_23VideoDecoderInputFormatENS0_24VideoDecoderOutputFormatENS0_22VideoDecoderOutputModeE(NxwGuestCpu *cpu);
+NXRT_API void adapter__ZN2nn5codec34InitializeAv1DecoderByRemoteMemoryEPNS0_14Av1DecoderTypeEmttjNS0_23VideoDecoderInputFormatENS0_24VideoDecoderOutputFormatENS0_22VideoDecoderOutputModeE(NxwGuestCpu *cpu);
+NXRT_API void adapter__ZN2nn5codec29ReadDecoderOutputImageRgbaHdrEPKNS0_25VideoDecoderImagePoolTypeEjttttPvmm(NxwGuestCpu *cpu);
+NXRT_API void adapter__ZN2nn5codec34ReadDecoderOutputImageRgbaHdrFloatEPKNS0_25VideoDecoderImagePoolTypeEjttttPvmm(NxwGuestCpu *cpu);
+NXRT_API void adapter__ZN2nn2gs17TryWaitNativeSyncERKNS0_16NativeSyncHandleE(NxwGuestCpu *cpu);
+NXRT_API void adapter__ZN2nn6syncpt3sdk20CreateSyncPointEventEPNS1_18SyncPointEventTypeE(NxwGuestCpu *cpu);
+NXRT_API void adapter__ZN2nn6syncpt3sdk25InitializeMultiWaitHolderEPNS_2os19MultiWaitHolderTypeEPNS1_18SyncPointEventTypeE(NxwGuestCpu *cpu);
+NXRT_API void adapter__ZN2nn6syncpt3sdk21RequestSyncPointEventEPNS1_18SyncPointEventTypeERKNS1_15SyncPointHandleE(NxwGuestCpu *cpu);
+NXRT_API void adapter__ZN2nn6syncpt3sdk20CancelSyncPointEventEPNS1_18SyncPointEventTypeE(NxwGuestCpu *cpu);
+NXRT_API void adapter__ZN2nn6syncpt3sdk21DestroySyncPointEventEPNS1_18SyncPointEventTypeE(NxwGuestCpu *cpu);
 NXRT_API void adapter__ZN2nn7friends10InitializeEv(NxwGuestCpu *cpu);
 NXRT_API void adapter__ZN2nn7friends12AsyncContextC1Ev(NxwGuestCpu *cpu);
 NXRT_API void adapter__ZN2nn7friends12AsyncContextD1Ev(NxwGuestCpu *cpu);
@@ -360,6 +443,11 @@ NXRT_API void adapter__ZN2nn3hid37SetPalmaDataBaseIdentificationVersionERKNS0_21
 NXRT_API void adapter__ZN2nn3hid19SuspendPalmaFeatureERKNS0_21PalmaConnectionHandleERKNS_4util10BitFlagSetILi32ENS0_12PalmaFeatureEEE(NxwGuestCpu *cpu);
 NXRT_API void adapter__ZN2nn3hid16ReadPalmaPlayLogERKNS0_21PalmaConnectionHandleERKt(NxwGuestCpu *cpu);
 NXRT_API void adapter__ZN2nn3hid17ResetPalmaPlayLogERKNS0_21PalmaConnectionHandleERKt(NxwGuestCpu *cpu);
+NXRT_API void adapter__ZN2nn3hid8StopJcmsERKNS0_10JcmsHandleE(NxwGuestCpu *cpu);
+NXRT_API void adapter__ZN2nn3hid13GetJcmsStatesEPNS0_9JcmsStateEiRKNS0_10JcmsHandleE(NxwGuestCpu *cpu);
+NXRT_API void adapter__ZN2nn3hid22SetNmousePointerRangesEii(NxwGuestCpu *cpu);
+NXRT_API void adapter__ZN2nn3hid19EnableNmousePointerENS0_12NmouseHandleEb(NxwGuestCpu *cpu);
+NXRT_API void adapter__ZN2nn3hid24SetNmousePointerPositionENS0_12NmouseHandleEii(NxwGuestCpu *cpu);
 NXRT_API void adapter__ZN2nn3mii8Database10InitializeEv(NxwGuestCpu *cpu);
 NXRT_API void adapter__ZN2nn3mii8Database8FinalizeEv(NxwGuestCpu *cpu);
 NXRT_API void adapter__ZNK2nn3mii8Database11IsAvailableEv(NxwGuestCpu *cpu);
@@ -447,6 +535,33 @@ NXRT_API void adapter__ZN2nn4pctl53RequestStereoVisionRestrictionConfigurationPe
 NXRT_API void adapter__ZN2nn4pctl20EndFreeCommunicationEv(NxwGuestCpu *cpu);
 NXRT_API void adapter__ZN2nn4pctl28IsFreeCommunicationAvailableEv(NxwGuestCpu *cpu);
 NXRT_API void adapter__ZN2nn4pctl27CheckStereoVisionPermissionEb(NxwGuestCpu *cpu);
+NXRT_API void adapter__ZN2nn4chat10InitializeEv(NxwGuestCpu *cpu);
+NXRT_API void adapter__ZN2nn4chat10IsChattingEv(NxwGuestCpu *cpu);
+NXRT_API void adapter__ZN2nn4chat20SetScreenSharingModeENS0_17ScreenSharingModeE(NxwGuestCpu *cpu);
+NXRT_API void adapter__ZN2nn4chat28AttachToRoomInfoChangedEventEPNS_2os11SystemEventE(NxwGuestCpu *cpu);
+NXRT_API void adapter__ZN2nn4chat13SetSharingKeyERKNS0_10SharingKeyE(NxwGuestCpu *cpu);
+NXRT_API void adapter__ZN2nn4chat15ClearSharingKeyEv(NxwGuestCpu *cpu);
+NXRT_API void adapter__ZN2nn4chat11GetRoomInfoEPNS0_8RoomInfoE(NxwGuestCpu *cpu);
+NXRT_API void adapter__ZN2nn4chat13ShowChatStartERKNS_7account3UidE(NxwGuestCpu *cpu);
+NXRT_API void adapter__ZN2nn4chat22ShowCameraSharingGuideEv(NxwGuestCpu *cpu);
+NXRT_API void adapter__ZN2nn4chat36ShowLocalCameraConfigurationVersion0ENS0_25CameraImageProcessingModeE(NxwGuestCpu *cpu);
+NXRT_API void adapter__ZN2nn4chat46BeginFullScreenWithLocalCameraAvailableSectionEb(NxwGuestCpu *cpu);
+NXRT_API void adapter__ZN2nn4chat44EndFullScreenWithLocalCameraAvailableSectionEv(NxwGuestCpu *cpu);
+NXRT_API void adapter__ZN2nn4chat35CalculateLocalCameraVideoBufferSizeEiii(NxwGuestCpu *cpu);
+NXRT_API void adapter__ZN2nn4chat36CalculateRemoteCameraVideoBufferSizeEiii(NxwGuestCpu *cpu);
+NXRT_API void adapter__ZN2nn4chat33InitializeLocalCameraVideoStorageEPNS0_20LocalCameraVideoTypeEiiiPvm(NxwGuestCpu *cpu);
+NXRT_API void adapter__ZN2nn4chat34InitializeRemoteCameraVideoStorageEPNS0_21RemoteCameraVideoTypeEiiiPvm(NxwGuestCpu *cpu);
+NXRT_API void adapter__ZN2nn4chat31FinalizeLocalCameraVideoStorageEPNS0_20LocalCameraVideoTypeE(NxwGuestCpu *cpu);
+NXRT_API void adapter__ZN2nn4chat32FinalizeRemoteCameraVideoStorageEPNS0_21RemoteCameraVideoTypeE(NxwGuestCpu *cpu);
+NXRT_API void adapter__ZN2nn4chat25GetLocalCameraImageHandleEPKNS0_20LocalCameraVideoTypeEi(NxwGuestCpu *cpu);
+NXRT_API void adapter__ZN2nn4chat26GetRemoteCameraImageHandleEPKNS0_21RemoteCameraVideoTypeEi(NxwGuestCpu *cpu);
+NXRT_API void adapter__ZN2nn4chat25StartLocalCameraStreamingEv(NxwGuestCpu *cpu);
+NXRT_API void adapter__ZN2nn4chat24StopLocalCameraStreamingEv(NxwGuestCpu *cpu);
+NXRT_API void adapter__ZN2nn4chat26StartRemoteCameraStreamingERKNS_7account23NetworkServiceAccountIdE(NxwGuestCpu *cpu);
+NXRT_API void adapter__ZN2nn4chat25StopRemoteCameraStreamingERKNS_7account23NetworkServiceAccountIdE(NxwGuestCpu *cpu);
+NXRT_API void adapter__ZN2nn4chat27RequestNextLocalCameraImageEPNS_2gs16NativeSyncHandleEPNS0_20LocalCameraVideoTypeEiS2_(NxwGuestCpu *cpu);
+NXRT_API void adapter__ZN2nn4chat28RequestNextRemoteCameraImageEPNS_2gs16NativeSyncHandleEPNS0_21RemoteCameraVideoTypeEiS2_RKNS_7account23NetworkServiceAccountIdE(NxwGuestCpu *cpu);
+NXRT_API void adapter__ZN2nn6camera3sdk19CreateCameraContextEPNS_5gsdrv18UniqueNativeHandleE(NxwGuestCpu *cpu);
 NXRT_API void adapter__ZN5movie7DecoderC1ENS_11DecoderTypeENS_19DecoderOutputFormatENS_11DecoderModeEi(NxwGuestCpu *cpu);
 NXRT_API void adapter__ZN5movie7DecoderC1ENS_11DecoderTypeENS_19DecoderOutputFormatENS_11DecoderModeE(NxwGuestCpu *cpu);
 NXRT_API void adapter__ZN5movie7DecoderC1ENS_11DecoderTypeENS_19DecoderOutputFormatE(NxwGuestCpu *cpu);
@@ -569,6 +684,8 @@ NXRT_API void adapter__ZN2nv18InitializeGraphicsEPvm(NxwGuestCpu *cpu);
 NXRT_API void adapter__ZN2nv16FinalizeGraphicsEv(NxwGuestCpu *cpu);
 NXRT_API void adapter__ZN2nv21GetGraphicsMemoryInfoEPNS_10MemoryInfoE(NxwGuestCpu *cpu);
 NXRT_API void adapter__ZN2nv22DumpGraphicsMemoryInfoEv(NxwGuestCpu *cpu);
+NXRT_API void adapter__ZN2nv9InitCheckEv(NxwGuestCpu *cpu);
+NXRT_API void adapter__ZN2nn2gs3sdk30CheckGraphicsSystemInitializedEPKcm(NxwGuestCpu *cpu);
 NXRT_API void adapter_NvOsDrvOpen(NxwGuestCpu *cpu);
 NXRT_API void adapter_NvOsDrvClose(NxwGuestCpu *cpu);
 NXRT_API void adapter_NvOsDrvIoctl(NxwGuestCpu *cpu);
@@ -577,6 +694,14 @@ NXRT_API void adapter_NvOsDrvIoctl3(NxwGuestCpu *cpu);
 NXRT_API void adapter_NvOsDrvMapSharedMem(NxwGuestCpu *cpu);
 NXRT_API void adapter__Z17NvOsDrvQueryEventijPN2nn2os15SystemEventTypeE(NxwGuestCpu *cpu);
 NXRT_API void adapter_nvnBootstrapLoader(NxwGuestCpu *cpu);
+NXRT_API void adapter__Z32nvnNativeImageBuilderSetDefaultsP21NVNnativeImageBuilder(NxwGuestCpu *cpu);
+NXRT_API void adapter__Z30nvnNativeImageBuilderSetDeviceP21NVNnativeImageBuilderP9NVNdevice(NxwGuestCpu *cpu);
+NXRT_API void adapter__Z41nvnNativeImageBuilderSetNativeImageHandleP21NVNnativeImageBuilderN2nn2gs17NativeImageHandleE(NxwGuestCpu *cpu);
+NXRT_API void adapter__Z40nvnNativeImageBuilderSetMemoryPermissionP21NVNnativeImageBuilder30NVNnativeImageMemoryPermission(NxwGuestCpu *cpu);
+NXRT_API void adapter__Z30nvnNativeImageBuilderSetFormatP21NVNnativeImageBuilder9NVNformat(NxwGuestCpu *cpu);
+NXRT_API void adapter__Z24nvnNativeImageInitializeP14NVNnativeImagePK21NVNnativeImageBuilder(NxwGuestCpu *cpu);
+NXRT_API void adapter__Z22nvnNativeImageFinalizeP14NVNnativeImage(NxwGuestCpu *cpu);
+NXRT_API void adapter__Z35nvnTextureInitializeFromNativeImageP10NVNtextureP14NVNnativeImage(NxwGuestCpu *cpu);
 NXRT_API void adapter__ZN2nn2oe17FinishStartupLogoEv(NxwGuestCpu *cpu);
 NXRT_API void adapter__ZN2nn2oe44SetUserInactivityDetectionTimeExtendedUnsafeEb(NxwGuestCpu *cpu);
 NXRT_API void adapter__ZN2nn2oe38SetUserInactivityDetectionTimeExtendedEb(NxwGuestCpu *cpu);
@@ -776,26 +901,10 @@ NXRT_API void adapter__ZN2nn3hid12FinalizeJcmsEv(NxwGuestCpu *cpu);
 NXRT_API void adapter__ZN2nn3hid13GetJcmsHandleERKjRKNS0_8JcmsTypeE(NxwGuestCpu *cpu);
 NXRT_API void adapter__ZN2nn3hid9StartJcmsERKNS0_10JcmsHandleE(NxwGuestCpu *cpu);
 NXRT_API void adapter__ZN2nn3hid12GetJcmsStateEPNS0_9JcmsStateERKNS0_10JcmsHandleE(NxwGuestCpu *cpu);
-NXRT_API void adapter__ZN2nn3hid13VibrationNode6UpdateEv(NxwGuestCpu *cpu);
-NXRT_API void adapter__ZN2nn3hid13VibrationNode15SetModulationToEPKS1_RKNS0_19VibrationModulationE(NxwGuestCpu *cpu);
-NXRT_API void adapter__ZN2nn3hid23VibrationNodeConnectionC1Ev(NxwGuestCpu *cpu);
-NXRT_API void adapter__ZN2nn3hid23VibrationNodeConnectionD1Ev(NxwGuestCpu *cpu);
 NXRT_API void adapter__ZN2nn3hid23VibrationNodeConnection7ConnectEPNS0_13VibrationNodeES3_(NxwGuestCpu *cpu);
-NXRT_API void adapter__ZN2nn3hid23VibrationNodeConnection10DisconnectEv(NxwGuestCpu *cpu);
-NXRT_API void adapter__ZN2nn3hid15VibrationPlayerC1Ev(NxwGuestCpu *cpu);
-NXRT_API void adapter__ZN2nn3hid15VibrationPlayerD1Ev(NxwGuestCpu *cpu);
 NXRT_API void adapter__ZN2nn3hid15VibrationPlayer4LoadEPKvm(NxwGuestCpu *cpu);
-NXRT_API void adapter__ZN2nn3hid15VibrationPlayer4PlayEv(NxwGuestCpu *cpu);
-NXRT_API void adapter__ZN2nn3hid15VibrationPlayer4StopEv(NxwGuestCpu *cpu);
-NXRT_API void adapter__ZN2nn3hid15VibrationPlayer7SetLoopEb(NxwGuestCpu *cpu);
-NXRT_API void adapter__ZN2nn3hid15VibrationPlayer15SetLoopIntervalEi(NxwGuestCpu *cpu);
-NXRT_API void adapter__ZN2nn3hid15VibrationPlayer18SetCurrentPositionEi(NxwGuestCpu *cpu);
-NXRT_API void adapter__ZN2nn3hid15VibrationTargetC1Ev(NxwGuestCpu *cpu);
-NXRT_API void adapter__ZN2nn3hid15VibrationTargetD1Ev(NxwGuestCpu *cpu);
 NXRT_API void adapter__ZN2nn3hid15VibrationTarget24GetVibrationDeviceHandleEv(NxwGuestCpu *cpu);
 NXRT_API void adapter__ZN2nn3hid15VibrationTarget24SetVibrationDeviceHandleERKNS0_21VibrationDeviceHandleE(NxwGuestCpu *cpu);
-NXRT_API void adapter__ZN2nn3hid18VibrationConverterC1Ei(NxwGuestCpu *cpu);
-NXRT_API void adapter__ZN2nn3hid18VibrationConverterD1Ev(NxwGuestCpu *cpu);
 NXRT_API void adapter__ZN2nn3hid18VibrationConverter12ProcessChunkEPNS0_14VibrationValueEPKsi(NxwGuestCpu *cpu);
 NXRT_API void adapter__ZN2nn6crypto36GenerateCryptographicallyRandomBytesEPvm(NxwGuestCpu *cpu);
 NXRT_API void adapter_getenv(NxwGuestCpu *cpu);
@@ -975,6 +1084,14 @@ NXRT_API void adapter__ZN2nn2vi8FinalizeEv(NxwGuestCpu *cpu);
 NXRT_API void adapter__ZN2nn2vi23SetDisplayVrrCapabilityEPNS0_7DisplayEb(NxwGuestCpu *cpu);
 NXRT_API void adapter__ZN2nn2vi52SetLayerNextHdrExtendedContentLuminanceRangeMetadataEPNS0_5LayerEtt(NxwGuestCpu *cpu);
 NXRT_API void adapter__ZN2nn2vi52SetLayerNextHdrStandardContentLuminanceRangeMetadataEPNS0_5LayerEtt(NxwGuestCpu *cpu);
+NXRT_API void adapter__ZN2nn2vi21QueryDisplayHdrStatusEPbPNS0_15HdrOutputFormatEPtPKNS0_7DisplayE(NxwGuestCpu *cpu);
+NXRT_API void adapter__ZN2nn2vi25QueryDisplayHdrPaperWhiteEPtPKNS0_7DisplayE(NxwGuestCpu *cpu);
+NXRT_API void adapter__ZN2nn2vi24QueryDisplayVrrSupportedEPbPKNS0_7DisplayE(NxwGuestCpu *cpu);
+NXRT_API void adapter__ZN2nn2vi28SetLayerExtendedSwapIntervalEPNS0_5LayerEii(NxwGuestCpu *cpu);
+NXRT_API void adapter__ZN2nn2vi30ClearLayerExtendedSwapIntervalEPNS0_5LayerE(NxwGuestCpu *cpu);
+NXRT_API void adapter__ZN2nn2vi35SetLayerNextHdrContentGamutMetadataEPNS0_5LayerENS0_15HdrContentGamutE(NxwGuestCpu *cpu);
+NXRT_API void adapter__ZN2nn2vi39SetLayerNextHdrAdjustableBezierMetadataEPNS0_5LayerEfff(NxwGuestCpu *cpu);
+NXRT_API void adapter__ZN2nn2vi39SetLayerNextHdrToSdrToneMappingMetadataEPNS0_5LayerENS0_14HdrToneMappingE(NxwGuestCpu *cpu);
 NXRT_API void adapter_getentropy(NxwGuestCpu *cpu);
 NXRT_API void adapter_memcpy(NxwGuestCpu *cpu);
 NXRT_API void adapter_memset(NxwGuestCpu *cpu);
@@ -1193,6 +1310,14 @@ NXRT_API void adapter_nvnCommandBufferSetViewports(NxwGuestCpu *cpu);
 NXRT_API void adapter_nvnCommandBufferSetScissor(NxwGuestCpu *cpu);
 NXRT_API void adapter_nvnCommandBufferSetDepthRange(NxwGuestCpu *cpu);
 NXRT_API void adapter_nvnCommandBufferBindProgram(NxwGuestCpu *cpu);
+NXRT_API void adapter_nvnCommandBufferDrawMeshTasks(NxwGuestCpu *cpu);
+NXRT_API void adapter_nvnCommandBufferDrawMeshTasksIndirect(NxwGuestCpu *cpu);
+NXRT_API void adapter_nvnCommandBufferMultiDrawMeshTasksIndirect(NxwGuestCpu *cpu);
+NXRT_API void adapter_nvnCommandBufferMultiDrawMeshTasksIndirectCount(NxwGuestCpu *cpu);
+NXRT_API void adapter_nvnCommandBufferDrawMeshTasks3D(NxwGuestCpu *cpu);
+NXRT_API void adapter_nvnCommandBufferDrawMeshTasks3DIndirect(NxwGuestCpu *cpu);
+NXRT_API void adapter_nvnCommandBufferMultiDrawMeshTasks3DIndirect(NxwGuestCpu *cpu);
+NXRT_API void adapter_nvnCommandBufferMultiDrawMeshTasks3DIndirectCount(NxwGuestCpu *cpu);
 NXRT_API void adapter_nvnCommandBufferBindBlendState(NxwGuestCpu *cpu);
 NXRT_API void adapter_nvnCommandBufferBindColorState(NxwGuestCpu *cpu);
 NXRT_API void adapter_nvnCommandBufferBindChannelMaskState(NxwGuestCpu *cpu);
@@ -1435,6 +1560,12 @@ NXRT_API void adapter_nvnCommandBufferGetCommandMemorySize(NxwGuestCpu *cpu);
 NXRT_API void adapter_nvnCommandBufferSetCommandMemoryCallbackEnabled(NxwGuestCpu *cpu);
 NXRT_API void adapter_nvnProgramSetShadersExt(NxwGuestCpu *cpu);
 NXRT_API void adapter_nvnProgramSetSampleShading(NxwGuestCpu *cpu);
+NXRT_API void adapter_nvnProgramBuilderSetDefaults(NxwGuestCpu *cpu);
+NXRT_API void adapter_nvnProgramBuilderSetDevice(NxwGuestCpu *cpu);
+NXRT_API void adapter_nvnProgramBuilderGetDevice(NxwGuestCpu *cpu);
+NXRT_API void adapter_nvnProgramBuilderSetShaders(NxwGuestCpu *cpu);
+NXRT_API void adapter_nvnProgramBuilderGetShaderCount(NxwGuestCpu *cpu);
+NXRT_API void adapter_nvnProgramInitializeFromBuilder(NxwGuestCpu *cpu);
 NXRT_API void adapter_nvnCommandBufferCallCommands(NxwGuestCpu *cpu);
 NXRT_API void adapter_nvnCommandBufferBindTexture(NxwGuestCpu *cpu);
 NXRT_API void adapter_nvnCommandBufferBindTextures(NxwGuestCpu *cpu);
@@ -1457,6 +1588,7 @@ NXRT_API void adapter_nvnCommandBufferSetRenderEnableConditional(NxwGuestCpu *cp
 NXRT_API void adapter_nvnCommandBufferSetDepthClamp(NxwGuestCpu *cpu);
 NXRT_API void adapter_nvnCommandBufferSetViewportSwizzles(NxwGuestCpu *cpu);
 NXRT_API void adapter_nvnCommandBufferSetAlphaRef(NxwGuestCpu *cpu);
+NXRT_API void adapter_nvnCommandBufferPushGraphicsConstants(NxwGuestCpu *cpu);
 NXRT_API void adapter_nvnCommandBufferSetLineWidth(NxwGuestCpu *cpu);
 NXRT_API void adapter_nvnCommandBufferSetPointSize(NxwGuestCpu *cpu);
 NXRT_API void adapter_nvnCommandBufferSetPrimitiveRestart(NxwGuestCpu *cpu);
@@ -1494,10 +1626,6 @@ NXRT_API void adapter_nvnCommandBufferComputeDirtyTileMapEx(NxwGuestCpu *cpu);
 NXRT_API void adapter_nvnCommandBufferCopyAccelerationStructure(NxwGuestCpu *cpu);
 NXRT_API void adapter_nvnCommandBufferDispatchRays(NxwGuestCpu *cpu);
 NXRT_API void adapter_nvnCommandBufferDispatchRaysIndirect(NxwGuestCpu *cpu);
-NXRT_API void adapter_nvnCommandBufferDrawMeshTasks(NxwGuestCpu *cpu);
-NXRT_API void adapter_nvnCommandBufferDrawMeshTasks3D(NxwGuestCpu *cpu);
-NXRT_API void adapter_nvnCommandBufferDrawMeshTasks3DIndirect(NxwGuestCpu *cpu);
-NXRT_API void adapter_nvnCommandBufferDrawMeshTasksIndirect(NxwGuestCpu *cpu);
 NXRT_API void adapter_nvnCommandBufferEnableExclusiveScissor(NxwGuestCpu *cpu);
 NXRT_API void adapter_nvnCommandBufferEndDeviceCommands(NxwGuestCpu *cpu);
 NXRT_API void adapter_nvnCommandBufferEvaluateDlss(NxwGuestCpu *cpu);
@@ -1506,10 +1634,6 @@ NXRT_API void adapter_nvnCommandBufferInsertCheckpointDynamic(NxwGuestCpu *cpu);
 NXRT_API void adapter_nvnCommandBufferInsertCheckpointStatic(NxwGuestCpu *cpu);
 NXRT_API void adapter_nvnCommandBufferInsertDebugMarkerCompute(NxwGuestCpu *cpu);
 NXRT_API void adapter_nvnCommandBufferInsertDebugMarkerGraphics(NxwGuestCpu *cpu);
-NXRT_API void adapter_nvnCommandBufferMultiDrawMeshTasks3DIndirect(NxwGuestCpu *cpu);
-NXRT_API void adapter_nvnCommandBufferMultiDrawMeshTasks3DIndirectCount(NxwGuestCpu *cpu);
-NXRT_API void adapter_nvnCommandBufferMultiDrawMeshTasksIndirect(NxwGuestCpu *cpu);
-NXRT_API void adapter_nvnCommandBufferMultiDrawMeshTasksIndirectCount(NxwGuestCpu *cpu);
 NXRT_API void adapter_nvnCommandBufferOverrideSubtileSize(NxwGuestCpu *cpu);
 NXRT_API void adapter_nvnCommandBufferPopDebugGroupCompute(NxwGuestCpu *cpu);
 NXRT_API void adapter_nvnCommandBufferPopDebugGroupGraphics(NxwGuestCpu *cpu);
@@ -1517,7 +1641,6 @@ NXRT_API void adapter_nvnCommandBufferPushComputeConstants(NxwGuestCpu *cpu);
 NXRT_API void adapter_nvnCommandBufferPushComputeConstantsDeferred(NxwGuestCpu *cpu);
 NXRT_API void adapter_nvnCommandBufferPushDebugGroupCompute(NxwGuestCpu *cpu);
 NXRT_API void adapter_nvnCommandBufferPushDebugGroupGraphics(NxwGuestCpu *cpu);
-NXRT_API void adapter_nvnCommandBufferPushGraphicsConstants(NxwGuestCpu *cpu);
 NXRT_API void adapter_nvnCommandBufferPushGraphicsConstantsDeferred(NxwGuestCpu *cpu);
 NXRT_API void adapter_nvnCommandBufferRelocateAccelerationStructure(NxwGuestCpu *cpu);
 NXRT_API void adapter_nvnCommandBufferResetDeviceMessageBuffer(NxwGuestCpu *cpu);
@@ -1655,32 +1778,26 @@ NXRT_API void adapter_nvnMultisampleStateGetCoverageTruncationEnable(NxwGuestCpu
 NXRT_API void adapter_nvnMultisampleStateGetSampleLocations(NxwGuestCpu *cpu);
 NXRT_API void adapter_nvnMultisampleStateSetCoverageTruncationEnable(NxwGuestCpu *cpu);
 NXRT_API void adapter_nvnProgramBuilderGetDebugDataHashes(NxwGuestCpu *cpu);
-NXRT_API void adapter_nvnProgramBuilderGetDevice(NxwGuestCpu *cpu);
 NXRT_API void adapter_nvnProgramBuilderGetMaxCallableRecursionDepth(NxwGuestCpu *cpu);
 NXRT_API void adapter_nvnProgramBuilderGetMaxTraceRecursionDepth(NxwGuestCpu *cpu);
 NXRT_API void adapter_nvnProgramBuilderGetProgramRayTracingFlags(NxwGuestCpu *cpu);
 NXRT_API void adapter_nvnProgramBuilderGetRayTracingModuleCount(NxwGuestCpu *cpu);
 NXRT_API void adapter_nvnProgramBuilderGetRayTracingModuleData(NxwGuestCpu *cpu);
 NXRT_API void adapter_nvnProgramBuilderGetSampleShading(NxwGuestCpu *cpu);
-NXRT_API void adapter_nvnProgramBuilderGetShaderCount(NxwGuestCpu *cpu);
 NXRT_API void adapter_nvnProgramBuilderGetShaders(NxwGuestCpu *cpu);
 NXRT_API void adapter_nvnProgramBuilderGetSubroutineLinkage(NxwGuestCpu *cpu);
 NXRT_API void adapter_nvnProgramBuilderGetSubroutineLinkageCount(NxwGuestCpu *cpu);
 NXRT_API void adapter_nvnProgramBuilderSetDebugDataHashes(NxwGuestCpu *cpu);
-NXRT_API void adapter_nvnProgramBuilderSetDefaults(NxwGuestCpu *cpu);
-NXRT_API void adapter_nvnProgramBuilderSetDevice(NxwGuestCpu *cpu);
 NXRT_API void adapter_nvnProgramBuilderSetMaxCallableRecursionDepth(NxwGuestCpu *cpu);
 NXRT_API void adapter_nvnProgramBuilderSetMaxTraceRecursionDepth(NxwGuestCpu *cpu);
 NXRT_API void adapter_nvnProgramBuilderSetProgramRayTracingFlags(NxwGuestCpu *cpu);
 NXRT_API void adapter_nvnProgramBuilderSetRayTracingModules(NxwGuestCpu *cpu);
 NXRT_API void adapter_nvnProgramBuilderSetSampleShading(NxwGuestCpu *cpu);
-NXRT_API void adapter_nvnProgramBuilderSetShaders(NxwGuestCpu *cpu);
 NXRT_API void adapter_nvnProgramBuilderSetSubroutineLinkage(NxwGuestCpu *cpu);
 NXRT_API void adapter_nvnProgramGetDeviceComputeMemorySize(NxwGuestCpu *cpu);
 NXRT_API void adapter_nvnProgramGetScratchBytesPerWarp(NxwGuestCpu *cpu);
 NXRT_API void adapter_nvnProgramGetShaderGroupHandle(NxwGuestCpu *cpu);
 NXRT_API void adapter_nvnProgramGetSubtileSize(NxwGuestCpu *cpu);
-NXRT_API void adapter_nvnProgramInitializeFromBuilder(NxwGuestCpu *cpu);
 NXRT_API void adapter_nvnQueueBuilderGetCommandFlushThreshold(NxwGuestCpu *cpu);
 NXRT_API void adapter_nvnQueueBuilderGetCommandMemorySize(NxwGuestCpu *cpu);
 NXRT_API void adapter_nvnQueueBuilderGetComputeMemorySize(NxwGuestCpu *cpu);
@@ -1868,6 +1985,8 @@ const nxrt_hle_entry nxrt_hle_table[] = {
     {"_ZN2nn5audio38AcquireAudioDeviceNotificationForInputEPNS_2os11SystemEventE", NXRT_HLE_FORCED, 1, "hle_audren.c", "input device change notification: bound, never signaled (the host has no microphone)", adapter__ZN2nn5audio38AcquireAudioDeviceNotificationForInputEPNS_2os11SystemEventE},
     {"_ZN2nn5audio36AcquireAudioDeviceSwitchNotificationEPNS_2os11SystemEventE", NXRT_HLE_FORCED, 1, "hle_audren.c", "output device switch notification (SDK 7 name): bound, never signaled", adapter__ZN2nn5audio36AcquireAudioDeviceSwitchNotificationEPNS_2os11SystemEventE},
     {"_ZN2nn5audio21GetActiveChannelCountEv", NXRT_HLE_FORCED, 1, "hle_audren.c", "output channel count (SDK 7 name): 2", adapter__ZN2nn5audio21GetActiveChannelCountEv},
+    {"_ZN2nn5audio40SetDeviceOutputVolumeAutoTuneModeEnabledEb", NXRT_HLE_FORCED, 1, "hle_audren.c", "device volume auto-tune; kept for the getter, not applied by the host", adapter__ZN2nn5audio40SetDeviceOutputVolumeAutoTuneModeEnabledEb},
+    {"_ZN2nn5audio39IsDeviceOutputVolumeAutoTuneModeEnabledEv", NXRT_HLE_FORCED, 1, "hle_audren.c", "device volume auto-tune: what the game last set (off at start)", adapter__ZN2nn5audio39IsDeviceOutputVolumeAutoTuneModeEnabledEv},
     {"_ZN2nn5codec19HardwareOpusDecoderC1Ei", NXRT_HLE_FORCED, 1, "hle_codec.c", "hwopus service; replaced by the SDK software OpusDecoder (same IOpusDecoder virtual interface)", adapter__ZN2nn5codec19HardwareOpusDecoderC1Ei},
     {"_ZN2nn5codec36GetHardwareOpusDecoderWorkBufferSizeEiii", NXRT_HLE_FORCED, 1, "hle_codec.c", "hwopus service; work buffer computed for the software decoder", adapter__ZN2nn5codec36GetHardwareOpusDecoderWorkBufferSizeEiii},
     {"_ZN2nn5codec36GetHardwareOpusDecoderWorkBufferSizeEii", NXRT_HLE_FORCED, 1, "hle_codec.c", "hwopus service; work buffer computed for the software decoder (SDK 11 two-argument version)", adapter__ZN2nn5codec36GetHardwareOpusDecoderWorkBufferSizeEii},
@@ -1889,6 +2008,87 @@ const nxrt_hle_entry nxrt_hle_table[] = {
     {"_ZN2nn5codec35ResetHardwareOpusMultiStreamDecoderEPNS0_34HardwareOpusMultiStreamDecoderTypeE", NXRT_HLE_FORCED, 1, "hle_codec.c", "hwopus service; software OpusMultiStreamDecoder", adapter__ZN2nn5codec35ResetHardwareOpusMultiStreamDecoderEPNS0_34HardwareOpusMultiStreamDecoderTypeE},
     {"_ZN2nn5codec44DecodeOpusMultiStreamInterleavedWithHardwareEPNS0_34HardwareOpusMultiStreamDecoderTypeEPmPiPsmPKvm", NXRT_HLE_FORCED, 1, "hle_codec.c", "hwopus service; software OpusMultiStreamDecoder", adapter__ZN2nn5codec44DecodeOpusMultiStreamInterleavedWithHardwareEPNS0_34HardwareOpusMultiStreamDecoderTypeEPmPiPsmPKvm},
     {"_ZN2nn5codec47GetHardwareOpusMultiStreamDecoderProcessingTimeEPKNS0_34HardwareOpusMultiStreamDecoderTypeE", NXRT_HLE_FORCED, 1, "hle_codec.c", "hwopus service; no hardware decode time", adapter__ZN2nn5codec47GetHardwareOpusMultiStreamDecoderProcessingTimeEPKNS0_34HardwareOpusMultiStreamDecoderTypeE},
+    {"_ZN2nn5codec5video10InitializeEv", NXRT_HLE_FORCED, 1, "hle_codec_video.c", "the decoder service is the host's (hle_codec_video.c)", adapter__ZN2nn5codec5video10InitializeEv},
+    {"_ZN2nn5codec5video8FinalizeEv", NXRT_HLE_FORCED, 1, "hle_codec_video.c", "the decoder service is the host's", adapter__ZN2nn5codec5video8FinalizeEv},
+    {"_ZN2nn5codec25MakeDecodeImagePreferenceEttNS0_24VideoDecoderOutputFormatENS0_9CodecModeE", NXRT_HLE_FORCED, 1, "hle_codec_video.c", "the preference only carries the size and format to the host's pool", adapter__ZN2nn5codec25MakeDecodeImagePreferenceEttNS0_24VideoDecoderOutputFormatENS0_9CodecModeE},
+    {"_ZN2nn5codec31CalculateDecoderImagePoolBufferEPmS1_RKNS0_27VideoDecoderImagePreferenceEj", NXRT_HLE_FORCED, 1, "hle_codec_video.c", "pool memory: room for RGBA pictures (the host keeps its own copies)", adapter__ZN2nn5codec31CalculateDecoderImagePoolBufferEPmS1_RKNS0_27VideoDecoderImagePreferenceEj},
+    {"_ZN2nn5codec26InitializeDecoderImagePoolEPNS0_25VideoDecoderImagePoolTypeEPvmRKNS0_27VideoDecoderImagePreferenceEjNS0_9CodecModeE", NXRT_HLE_FORCED, 1, "hle_codec_video.c", "a host pool of decoded pictures", adapter__ZN2nn5codec26InitializeDecoderImagePoolEPNS0_25VideoDecoderImagePoolTypeEPvmRKNS0_27VideoDecoderImagePreferenceEjNS0_9CodecModeE},
+    {"_ZN2nn5codec24FinalizeDecoderImagePoolEPNS0_25VideoDecoderImagePoolTypeE", NXRT_HLE_FORCED, 1, "hle_codec_video.c", "frees the host pool", adapter__ZN2nn5codec24FinalizeDecoderImagePoolEPNS0_25VideoDecoderImagePoolTypeE},
+    {"_ZN2nn5codec36GetDecoderImagePoolNativeImageHandleEPKNS0_25VideoDecoderImagePoolTypeEj", NXRT_HLE_FORCED, 1, "hle_codec_video.c", "native image handles (the GPU route) are not served", adapter__ZN2nn5codec36GetDecoderImagePoolNativeImageHandleEPKNS0_25VideoDecoderImagePoolTypeEj},
+    {"_ZN2nn5codec26ReadDecoderOutputImageRgbaEPKNS0_25VideoDecoderImagePoolTypeEjttttPvmm", NXRT_HLE_FORCED, 1, "hle_codec_video.c", "converts the host's picture (md_rgba)", adapter__ZN2nn5codec26ReadDecoderOutputImageRgbaEPKNS0_25VideoDecoderImagePoolTypeEjttttPvmm},
+    {"_ZN2nn5codec26ReadDecoderOutputImageNv12EPKNS0_25VideoDecoderImagePoolTypeEjttttPvmmS4_mm", NXRT_HLE_FORCED, 1, "hle_codec_video.c", "converts the host's picture (md_nv12)", adapter__ZN2nn5codec26ReadDecoderOutputImageNv12EPKNS0_25VideoDecoderImagePoolTypeEjttttPvmmS4_mm},
+    {"_ZN2nn5codec14StopVp9DecoderEPNS0_14Vp9DecoderTypeE", NXRT_HLE_FORCED, 1, "hle_codec_video.c", "drops undelivered pictures", adapter__ZN2nn5codec14StopVp9DecoderEPNS0_14Vp9DecoderTypeE},
+    {"_ZN2nn5codec15FlushVp9DecoderEPNS0_14Vp9DecoderTypeE", NXRT_HLE_FORCED, 1, "hle_codec_video.c", "drops undelivered pictures", adapter__ZN2nn5codec15FlushVp9DecoderEPNS0_14Vp9DecoderTypeE},
+    {"_ZN2nn5codec15StartVp9DecoderEPNS0_14Vp9DecoderTypeE", NXRT_HLE_FORCED, 1, "hle_codec_video.c", "the host decoder decodes on submission", adapter__ZN2nn5codec15StartVp9DecoderEPNS0_14Vp9DecoderTypeE},
+    {"_ZN2nn5codec18FinalizeVp9DecoderEPNS0_14Vp9DecoderTypeE", NXRT_HLE_FORCED, 1, "hle_codec_video.c", "frees the host decoder", adapter__ZN2nn5codec18FinalizeVp9DecoderEPNS0_14Vp9DecoderTypeE},
+    {"_ZN2nn5codec20InitializeVp9DecoderEPNS0_14Vp9DecoderTypeEPvmmttjNS0_23VideoDecoderInputFormatENS0_24VideoDecoderOutputFormatE", NXRT_HLE_FORCED, 1, "hle_codec_video.c", "decoded on the host", adapter__ZN2nn5codec20InitializeVp9DecoderEPNS0_14Vp9DecoderTypeEPvmmttjNS0_23VideoDecoderInputFormatENS0_24VideoDecoderOutputFormatE},
+    {"_ZN2nn5codec20InitializeVp9DecoderEPNS0_14Vp9DecoderTypeEmttjNS0_23VideoDecoderInputFormatENS0_24VideoDecoderOutputFormatE", NXRT_HLE_FORCED, 1, "hle_codec_video.c", "decoded on the host", adapter__ZN2nn5codec20InitializeVp9DecoderEPNS0_14Vp9DecoderTypeEmttjNS0_23VideoDecoderInputFormatENS0_24VideoDecoderOutputFormatE},
+    {"_ZN2nn5codec24RegisterVp9DecoderBufferEPNS0_14Vp9DecoderTypeEjPNS0_25VideoDecoderImagePoolTypeEj", NXRT_HLE_FORCED, 1, "hle_codec_video.c", "a buffer of the host decoder, acquirable at once", adapter__ZN2nn5codec24RegisterVp9DecoderBufferEPNS0_14Vp9DecoderTypeEjPNS0_25VideoDecoderImagePoolTypeEj},
+    {"_ZN2nn5codec26UnregisterVp9DecoderBufferEPNS0_14Vp9DecoderTypeEj", NXRT_HLE_FORCED, 1, "hle_codec_video.c", "the buffer leaves the host decoder", adapter__ZN2nn5codec26UnregisterVp9DecoderBufferEPNS0_14Vp9DecoderTypeEj},
+    {"_ZN2nn5codec27SubmitVp9DecoderInputBufferEPmPNS0_14Vp9DecoderTypeEPKvmNS_8TimeSpanEb", NXRT_HLE_FORCED, 1, "hle_codec_video.c", "decodes the packet on the submitting thread", adapter__ZN2nn5codec27SubmitVp9DecoderInputBufferEPmPNS0_14Vp9DecoderTypeEPKvmNS_8TimeSpanEb},
+    {"_ZN2nn5codec29AcquireVp9DecoderOutputBufferEPjPNS_2gs16NativeSyncHandleEPNS0_14Vp9DecoderTypeE", NXRT_HLE_FORCED, 1, "hle_codec_video.c", "the oldest acquirable buffer and its sync handle", adapter__ZN2nn5codec29AcquireVp9DecoderOutputBufferEPjPNS_2gs16NativeSyncHandleEPNS0_14Vp9DecoderTypeE},
+    {"_ZN2nn5codec29CalculateVp9DecoderWorkBufferEPmS1_mtt", NXRT_HLE_FORCED, 1, "hle_codec_video.c", "the host decoder needs no work memory", adapter__ZN2nn5codec29CalculateVp9DecoderWorkBufferEPmS1_mtt},
+    {"_ZN2nn5codec29ReleaseVp9DecoderOutputBufferEPNS0_14Vp9DecoderTypeEjNS_2gs16NativeSyncHandleE", NXRT_HLE_FORCED, 1, "hle_codec_video.c", "the buffer waits for the next picture and is acquirable again", adapter__ZN2nn5codec29ReleaseVp9DecoderOutputBufferEPNS0_14Vp9DecoderTypeEjNS_2gs16NativeSyncHandleE},
+    {"_ZN2nn5codec33GetVp9DecoderSubmissionReadyEventEPPNS_2os15SystemEventTypeEPNS0_14Vp9DecoderTypeE", NXRT_HLE_FORCED, 1, "hle_codec_video.c", "signalled while the host decoder takes packets", adapter__ZN2nn5codec33GetVp9DecoderSubmissionReadyEventEPPNS_2os15SystemEventTypeEPNS0_14Vp9DecoderTypeE},
+    {"_ZN2nn5codec35GetVp9DecoderOutputBufferPropertiesEPtS1_S1_S1_PNS_8TimeSpanEPbPNS0_14Vp9DecoderTypeEj", NXRT_HLE_FORCED, 1, "hle_codec_video.c", "the filled buffer's picture size, time and end of stream", adapter__ZN2nn5codec35GetVp9DecoderOutputBufferPropertiesEPtS1_S1_S1_PNS_8TimeSpanEPbPNS0_14Vp9DecoderTypeEj},
+    {"_ZN2nn5codec36SubmitEncryptedVp9DecoderInputBufferEPmPNS0_14Vp9DecoderTypeEPKNS0_18EncryptionPropertyEPKvmNS_8TimeSpanEb", NXRT_HLE_FORCED, 1, "hle_codec_video.c", "protected streams are not served", adapter__ZN2nn5codec36SubmitEncryptedVp9DecoderInputBufferEPmPNS0_14Vp9DecoderTypeEPKNS0_18EncryptionPropertyEPKvmNS_8TimeSpanEb},
+    {"_ZN2nn5codec14StopVp8DecoderEPNS0_14Vp8DecoderTypeE", NXRT_HLE_FORCED, 1, "hle_codec_video.c", "drops undelivered pictures", adapter__ZN2nn5codec14StopVp8DecoderEPNS0_14Vp8DecoderTypeE},
+    {"_ZN2nn5codec15FlushVp8DecoderEPNS0_14Vp8DecoderTypeE", NXRT_HLE_FORCED, 1, "hle_codec_video.c", "drops undelivered pictures", adapter__ZN2nn5codec15FlushVp8DecoderEPNS0_14Vp8DecoderTypeE},
+    {"_ZN2nn5codec15StartVp8DecoderEPNS0_14Vp8DecoderTypeE", NXRT_HLE_FORCED, 1, "hle_codec_video.c", "the host decoder decodes on submission", adapter__ZN2nn5codec15StartVp8DecoderEPNS0_14Vp8DecoderTypeE},
+    {"_ZN2nn5codec18FinalizeVp8DecoderEPNS0_14Vp8DecoderTypeE", NXRT_HLE_FORCED, 1, "hle_codec_video.c", "frees the host decoder", adapter__ZN2nn5codec18FinalizeVp8DecoderEPNS0_14Vp8DecoderTypeE},
+    {"_ZN2nn5codec20InitializeVp8DecoderEPNS0_14Vp8DecoderTypeEPvmmttjNS0_23VideoDecoderInputFormatENS0_24VideoDecoderOutputFormatE", NXRT_HLE_FORCED, 1, "hle_codec_video.c", "decoded on the host", adapter__ZN2nn5codec20InitializeVp8DecoderEPNS0_14Vp8DecoderTypeEPvmmttjNS0_23VideoDecoderInputFormatENS0_24VideoDecoderOutputFormatE},
+    {"_ZN2nn5codec20InitializeVp8DecoderEPNS0_14Vp8DecoderTypeEmttjNS0_23VideoDecoderInputFormatENS0_24VideoDecoderOutputFormatE", NXRT_HLE_FORCED, 1, "hle_codec_video.c", "decoded on the host", adapter__ZN2nn5codec20InitializeVp8DecoderEPNS0_14Vp8DecoderTypeEmttjNS0_23VideoDecoderInputFormatENS0_24VideoDecoderOutputFormatE},
+    {"_ZN2nn5codec24RegisterVp8DecoderBufferEPNS0_14Vp8DecoderTypeEjPNS0_25VideoDecoderImagePoolTypeEj", NXRT_HLE_FORCED, 1, "hle_codec_video.c", "a buffer of the host decoder, acquirable at once", adapter__ZN2nn5codec24RegisterVp8DecoderBufferEPNS0_14Vp8DecoderTypeEjPNS0_25VideoDecoderImagePoolTypeEj},
+    {"_ZN2nn5codec26UnregisterVp8DecoderBufferEPNS0_14Vp8DecoderTypeEj", NXRT_HLE_FORCED, 1, "hle_codec_video.c", "the buffer leaves the host decoder", adapter__ZN2nn5codec26UnregisterVp8DecoderBufferEPNS0_14Vp8DecoderTypeEj},
+    {"_ZN2nn5codec27SubmitVp8DecoderInputBufferEPmPNS0_14Vp8DecoderTypeEPKvmNS_8TimeSpanEb", NXRT_HLE_FORCED, 1, "hle_codec_video.c", "decodes the packet on the submitting thread", adapter__ZN2nn5codec27SubmitVp8DecoderInputBufferEPmPNS0_14Vp8DecoderTypeEPKvmNS_8TimeSpanEb},
+    {"_ZN2nn5codec29AcquireVp8DecoderOutputBufferEPjPNS_2gs16NativeSyncHandleEPNS0_14Vp8DecoderTypeE", NXRT_HLE_FORCED, 1, "hle_codec_video.c", "the oldest acquirable buffer and its sync handle", adapter__ZN2nn5codec29AcquireVp8DecoderOutputBufferEPjPNS_2gs16NativeSyncHandleEPNS0_14Vp8DecoderTypeE},
+    {"_ZN2nn5codec29CalculateVp8DecoderWorkBufferEPmS1_mtt", NXRT_HLE_FORCED, 1, "hle_codec_video.c", "the host decoder needs no work memory", adapter__ZN2nn5codec29CalculateVp8DecoderWorkBufferEPmS1_mtt},
+    {"_ZN2nn5codec29ReleaseVp8DecoderOutputBufferEPNS0_14Vp8DecoderTypeEjNS_2gs16NativeSyncHandleE", NXRT_HLE_FORCED, 1, "hle_codec_video.c", "the buffer waits for the next picture and is acquirable again", adapter__ZN2nn5codec29ReleaseVp8DecoderOutputBufferEPNS0_14Vp8DecoderTypeEjNS_2gs16NativeSyncHandleE},
+    {"_ZN2nn5codec33GetVp8DecoderSubmissionReadyEventEPPNS_2os15SystemEventTypeEPNS0_14Vp8DecoderTypeE", NXRT_HLE_FORCED, 1, "hle_codec_video.c", "signalled while the host decoder takes packets", adapter__ZN2nn5codec33GetVp8DecoderSubmissionReadyEventEPPNS_2os15SystemEventTypeEPNS0_14Vp8DecoderTypeE},
+    {"_ZN2nn5codec35GetVp8DecoderOutputBufferPropertiesEPtS1_S1_S1_PNS_8TimeSpanEPbPNS0_14Vp8DecoderTypeEj", NXRT_HLE_FORCED, 1, "hle_codec_video.c", "the filled buffer's picture size, time and end of stream", adapter__ZN2nn5codec35GetVp8DecoderOutputBufferPropertiesEPtS1_S1_S1_PNS_8TimeSpanEPbPNS0_14Vp8DecoderTypeEj},
+    {"_ZN2nn5codec36SubmitEncryptedVp8DecoderInputBufferEPmPNS0_14Vp8DecoderTypeEPKNS0_18EncryptionPropertyEPKvmNS_8TimeSpanEb", NXRT_HLE_FORCED, 1, "hle_codec_video.c", "protected streams are not served", adapter__ZN2nn5codec36SubmitEncryptedVp8DecoderInputBufferEPmPNS0_14Vp8DecoderTypeEPKNS0_18EncryptionPropertyEPKvmNS_8TimeSpanEb},
+    {"_ZN2nn5codec15StopH264DecoderEPNS0_15H264DecoderTypeE", NXRT_HLE_FORCED, 1, "hle_codec_video.c", "drops undelivered pictures", adapter__ZN2nn5codec15StopH264DecoderEPNS0_15H264DecoderTypeE},
+    {"_ZN2nn5codec16FlushH264DecoderEPNS0_15H264DecoderTypeE", NXRT_HLE_FORCED, 1, "hle_codec_video.c", "drops undelivered pictures", adapter__ZN2nn5codec16FlushH264DecoderEPNS0_15H264DecoderTypeE},
+    {"_ZN2nn5codec16StartH264DecoderEPNS0_15H264DecoderTypeE", NXRT_HLE_FORCED, 1, "hle_codec_video.c", "the host decoder decodes on submission", adapter__ZN2nn5codec16StartH264DecoderEPNS0_15H264DecoderTypeE},
+    {"_ZN2nn5codec19FinalizeH264DecoderEPNS0_15H264DecoderTypeE", NXRT_HLE_FORCED, 1, "hle_codec_video.c", "frees the host decoder", adapter__ZN2nn5codec19FinalizeH264DecoderEPNS0_15H264DecoderTypeE},
+    {"_ZN2nn5codec21InitializeH264DecoderEPNS0_15H264DecoderTypeEPvmmttjNS0_23VideoDecoderInputFormatENS0_24VideoDecoderOutputFormatEPKvm", NXRT_HLE_FORCED, 1, "hle_codec_video.c", "decoded on the host", adapter__ZN2nn5codec21InitializeH264DecoderEPNS0_15H264DecoderTypeEPvmmttjNS0_23VideoDecoderInputFormatENS0_24VideoDecoderOutputFormatEPKvm},
+    {"_ZN2nn5codec21InitializeH264DecoderEPNS0_15H264DecoderTypeEmttjNS0_23VideoDecoderInputFormatENS0_24VideoDecoderOutputFormatEPKvm", NXRT_HLE_FORCED, 1, "hle_codec_video.c", "decoded on the host", adapter__ZN2nn5codec21InitializeH264DecoderEPNS0_15H264DecoderTypeEmttjNS0_23VideoDecoderInputFormatENS0_24VideoDecoderOutputFormatEPKvm},
+    {"_ZN2nn5codec25RegisterH264DecoderBufferEPNS0_15H264DecoderTypeEjPNS0_25VideoDecoderImagePoolTypeEj", NXRT_HLE_FORCED, 1, "hle_codec_video.c", "a buffer of the host decoder, acquirable at once", adapter__ZN2nn5codec25RegisterH264DecoderBufferEPNS0_15H264DecoderTypeEjPNS0_25VideoDecoderImagePoolTypeEj},
+    {"_ZN2nn5codec27UnregisterH264DecoderBufferEPNS0_15H264DecoderTypeEj", NXRT_HLE_FORCED, 1, "hle_codec_video.c", "the buffer leaves the host decoder", adapter__ZN2nn5codec27UnregisterH264DecoderBufferEPNS0_15H264DecoderTypeEj},
+    {"_ZN2nn5codec28SubmitH264DecoderInputBufferEPmPNS0_15H264DecoderTypeEPKvmNS_8TimeSpanEb", NXRT_HLE_FORCED, 1, "hle_codec_video.c", "decodes the packet on the submitting thread", adapter__ZN2nn5codec28SubmitH264DecoderInputBufferEPmPNS0_15H264DecoderTypeEPKvmNS_8TimeSpanEb},
+    {"_ZN2nn5codec30AcquireH264DecoderOutputBufferEPjPNS_2gs16NativeSyncHandleEPNS0_15H264DecoderTypeE", NXRT_HLE_FORCED, 1, "hle_codec_video.c", "the oldest acquirable buffer and its sync handle", adapter__ZN2nn5codec30AcquireH264DecoderOutputBufferEPjPNS_2gs16NativeSyncHandleEPNS0_15H264DecoderTypeE},
+    {"_ZN2nn5codec30CalculateH264DecoderWorkBufferEPmS1_mtt", NXRT_HLE_FORCED, 1, "hle_codec_video.c", "the host decoder needs no work memory", adapter__ZN2nn5codec30CalculateH264DecoderWorkBufferEPmS1_mtt},
+    {"_ZN2nn5codec30ReleaseH264DecoderOutputBufferEPNS0_15H264DecoderTypeEjNS_2gs16NativeSyncHandleE", NXRT_HLE_FORCED, 1, "hle_codec_video.c", "the buffer waits for the next picture and is acquirable again", adapter__ZN2nn5codec30ReleaseH264DecoderOutputBufferEPNS0_15H264DecoderTypeEjNS_2gs16NativeSyncHandleE},
+    {"_ZN2nn5codec34GetH264DecoderSubmissionReadyEventEPPNS_2os15SystemEventTypeEPNS0_15H264DecoderTypeE", NXRT_HLE_FORCED, 1, "hle_codec_video.c", "signalled while the host decoder takes packets", adapter__ZN2nn5codec34GetH264DecoderSubmissionReadyEventEPPNS_2os15SystemEventTypeEPNS0_15H264DecoderTypeE},
+    {"_ZN2nn5codec36GetH264DecoderOutputBufferPropertiesEPtS1_S1_S1_PNS_8TimeSpanEPbPNS0_15H264DecoderTypeEj", NXRT_HLE_FORCED, 1, "hle_codec_video.c", "the filled buffer's picture size, time and end of stream", adapter__ZN2nn5codec36GetH264DecoderOutputBufferPropertiesEPtS1_S1_S1_PNS_8TimeSpanEPbPNS0_15H264DecoderTypeEj},
+    {"_ZN2nn5codec37SubmitEncryptedH264DecoderInputBufferEPmPNS0_15H264DecoderTypeEPKNS0_18EncryptionPropertyEPKvmNS_8TimeSpanEb", NXRT_HLE_FORCED, 1, "hle_codec_video.c", "protected streams are not served", adapter__ZN2nn5codec37SubmitEncryptedH264DecoderInputBufferEPmPNS0_15H264DecoderTypeEPKNS0_18EncryptionPropertyEPKvmNS_8TimeSpanEb},
+    {"_ZN2nn5codec21InitializeH264DecoderEPNS0_15H264DecoderTypeEPvmmttjNS0_23VideoDecoderInputFormatENS0_24VideoDecoderOutputFormatENS0_22VideoDecoderOutputModeEPKvm", NXRT_HLE_FORCED, 1, "hle_codec_video.c", "decoded with VideoToolbox on the host", adapter__ZN2nn5codec21InitializeH264DecoderEPNS0_15H264DecoderTypeEPvmmttjNS0_23VideoDecoderInputFormatENS0_24VideoDecoderOutputFormatENS0_22VideoDecoderOutputModeEPKvm},
+    {"_ZN2nn5codec29CalculateAv1DecoderWorkBufferEPmS1_mtt", NXRT_HLE_FORCED, 1, "hle_codec_video.c", "the host decoder needs no work memory", adapter__ZN2nn5codec29CalculateAv1DecoderWorkBufferEPmS1_mtt},
+    {"_ZN2nn5codec20InitializeAv1DecoderEPNS0_14Av1DecoderTypeEPvmmttjNS0_23VideoDecoderInputFormatENS0_24VideoDecoderOutputFormatE", NXRT_HLE_FORCED, 1, "hle_codec_video.c", "AV1: no decoder on the host", adapter__ZN2nn5codec20InitializeAv1DecoderEPNS0_14Av1DecoderTypeEPvmmttjNS0_23VideoDecoderInputFormatENS0_24VideoDecoderOutputFormatE},
+    {"_ZN2nn5codec20InitializeAv1DecoderEPNS0_14Av1DecoderTypeEmttjNS0_23VideoDecoderInputFormatENS0_24VideoDecoderOutputFormatE", NXRT_HLE_FORCED, 1, "hle_codec_video.c", "AV1: no decoder on the host", adapter__ZN2nn5codec20InitializeAv1DecoderEPNS0_14Av1DecoderTypeEmttjNS0_23VideoDecoderInputFormatENS0_24VideoDecoderOutputFormatE},
+    {"_ZN2nn5codec18FinalizeAv1DecoderEPNS0_14Av1DecoderTypeE", NXRT_HLE_FORCED, 1, "hle_codec_video.c", "AV1: nothing was made", adapter__ZN2nn5codec18FinalizeAv1DecoderEPNS0_14Av1DecoderTypeE},
+    {"_ZN2nn5codec25MakeDecodeImagePreferenceEttNS0_24VideoDecoderOutputFormatENS0_15ImageTilingModeE", NXRT_HLE_FORCED, 1, "hle_codec_video.c", "the preference only carries the size and format to the host's pool (SDK 21: 0x40 bytes)", adapter__ZN2nn5codec25MakeDecodeImagePreferenceEttNS0_24VideoDecoderOutputFormatENS0_15ImageTilingModeE},
+    {"_ZN2nn5codec26InitializeDecoderImagePoolEPNS0_25VideoDecoderImagePoolTypeEPvmRKNS0_27VideoDecoderImagePreferenceEj", NXRT_HLE_FORCED, 1, "hle_codec_video.c", "a host pool of decoded pictures (SDK 21)", adapter__ZN2nn5codec26InitializeDecoderImagePoolEPNS0_25VideoDecoderImagePoolTypeEPvmRKNS0_27VideoDecoderImagePreferenceEj},
+    {"_ZN2nn5codec33GetVp9DecoderSubmissionReadyEventEPNS0_14Vp9DecoderTypeE", NXRT_HLE_FORCED, 1, "hle_codec_video.c", "the host decoder's submission-ready event (SDK 21: returned)", adapter__ZN2nn5codec33GetVp9DecoderSubmissionReadyEventEPNS0_14Vp9DecoderTypeE},
+    {"_ZN2nn5codec34InitializeVp9DecoderByRemoteMemoryEPNS0_14Vp9DecoderTypeEmttjNS0_23VideoDecoderInputFormatENS0_24VideoDecoderOutputFormatENS0_22VideoDecoderOutputModeE", NXRT_HLE_FORCED, 1, "hle_codec_video.c", "decoded on the host (SDK 21)", adapter__ZN2nn5codec34InitializeVp9DecoderByRemoteMemoryEPNS0_14Vp9DecoderTypeEmttjNS0_23VideoDecoderInputFormatENS0_24VideoDecoderOutputFormatENS0_22VideoDecoderOutputModeE},
+    {"_ZN2nn5codec36InitializeVp9DecoderByTransferMemoryEPNS0_14Vp9DecoderTypeEPvmmttjNS0_23VideoDecoderInputFormatENS0_24VideoDecoderOutputFormatENS0_22VideoDecoderOutputModeE", NXRT_HLE_FORCED, 1, "hle_codec_video.c", "decoded on the host (SDK 21)", adapter__ZN2nn5codec36InitializeVp9DecoderByTransferMemoryEPNS0_14Vp9DecoderTypeEPvmmttjNS0_23VideoDecoderInputFormatENS0_24VideoDecoderOutputFormatENS0_22VideoDecoderOutputModeE},
+    {"_ZN2nn5codec33GetVp8DecoderSubmissionReadyEventEPNS0_14Vp8DecoderTypeE", NXRT_HLE_FORCED, 1, "hle_codec_video.c", "the host decoder's submission-ready event (SDK 21: returned)", adapter__ZN2nn5codec33GetVp8DecoderSubmissionReadyEventEPNS0_14Vp8DecoderTypeE},
+    {"_ZN2nn5codec34InitializeVp8DecoderByRemoteMemoryEPNS0_14Vp8DecoderTypeEmttjNS0_23VideoDecoderInputFormatENS0_24VideoDecoderOutputFormatENS0_22VideoDecoderOutputModeE", NXRT_HLE_FORCED, 1, "hle_codec_video.c", "decoded on the host (SDK 21)", adapter__ZN2nn5codec34InitializeVp8DecoderByRemoteMemoryEPNS0_14Vp8DecoderTypeEmttjNS0_23VideoDecoderInputFormatENS0_24VideoDecoderOutputFormatENS0_22VideoDecoderOutputModeE},
+    {"_ZN2nn5codec36InitializeVp8DecoderByTransferMemoryEPNS0_14Vp8DecoderTypeEPvmmttjNS0_23VideoDecoderInputFormatENS0_24VideoDecoderOutputFormatENS0_22VideoDecoderOutputModeE", NXRT_HLE_FORCED, 1, "hle_codec_video.c", "decoded on the host (SDK 21)", adapter__ZN2nn5codec36InitializeVp8DecoderByTransferMemoryEPNS0_14Vp8DecoderTypeEPvmmttjNS0_23VideoDecoderInputFormatENS0_24VideoDecoderOutputFormatENS0_22VideoDecoderOutputModeE},
+    {"_ZN2nn5codec37InitializeH264DecoderByTransferMemoryEPNS0_15H264DecoderTypeEPvmmttjNS0_23VideoDecoderInputFormatENS0_24VideoDecoderOutputFormatENS0_22VideoDecoderOutputModeEPKvm", NXRT_HLE_FORCED, 1, "hle_codec_video.c", "decoded with the host's H.264 decoder (SDK 21)", adapter__ZN2nn5codec37InitializeH264DecoderByTransferMemoryEPNS0_15H264DecoderTypeEPvmmttjNS0_23VideoDecoderInputFormatENS0_24VideoDecoderOutputFormatENS0_22VideoDecoderOutputModeEPKvm},
+    {"_ZN2nn5codec35InitializeH264DecoderByRemoteMemoryEPNS0_15H264DecoderTypeEmttjNS0_23VideoDecoderInputFormatENS0_24VideoDecoderOutputFormatENS0_22VideoDecoderOutputModeEPKvm", NXRT_HLE_FORCED, 1, "hle_codec_video.c", "decoded with the host's H.264 decoder (SDK 21)", adapter__ZN2nn5codec35InitializeH264DecoderByRemoteMemoryEPNS0_15H264DecoderTypeEmttjNS0_23VideoDecoderInputFormatENS0_24VideoDecoderOutputFormatENS0_22VideoDecoderOutputModeEPKvm},
+    {"_ZN2nn5codec34GetH264DecoderSubmissionReadyEventEPNS0_15H264DecoderTypeE", NXRT_HLE_FORCED, 1, "hle_codec_video.c", "the host decoder's submission-ready event (SDK 21: returned)", adapter__ZN2nn5codec34GetH264DecoderSubmissionReadyEventEPNS0_15H264DecoderTypeE},
+    {"_ZN2nn5codec31InitializeDecoderAliasImagePoolEPNS0_25VideoDecoderImagePoolTypeENS_2gs17NativeImageHandleEj", NXRT_HLE_FORCED, 1, "hle_codec_video.c", "alias pools (the GPU route) are not served", adapter__ZN2nn5codec31InitializeDecoderAliasImagePoolEPNS0_25VideoDecoderImagePoolTypeENS_2gs17NativeImageHandleEj},
+    {"_ZN2nn5codec36InitializeAv1DecoderByTransferMemoryEPNS0_14Av1DecoderTypeEPvmmttjNS0_23VideoDecoderInputFormatENS0_24VideoDecoderOutputFormatENS0_22VideoDecoderOutputModeE", NXRT_HLE_FORCED, 1, "hle_codec_video.c", "AV1: no decoder on the host", adapter__ZN2nn5codec36InitializeAv1DecoderByTransferMemoryEPNS0_14Av1DecoderTypeEPvmmttjNS0_23VideoDecoderInputFormatENS0_24VideoDecoderOutputFormatENS0_22VideoDecoderOutputModeE},
+    {"_ZN2nn5codec34InitializeAv1DecoderByRemoteMemoryEPNS0_14Av1DecoderTypeEmttjNS0_23VideoDecoderInputFormatENS0_24VideoDecoderOutputFormatENS0_22VideoDecoderOutputModeE", NXRT_HLE_FORCED, 1, "hle_codec_video.c", "AV1: no decoder on the host", adapter__ZN2nn5codec34InitializeAv1DecoderByRemoteMemoryEPNS0_14Av1DecoderTypeEmttjNS0_23VideoDecoderInputFormatENS0_24VideoDecoderOutputFormatENS0_22VideoDecoderOutputModeE},
+    {"_ZN2nn5codec29ReadDecoderOutputImageRgbaHdrEPKNS0_25VideoDecoderImagePoolTypeEjttttPvmm", NXRT_HLE_FORCED, 1, "hle_codec_video.c", "HDR pictures are not served", adapter__ZN2nn5codec29ReadDecoderOutputImageRgbaHdrEPKNS0_25VideoDecoderImagePoolTypeEjttttPvmm},
+    {"_ZN2nn5codec34ReadDecoderOutputImageRgbaHdrFloatEPKNS0_25VideoDecoderImagePoolTypeEjttttPvmm", NXRT_HLE_FORCED, 1, "hle_codec_video.c", "HDR pictures are not served", adapter__ZN2nn5codec34ReadDecoderOutputImageRgbaHdrFloatEPKNS0_25VideoDecoderImagePoolTypeEjttttPvmm},
+    {"_ZN2nn2gs17TryWaitNativeSyncERKNS0_16NativeSyncHandleE", NXRT_HLE_FORCED, 1, "hle_codec_video.c", "decoder sync handles are the host's (hle_codec_video.c)", adapter__ZN2nn2gs17TryWaitNativeSyncERKNS0_16NativeSyncHandleE},
+    {"_ZN2nn6syncpt3sdk20CreateSyncPointEventEPNS1_18SyncPointEventTypeE", NXRT_HLE_FORCED, 1, "hle_codec_video.c", "a host-bound SystemEvent inside the event type", adapter__ZN2nn6syncpt3sdk20CreateSyncPointEventEPNS1_18SyncPointEventTypeE},
+    {"_ZN2nn6syncpt3sdk25InitializeMultiWaitHolderEPNS_2os19MultiWaitHolderTypeEPNS1_18SyncPointEventTypeE", NXRT_HLE_FORCED, 1, "hle_codec_video.c", "links the event's SystemEvent", adapter__ZN2nn6syncpt3sdk25InitializeMultiWaitHolderEPNS_2os19MultiWaitHolderTypeEPNS1_18SyncPointEventTypeE},
+    {"_ZN2nn6syncpt3sdk21RequestSyncPointEventEPNS1_18SyncPointEventTypeERKNS1_15SyncPointHandleE", NXRT_HLE_FORCED, 1, "hle_codec_video.c", "signalled when the decoder fills the awaited buffer", adapter__ZN2nn6syncpt3sdk21RequestSyncPointEventEPNS1_18SyncPointEventTypeERKNS1_15SyncPointHandleE},
+    {"_ZN2nn6syncpt3sdk20CancelSyncPointEventEPNS1_18SyncPointEventTypeE", NXRT_HLE_FORCED, 1, "hle_codec_video.c", "disarms the event", adapter__ZN2nn6syncpt3sdk20CancelSyncPointEventEPNS1_18SyncPointEventTypeE},
+    {"_ZN2nn6syncpt3sdk21DestroySyncPointEventEPNS1_18SyncPointEventTypeE", NXRT_HLE_FORCED, 1, "hle_codec_video.c", "destroys the event's SystemEvent", adapter__ZN2nn6syncpt3sdk21DestroySyncPointEventEPNS1_18SyncPointEventTypeE},
     {"_ZN2nn7friends10InitializeEv", NXRT_HLE_FORCED, 1, "hle_friends.c", "connects to the friends service (cut)", adapter__ZN2nn7friends10InitializeEv},
     {"_ZN2nn7friends12AsyncContextC1Ev", NXRT_HLE_FORCED, 1, "hle_friends.c", "async context creates no session (cut)", adapter__ZN2nn7friends12AsyncContextC1Ev},
     {"_ZN2nn7friends12AsyncContextD1Ev", NXRT_HLE_FORCED, 1, "hle_friends.c", "async context has no session to close (cut)", adapter__ZN2nn7friends12AsyncContextD1Ev},
@@ -2131,6 +2331,11 @@ const nxrt_hle_entry nxrt_hle_table[] = {
     {"_ZN2nn3hid19SuspendPalmaFeatureERKNS0_21PalmaConnectionHandleERKNS_4util10BitFlagSetILi32ENS0_12PalmaFeatureEEE", NXRT_HLE_FORCED, 1, "hle_hid.c", "Poké Ball Plus feature suspension: fails, none connected", adapter__ZN2nn3hid19SuspendPalmaFeatureERKNS0_21PalmaConnectionHandleERKNS_4util10BitFlagSetILi32ENS0_12PalmaFeatureEEE},
     {"_ZN2nn3hid16ReadPalmaPlayLogERKNS0_21PalmaConnectionHandleERKt", NXRT_HLE_FORCED, 1, "hle_hid.c", "Poké Ball Plus play log read: fails, none connected", adapter__ZN2nn3hid16ReadPalmaPlayLogERKNS0_21PalmaConnectionHandleERKt},
     {"_ZN2nn3hid17ResetPalmaPlayLogERKNS0_21PalmaConnectionHandleERKt", NXRT_HLE_FORCED, 1, "hle_hid.c", "Poké Ball Plus play log reset: fails, none connected", adapter__ZN2nn3hid17ResetPalmaPlayLogERKNS0_21PalmaConnectionHandleERKt},
+    {"_ZN2nn3hid8StopJcmsERKNS0_10JcmsHandleE", NXRT_HLE_FORCED, 1, "hle_hid.c", "Joy-Con mouse sensor: no sensor on the host", adapter__ZN2nn3hid8StopJcmsERKNS0_10JcmsHandleE},
+    {"_ZN2nn3hid13GetJcmsStatesEPNS0_9JcmsStateEiRKNS0_10JcmsHandleE", NXRT_HLE_FORCED, 1, "hle_hid.c", "Joy-Con mouse sensor states: none (no sensor on the host)", adapter__ZN2nn3hid13GetJcmsStatesEPNS0_9JcmsStateEiRKNS0_10JcmsHandleE},
+    {"_ZN2nn3hid22SetNmousePointerRangesEii", NXRT_HLE_FORCED, 1, "hle_hid.c", "Joy-Con mouse pointer range: no sensor on the host", adapter__ZN2nn3hid22SetNmousePointerRangesEii},
+    {"_ZN2nn3hid19EnableNmousePointerENS0_12NmouseHandleEb", NXRT_HLE_FORCED, 1, "hle_hid.c", "Joy-Con mouse pointer: no sensor on the host (false: no device)", adapter__ZN2nn3hid19EnableNmousePointerENS0_12NmouseHandleEb},
+    {"_ZN2nn3hid24SetNmousePointerPositionENS0_12NmouseHandleEii", NXRT_HLE_FORCED, 1, "hle_hid.c", "Joy-Con mouse pointer position: no sensor on the host (false: no device)", adapter__ZN2nn3hid24SetNmousePointerPositionENS0_12NmouseHandleEii},
     {"_ZN2nn3mii8Database10InitializeEv", NXRT_HLE_FORCED, 0, "hle_mii.c", "mii:u service; the host's database: the six default Miis, none of the console's own", adapter__ZN2nn3mii8Database10InitializeEv},
     {"_ZN2nn3mii8Database8FinalizeEv", NXRT_HLE_FORCED, 2, "hle_mii.c", "mii:u service; nothing to release", adapter__ZN2nn3mii8Database8FinalizeEv},
     {"_ZNK2nn3mii8Database11IsAvailableEv", NXRT_HLE_FORCED, 2, "hle_mii.c", "mii:u service; always available", adapter__ZNK2nn3mii8Database11IsAvailableEv},
@@ -2218,6 +2423,33 @@ const nxrt_hle_entry nxrt_hle_table[] = {
     {"_ZN2nn4pctl20EndFreeCommunicationEv", NXRT_HLE_FORCED, 1, "hle_misc.c", "parental controls · communication with others", adapter__ZN2nn4pctl20EndFreeCommunicationEv},
     {"_ZN2nn4pctl28IsFreeCommunicationAvailableEv", NXRT_HLE_FORCED, 1, "hle_misc.c", "parental controls · whether communication with others is available; never (DM_COOP: yes)", adapter__ZN2nn4pctl28IsFreeCommunicationAvailableEv},
     {"_ZN2nn4pctl27CheckStereoVisionPermissionEb", NXRT_HLE_FORCED, 1, "hle_misc.c", "parental controls · stereoscopic 3D permission; the host has no VR display, not permitted", adapter__ZN2nn4pctl27CheckStereoVisionPermissionEb},
+    {"_ZN2nn4chat10InitializeEv", NXRT_HLE_FORCED, 1, "hle_misc.c", "GameChat (chat:u): ready, no chat", adapter__ZN2nn4chat10InitializeEv},
+    {"_ZN2nn4chat10IsChattingEv", NXRT_HLE_FORCED, 1, "hle_misc.c", "GameChat: not chatting", adapter__ZN2nn4chat10IsChattingEv},
+    {"_ZN2nn4chat20SetScreenSharingModeENS0_17ScreenSharingModeE", NXRT_HLE_FORCED, 1, "hle_misc.c", "GameChat screen sharing mode: no chat to share with", adapter__ZN2nn4chat20SetScreenSharingModeENS0_17ScreenSharingModeE},
+    {"_ZN2nn4chat28AttachToRoomInfoChangedEventEPNS_2os11SystemEventE", NXRT_HLE_FORCED, 1, "hle_misc.c", "GameChat room info change event: bound, never signalled (no chat)", adapter__ZN2nn4chat28AttachToRoomInfoChangedEventEPNS_2os11SystemEventE},
+    {"_ZN2nn4chat13SetSharingKeyERKNS0_10SharingKeyE", NXRT_HLE_FORCED, 1, "hle_misc.c", "GameChat sharing key: no chat to share with", adapter__ZN2nn4chat13SetSharingKeyERKNS0_10SharingKeyE},
+    {"_ZN2nn4chat15ClearSharingKeyEv", NXRT_HLE_FORCED, 1, "hle_misc.c", "GameChat sharing key cleared: no chat", adapter__ZN2nn4chat15ClearSharingKeyEv},
+    {"_ZN2nn4chat11GetRoomInfoEPNS0_8RoomInfoE", NXRT_HLE_FORCED, 1, "hle_misc.c", "GameChat room: none (no members)", adapter__ZN2nn4chat11GetRoomInfoEPNS0_8RoomInfoE},
+    {"_ZN2nn4chat13ShowChatStartERKNS_7account3UidE", NXRT_HLE_FORCED, 1, "hle_misc.c", "GameChat start applet: no chat, closes at once", adapter__ZN2nn4chat13ShowChatStartERKNS_7account3UidE},
+    {"_ZN2nn4chat22ShowCameraSharingGuideEv", NXRT_HLE_FORCED, 1, "hle_misc.c", "GameChat camera sharing guide: no chat, closes at once", adapter__ZN2nn4chat22ShowCameraSharingGuideEv},
+    {"_ZN2nn4chat36ShowLocalCameraConfigurationVersion0ENS0_25CameraImageProcessingModeE", NXRT_HLE_FORCED, 1, "hle_misc.c", "GameChat camera settings applet: no camera, closes at once", adapter__ZN2nn4chat36ShowLocalCameraConfigurationVersion0ENS0_25CameraImageProcessingModeE},
+    {"_ZN2nn4chat46BeginFullScreenWithLocalCameraAvailableSectionEb", NXRT_HLE_FORCED, 1, "hle_misc.c", "GameChat full-screen camera section: no camera", adapter__ZN2nn4chat46BeginFullScreenWithLocalCameraAvailableSectionEb},
+    {"_ZN2nn4chat44EndFullScreenWithLocalCameraAvailableSectionEv", NXRT_HLE_FORCED, 1, "hle_misc.c", "GameChat full-screen camera section: no camera", adapter__ZN2nn4chat44EndFullScreenWithLocalCameraAvailableSectionEv},
+    {"_ZN2nn4chat35CalculateLocalCameraVideoBufferSizeEiii", NXRT_HLE_FORCED, 1, "hle_misc.c", "GameChat camera pictures: the host's linear RGBA8 layout", adapter__ZN2nn4chat35CalculateLocalCameraVideoBufferSizeEiii},
+    {"_ZN2nn4chat36CalculateRemoteCameraVideoBufferSizeEiii", NXRT_HLE_FORCED, 1, "hle_misc.c", "GameChat camera pictures: the host's linear RGBA8 layout", adapter__ZN2nn4chat36CalculateRemoteCameraVideoBufferSizeEiii},
+    {"_ZN2nn4chat33InitializeLocalCameraVideoStorageEPNS0_20LocalCameraVideoTypeEiiiPvm", NXRT_HLE_FORCED, 1, "hle_misc.c", "GameChat camera storage: black pictures in the game's buffer (no camera)", adapter__ZN2nn4chat33InitializeLocalCameraVideoStorageEPNS0_20LocalCameraVideoTypeEiiiPvm},
+    {"_ZN2nn4chat34InitializeRemoteCameraVideoStorageEPNS0_21RemoteCameraVideoTypeEiiiPvm", NXRT_HLE_FORCED, 1, "hle_misc.c", "GameChat camera storage: black pictures in the game's buffer (no camera)", adapter__ZN2nn4chat34InitializeRemoteCameraVideoStorageEPNS0_21RemoteCameraVideoTypeEiiiPvm},
+    {"_ZN2nn4chat31FinalizeLocalCameraVideoStorageEPNS0_20LocalCameraVideoTypeE", NXRT_HLE_FORCED, 1, "hle_misc.c", "GameChat camera storage released", adapter__ZN2nn4chat31FinalizeLocalCameraVideoStorageEPNS0_20LocalCameraVideoTypeE},
+    {"_ZN2nn4chat32FinalizeRemoteCameraVideoStorageEPNS0_21RemoteCameraVideoTypeE", NXRT_HLE_FORCED, 1, "hle_misc.c", "GameChat camera storage released", adapter__ZN2nn4chat32FinalizeRemoteCameraVideoStorageEPNS0_21RemoteCameraVideoTypeE},
+    {"_ZN2nn4chat25GetLocalCameraImageHandleEPKNS0_20LocalCameraVideoTypeEi", NXRT_HLE_FORCED, 1, "hle_misc.c", "GameChat camera picture: a handle the host's nvnNativeImage knows", adapter__ZN2nn4chat25GetLocalCameraImageHandleEPKNS0_20LocalCameraVideoTypeEi},
+    {"_ZN2nn4chat26GetRemoteCameraImageHandleEPKNS0_21RemoteCameraVideoTypeEi", NXRT_HLE_FORCED, 1, "hle_misc.c", "GameChat camera picture: a handle the host's nvnNativeImage knows", adapter__ZN2nn4chat26GetRemoteCameraImageHandleEPKNS0_21RemoteCameraVideoTypeEi},
+    {"_ZN2nn4chat25StartLocalCameraStreamingEv", NXRT_HLE_FORCED, 1, "hle_misc.c", "GameChat camera streaming: no camera, nothing streams", adapter__ZN2nn4chat25StartLocalCameraStreamingEv},
+    {"_ZN2nn4chat24StopLocalCameraStreamingEv", NXRT_HLE_FORCED, 1, "hle_misc.c", "GameChat camera streaming: no camera", adapter__ZN2nn4chat24StopLocalCameraStreamingEv},
+    {"_ZN2nn4chat26StartRemoteCameraStreamingERKNS_7account23NetworkServiceAccountIdE", NXRT_HLE_FORCED, 1, "hle_misc.c", "GameChat camera streaming: nobody to stream from", adapter__ZN2nn4chat26StartRemoteCameraStreamingERKNS_7account23NetworkServiceAccountIdE},
+    {"_ZN2nn4chat25StopRemoteCameraStreamingERKNS_7account23NetworkServiceAccountIdE", NXRT_HLE_FORCED, 1, "hle_misc.c", "GameChat camera streaming: nobody to stream from", adapter__ZN2nn4chat25StopRemoteCameraStreamingERKNS_7account23NetworkServiceAccountIdE},
+    {"_ZN2nn4chat27RequestNextLocalCameraImageEPNS_2gs16NativeSyncHandleEPNS0_20LocalCameraVideoTypeEiS2_", NXRT_HLE_FORCED, 1, "hle_misc.c", "GameChat camera picture: never comes (no camera)", adapter__ZN2nn4chat27RequestNextLocalCameraImageEPNS_2gs16NativeSyncHandleEPNS0_20LocalCameraVideoTypeEiS2_},
+    {"_ZN2nn4chat28RequestNextRemoteCameraImageEPNS_2gs16NativeSyncHandleEPNS0_21RemoteCameraVideoTypeEiS2_RKNS_7account23NetworkServiceAccountIdE", NXRT_HLE_FORCED, 1, "hle_misc.c", "GameChat camera picture: never comes (nobody streams)", adapter__ZN2nn4chat28RequestNextRemoteCameraImageEPNS_2gs16NativeSyncHandleEPNS0_21RemoteCameraVideoTypeEiS2_RKNS_7account23NetworkServiceAccountIdE},
+    {"_ZN2nn6camera3sdk19CreateCameraContextEPNS_5gsdrv18UniqueNativeHandleE", NXRT_HLE_FORCED, 1, "hle_misc.c", "a host session answered with zeroed output: no camera", adapter__ZN2nn6camera3sdk19CreateCameraContextEPNS_5gsdrv18UniqueNativeHandleE},
     {"_ZN5movie7DecoderC1ENS_11DecoderTypeENS_19DecoderOutputFormatENS_11DecoderModeEi", NXRT_HLE_FORCED, 0, "hle_movie.c", "movie decoder: host implementation (no NVIDIA hardware decoder; VP8 / VP9 with libvpx, AVC with VideoToolbox)", adapter__ZN5movie7DecoderC1ENS_11DecoderTypeENS_19DecoderOutputFormatENS_11DecoderModeEi},
     {"_ZN5movie7DecoderC1ENS_11DecoderTypeENS_19DecoderOutputFormatENS_11DecoderModeE", NXRT_HLE_FORCED, 0, "hle_movie.c", "movie decoder (SDK 4, no priority): host implementation", adapter__ZN5movie7DecoderC1ENS_11DecoderTypeENS_19DecoderOutputFormatENS_11DecoderModeE},
     {"_ZN5movie7DecoderC1ENS_11DecoderTypeENS_19DecoderOutputFormatE", NXRT_HLE_FORCED, 0, "hle_movie.c", "movie decoder (SDK 3, no mode or priority): host implementation", adapter__ZN5movie7DecoderC1ENS_11DecoderTypeENS_19DecoderOutputFormatE},
@@ -2340,6 +2572,8 @@ const nxrt_hle_entry nxrt_hle_table[] = {
     {"_ZN2nv16FinalizeGraphicsEv", NXRT_HLE_FORCED, 1, "hle_nv.c", "", adapter__ZN2nv16FinalizeGraphicsEv},
     {"_ZN2nv21GetGraphicsMemoryInfoEPNS_10MemoryInfoE", NXRT_HLE_FORCED, 1, "hle_nv.c", "; pool figures from nv::InitializeGraphics, no driver statistics", adapter__ZN2nv21GetGraphicsMemoryInfoEPNS_10MemoryInfoE},
     {"_ZN2nv22DumpGraphicsMemoryInfoEv", NXRT_HLE_FORCED, 1, "hle_nv.c", "; the dump goes to the host log", adapter__ZN2nv22DumpGraphicsMemoryInfoEv},
+    {"_ZN2nv9InitCheckEv", NXRT_HLE_FORCED, 1, "hle_nv.c", "graphics initialised check; nv::InitializeGraphics recorded on the host", adapter__ZN2nv9InitCheckEv},
+    {"_ZN2nn2gs3sdk30CheckGraphicsSystemInitializedEPKcm", NXRT_HLE_FORCED, 1, "hle_nv.c", "the graphics system's boot is nv::InitializeGraphics, recorded on the host", adapter__ZN2nn2gs3sdk30CheckGraphicsSystemInitializedEPKcm},
     {"NvOsDrvOpen", NXRT_HLE_FORCED, 1, "hle_nvdrv.c", "nvdrv open device: the host has no nvdrv, returns −1", adapter_NvOsDrvOpen},
     {"NvOsDrvClose", NXRT_HLE_FORCED, 1, "hle_nvdrv.c", "nvdrv close device; nothing to do", adapter_NvOsDrvClose},
     {"NvOsDrvIoctl", NXRT_HLE_FORCED, 1, "hle_nvdrv.c", "nvdrv ioctl: returns an error", adapter_NvOsDrvIoctl},
@@ -2348,6 +2582,14 @@ const nxrt_hle_entry nxrt_hle_table[] = {
     {"NvOsDrvMapSharedMem", NXRT_HLE_FORCED, 1, "hle_nvdrv.c", "nvdrv shared memory map: returns an error", adapter_NvOsDrvMapSharedMem},
     {"_Z17NvOsDrvQueryEventijPN2nn2os15SystemEventTypeE", NXRT_HLE_FORCED, 1, "hle_nvdrv.c", "nvdrv query event: returns an error", adapter__Z17NvOsDrvQueryEventijPN2nn2os15SystemEventTypeE},
     {"nvnBootstrapLoader", NXRT_HLE_FORCED, 1, "hle_nvn.c", "the NVN graphics API is replaced wholesale with a host null device (Metal behind it); the SDK's NVN driver does not run", adapter_nvnBootstrapLoader},
+    {"_Z32nvnNativeImageBuilderSetDefaultsP21NVNnativeImageBuilder", NXRT_HLE_FORCED, 1, "hle_nvn.c", "native images are the host's", adapter__Z32nvnNativeImageBuilderSetDefaultsP21NVNnativeImageBuilder},
+    {"_Z30nvnNativeImageBuilderSetDeviceP21NVNnativeImageBuilderP9NVNdevice", NXRT_HLE_FORCED, 1, "hle_nvn.c", "native images are the host's", adapter__Z30nvnNativeImageBuilderSetDeviceP21NVNnativeImageBuilderP9NVNdevice},
+    {"_Z41nvnNativeImageBuilderSetNativeImageHandleP21NVNnativeImageBuilderN2nn2gs17NativeImageHandleE", NXRT_HLE_FORCED, 1, "hle_nvn.c", "native images are the host's", adapter__Z41nvnNativeImageBuilderSetNativeImageHandleP21NVNnativeImageBuilderN2nn2gs17NativeImageHandleE},
+    {"_Z40nvnNativeImageBuilderSetMemoryPermissionP21NVNnativeImageBuilder30NVNnativeImageMemoryPermission", NXRT_HLE_FORCED, 1, "hle_nvn.c", "native images are the host's: the permission has no meaning there", adapter__Z40nvnNativeImageBuilderSetMemoryPermissionP21NVNnativeImageBuilder30NVNnativeImageMemoryPermission},
+    {"_Z30nvnNativeImageBuilderSetFormatP21NVNnativeImageBuilder9NVNformat", NXRT_HLE_FORCED, 1, "hle_nvn.c", "native images are the host's", adapter__Z30nvnNativeImageBuilderSetFormatP21NVNnativeImageBuilder9NVNformat},
+    {"_Z24nvnNativeImageInitializeP14NVNnativeImagePK21NVNnativeImageBuilder", NXRT_HLE_FORCED, 1, "hle_nvn.c", "native images are the host's", adapter__Z24nvnNativeImageInitializeP14NVNnativeImagePK21NVNnativeImageBuilder},
+    {"_Z22nvnNativeImageFinalizeP14NVNnativeImage", NXRT_HLE_FORCED, 1, "hle_nvn.c", "native images are the host's", adapter__Z22nvnNativeImageFinalizeP14NVNnativeImage},
+    {"_Z35nvnTextureInitializeFromNativeImageP10NVNtextureP14NVNnativeImage", NXRT_HLE_FORCED, 1, "hle_nvn.c", "a linear texture over the picture's memory", adapter__Z35nvnTextureInitializeFromNativeImageP10NVNtextureP14NVNnativeImage},
     {"_ZN2nn2oe17FinishStartupLogoEv", NXRT_HLE_FORCED, 1, "hle_oe.c", "dismiss the system boot screen (through the am application proxy); the host has no boot screen", adapter__ZN2nn2oe17FinishStartupLogoEv},
     {"_ZN2nn2oe44SetUserInactivityDetectionTimeExtendedUnsafeEb", NXRT_HLE_FORCED, 1, "hle_oe.c", "inactivity extension mode 2 or 0; the host never turns the screen off", adapter__ZN2nn2oe44SetUserInactivityDetectionTimeExtendedUnsafeEb},
     {"_ZN2nn2oe38SetUserInactivityDetectionTimeExtendedEb", NXRT_HLE_FORCED, 1, "hle_oe.c", "inactivity extension mode 1 or 0; the host never turns the screen off", adapter__ZN2nn2oe38SetUserInactivityDetectionTimeExtendedEb},
@@ -2547,26 +2789,10 @@ const nxrt_hle_entry nxrt_hle_table[] = {
     {"_ZN2nn3hid13GetJcmsHandleERKjRKNS0_8JcmsTypeE", NXRT_HLE_FORCED, 1, "hle_offline.c", "SWITCH2 hid: sensor handle; 0", adapter__ZN2nn3hid13GetJcmsHandleERKjRKNS0_8JcmsTypeE},
     {"_ZN2nn3hid9StartJcmsERKNS0_10JcmsHandleE", NXRT_HLE_FORCED, 1, "hle_offline.c", "SWITCH2 hid: start sensor; reports success", adapter__ZN2nn3hid9StartJcmsERKNS0_10JcmsHandleE},
     {"_ZN2nn3hid12GetJcmsStateEPNS0_9JcmsStateERKNS0_10JcmsHandleE", NXRT_HLE_FORCED, 1, "hle_offline.c", "SWITCH2 hid: sensor state; left untouched, reports success", adapter__ZN2nn3hid12GetJcmsStateEPNS0_9JcmsStateERKNS0_10JcmsHandleE},
-    {"_ZN2nn3hid13VibrationNode6UpdateEv", NXRT_HLE_FORCED, 1, "hle_offline.c", "SWITCH2 hid: vibration node update; inert", adapter__ZN2nn3hid13VibrationNode6UpdateEv},
-    {"_ZN2nn3hid13VibrationNode15SetModulationToEPKS1_RKNS0_19VibrationModulationE", NXRT_HLE_FORCED, 1, "hle_offline.c", "SWITCH2 hid: vibration modulation; inert", adapter__ZN2nn3hid13VibrationNode15SetModulationToEPKS1_RKNS0_19VibrationModulationE},
-    {"_ZN2nn3hid23VibrationNodeConnectionC1Ev", NXRT_HLE_FORCED, 1, "hle_offline.c", "SWITCH2 hid: vibration connection ctor; inert", adapter__ZN2nn3hid23VibrationNodeConnectionC1Ev},
-    {"_ZN2nn3hid23VibrationNodeConnectionD1Ev", NXRT_HLE_FORCED, 1, "hle_offline.c", "SWITCH2 hid: vibration connection dtor; inert", adapter__ZN2nn3hid23VibrationNodeConnectionD1Ev},
     {"_ZN2nn3hid23VibrationNodeConnection7ConnectEPNS0_13VibrationNodeES3_", NXRT_HLE_FORCED, 1, "hle_offline.c", "SWITCH2 hid: connect vibration nodes; reports success", adapter__ZN2nn3hid23VibrationNodeConnection7ConnectEPNS0_13VibrationNodeES3_},
-    {"_ZN2nn3hid23VibrationNodeConnection10DisconnectEv", NXRT_HLE_FORCED, 1, "hle_offline.c", "SWITCH2 hid: disconnect vibration nodes; inert", adapter__ZN2nn3hid23VibrationNodeConnection10DisconnectEv},
-    {"_ZN2nn3hid15VibrationPlayerC1Ev", NXRT_HLE_FORCED, 1, "hle_offline.c", "SWITCH2 hid: vibration player ctor; inert", adapter__ZN2nn3hid15VibrationPlayerC1Ev},
-    {"_ZN2nn3hid15VibrationPlayerD1Ev", NXRT_HLE_FORCED, 1, "hle_offline.c", "SWITCH2 hid: vibration player dtor; inert", adapter__ZN2nn3hid15VibrationPlayerD1Ev},
     {"_ZN2nn3hid15VibrationPlayer4LoadEPKvm", NXRT_HLE_FORCED, 1, "hle_offline.c", "SWITCH2 hid: vibration player load; reports success", adapter__ZN2nn3hid15VibrationPlayer4LoadEPKvm},
-    {"_ZN2nn3hid15VibrationPlayer4PlayEv", NXRT_HLE_FORCED, 1, "hle_offline.c", "SWITCH2 hid: vibration player play; inert", adapter__ZN2nn3hid15VibrationPlayer4PlayEv},
-    {"_ZN2nn3hid15VibrationPlayer4StopEv", NXRT_HLE_FORCED, 1, "hle_offline.c", "SWITCH2 hid: vibration player stop; inert", adapter__ZN2nn3hid15VibrationPlayer4StopEv},
-    {"_ZN2nn3hid15VibrationPlayer7SetLoopEb", NXRT_HLE_FORCED, 1, "hle_offline.c", "SWITCH2 hid: vibration player loop; inert", adapter__ZN2nn3hid15VibrationPlayer7SetLoopEb},
-    {"_ZN2nn3hid15VibrationPlayer15SetLoopIntervalEi", NXRT_HLE_FORCED, 1, "hle_offline.c", "SWITCH2 hid: vibration player loop interval; inert", adapter__ZN2nn3hid15VibrationPlayer15SetLoopIntervalEi},
-    {"_ZN2nn3hid15VibrationPlayer18SetCurrentPositionEi", NXRT_HLE_FORCED, 1, "hle_offline.c", "SWITCH2 hid: vibration player position; inert", adapter__ZN2nn3hid15VibrationPlayer18SetCurrentPositionEi},
-    {"_ZN2nn3hid15VibrationTargetC1Ev", NXRT_HLE_FORCED, 1, "hle_offline.c", "SWITCH2 hid: vibration target ctor; inert", adapter__ZN2nn3hid15VibrationTargetC1Ev},
-    {"_ZN2nn3hid15VibrationTargetD1Ev", NXRT_HLE_FORCED, 1, "hle_offline.c", "SWITCH2 hid: vibration target dtor; inert", adapter__ZN2nn3hid15VibrationTargetD1Ev},
     {"_ZN2nn3hid15VibrationTarget24GetVibrationDeviceHandleEv", NXRT_HLE_FORCED, 1, "hle_offline.c", "SWITCH2 hid: vibration target device handle; 0", adapter__ZN2nn3hid15VibrationTarget24GetVibrationDeviceHandleEv},
     {"_ZN2nn3hid15VibrationTarget24SetVibrationDeviceHandleERKNS0_21VibrationDeviceHandleE", NXRT_HLE_FORCED, 1, "hle_offline.c", "SWITCH2 hid: vibration target device handle; ignored", adapter__ZN2nn3hid15VibrationTarget24SetVibrationDeviceHandleERKNS0_21VibrationDeviceHandleE},
-    {"_ZN2nn3hid18VibrationConverterC1Ei", NXRT_HLE_FORCED, 1, "hle_offline.c", "SWITCH2 hid: vibration converter ctor; inert", adapter__ZN2nn3hid18VibrationConverterC1Ei},
-    {"_ZN2nn3hid18VibrationConverterD1Ev", NXRT_HLE_FORCED, 1, "hle_offline.c", "SWITCH2 hid: vibration converter dtor; inert", adapter__ZN2nn3hid18VibrationConverterD1Ev},
     {"_ZN2nn3hid18VibrationConverter12ProcessChunkEPNS0_14VibrationValueEPKsi", NXRT_HLE_FORCED, 1, "hle_offline.c", "SWITCH2 hid: vibration converter; 0 values", adapter__ZN2nn3hid18VibrationConverter12ProcessChunkEPNS0_14VibrationValueEPKsi},
     {"_ZN2nn6crypto36GenerateCryptographicallyRandomBytesEPvm", NXRT_HLE_FORCED, 1, "hle_os.c", "csrng service; host entropy (the getentropy stream)", adapter__ZN2nn6crypto36GenerateCryptographicallyRandomBytesEPvm},
     {"getenv", NXRT_HLE_FORCED, 1, "hle_os.c", "the game profile's game_env answers its names; the SDK's own getenv (an empty environ on Horizon) the rest", adapter_getenv},
@@ -2662,15 +2888,15 @@ const nxrt_hle_entry nxrt_hle_table[] = {
     {"_ZN2nn2fs24InitializeForApplicationEv", NXRT_HLE_FORCED, 1, "hle_sdkinit.c", "connect to the fsp-srv file service; the file interface goes to the host file system + RomFS", adapter__ZN2nn2fs24InitializeForApplicationEv},
     {"_ZN2nn4pctl10InitializeEv", NXRT_HLE_FORCED, 1, "hle_sdkinit.c", "connect to the pctl parental controls service; single-player has no parental controls", adapter__ZN2nn4pctl10InitializeEv},
     {"_ZN2nn4diag34InitializeApplicationAbortObserverEv", NXRT_HLE_FORCED, 1, "hle_sdkinit.c", "register with the system's abort observer; host crashes are printed by the signal handler", adapter__ZN2nn4diag34InitializeApplicationAbortObserverEv},
-    {"_ZN2nn2sf4hipc31InitializeHipcServiceResolutionEv", NXRT_HLE_FORCED, 2, "hle_sf.c", "service name resolution (connects to sm); the host resolves the names it serves itself", adapter__ZN2nn2sf4hipc31InitializeHipcServiceResolutionEv},
-    {"_ZN2nn2sf4hipc29FinalizeHipcServiceResolutionEv", NXRT_HLE_FORCED, 0, "hle_sf.c", "service name resolution (sm)", adapter__ZN2nn2sf4hipc29FinalizeHipcServiceResolutionEv},
-    {"_ZN2nn2sf4hipc20ConnectToHipcServiceEPNS_3svc6HandleEPKc", NXRT_HLE_FORCED, 0, "hle_sf.c", "connect to a service through sm → a host session for the services the host serves", adapter__ZN2nn2sf4hipc20ConnectToHipcServiceEPNS_3svc6HandleEPKc},
-    {"_ZN2nn2sf4hipc24CloseClientSessionHandleENS_3svc6HandleE", NXRT_HLE_FORCED, 0, "hle_sf.c", "close a session (kernel handle) → the host session", adapter__ZN2nn2sf4hipc24CloseClientSessionHandleENS_3svc6HandleE},
-    {"_ZN2nn2sf4hipc6client22QueryPointerBufferSizeEPtNS_3svc6HandleE", NXRT_HLE_FORCED, 0, "hle_sf.c", "control request: pointer buffer size of a session → 0 for a host session", adapter__ZN2nn2sf4hipc6client22QueryPointerBufferSizeEPtNS_3svc6HandleE},
-    {"_ZN2nn2sf4hipc6client22ConvertSessionToDomainEPNS0_4cmif18CmifDomainObjectIdENS_3svc6HandleE", NXRT_HLE_FORCED, 0, "hle_sf.c", "control request: convert a session to a domain → the host session's object 1", adapter__ZN2nn2sf4hipc6client22ConvertSessionToDomainEPNS0_4cmif18CmifDomainObjectIdENS_3svc6HandleE},
-    {"_ZN2nn2sf4hipc6client16DuplicateSessionEPNS_3svc6HandleES4_", NXRT_HLE_FORCED, 0, "hle_sf.c", "control request: clone a session → a new host session to the same service", adapter__ZN2nn2sf4hipc6client16DuplicateSessionEPNS_3svc6HandleES4_},
-    {"_ZN2nn2sf4hipc6client18DuplicateSessionExEPNS_3svc6HandleES4_j", NXRT_HLE_FORCED, 0, "hle_sf.c", "control request: clone a session (with a tag) → a new host session to the same service", adapter__ZN2nn2sf4hipc6client18DuplicateSessionExEPNS_3svc6HandleES4_j},
-    {"_ZN2nn2sf4hipc15SendSyncRequestENS_3svc6HandleEPvm", NXRT_HLE_FORCED, 0, "hle_sf.c", "send a request on a session (svcSendSyncRequest) → answered by the host for its sessions", adapter__ZN2nn2sf4hipc15SendSyncRequestENS_3svc6HandleEPvm},
+    {"_ZN2nn2sf4hipc31InitializeHipcServiceResolutionEv", NXRT_HLE_FORCED, 1, "hle_sf.c", "service name resolution (connects to sm); the host resolves the names it serves itself", adapter__ZN2nn2sf4hipc31InitializeHipcServiceResolutionEv},
+    {"_ZN2nn2sf4hipc29FinalizeHipcServiceResolutionEv", NXRT_HLE_FORCED, 1, "hle_sf.c", "service name resolution (sm)", adapter__ZN2nn2sf4hipc29FinalizeHipcServiceResolutionEv},
+    {"_ZN2nn2sf4hipc20ConnectToHipcServiceEPNS_3svc6HandleEPKc", NXRT_HLE_FORCED, 1, "hle_sf.c", "connect to a service through sm → a host session for the services the host serves", adapter__ZN2nn2sf4hipc20ConnectToHipcServiceEPNS_3svc6HandleEPKc},
+    {"_ZN2nn2sf4hipc24CloseClientSessionHandleENS_3svc6HandleE", NXRT_HLE_FORCED, 1, "hle_sf.c", "close a session (kernel handle) → the host session", adapter__ZN2nn2sf4hipc24CloseClientSessionHandleENS_3svc6HandleE},
+    {"_ZN2nn2sf4hipc6client22QueryPointerBufferSizeEPtNS_3svc6HandleE", NXRT_HLE_FORCED, 1, "hle_sf.c", "control request: pointer buffer size of a session → 0 for a host session", adapter__ZN2nn2sf4hipc6client22QueryPointerBufferSizeEPtNS_3svc6HandleE},
+    {"_ZN2nn2sf4hipc6client22ConvertSessionToDomainEPNS0_4cmif18CmifDomainObjectIdENS_3svc6HandleE", NXRT_HLE_FORCED, 1, "hle_sf.c", "control request: convert a session to a domain → the host session's object 1", adapter__ZN2nn2sf4hipc6client22ConvertSessionToDomainEPNS0_4cmif18CmifDomainObjectIdENS_3svc6HandleE},
+    {"_ZN2nn2sf4hipc6client16DuplicateSessionEPNS_3svc6HandleES4_", NXRT_HLE_FORCED, 1, "hle_sf.c", "control request: clone a session → a new host session to the same service", adapter__ZN2nn2sf4hipc6client16DuplicateSessionEPNS_3svc6HandleES4_},
+    {"_ZN2nn2sf4hipc6client18DuplicateSessionExEPNS_3svc6HandleES4_j", NXRT_HLE_FORCED, 1, "hle_sf.c", "control request: clone a session (with a tag) → a new host session to the same service", adapter__ZN2nn2sf4hipc6client18DuplicateSessionExEPNS_3svc6HandleES4_j},
+    {"_ZN2nn2sf4hipc15SendSyncRequestENS_3svc6HandleEPvm", NXRT_HLE_FORCED, 1, "hle_sf.c", "send a request on a session (svcSendSyncRequest) → answered by the host for its sessions", adapter__ZN2nn2sf4hipc15SendSyncRequestENS_3svc6HandleEPvm},
     {"_ZN2nn5swkbd12ShowKeyboardEPNS0_6StringERKNS0_15ShowKeyboardArgE", NXRT_HLE_FORCED, 1, "hle_swkbd.c", "software keyboard applet → host native input box (DM_KBD gives the text directly)", adapter__ZN2nn5swkbd12ShowKeyboardEPNS0_6StringERKNS0_15ShowKeyboardArgE},
     {"_ZN2nn5swkbd14InlineKeyboard10InitializeEPv", NXRT_HLE_FORCED, 1, "hle_swkbd.c", "inline keyboard: no applet started (the host has no applet proxy), reports success", adapter__ZN2nn5swkbd14InlineKeyboard10InitializeEPv},
     {"_ZN2nn5swkbd14InlineKeyboard8FinalizeEv", NXRT_HLE_FORCED, 1, "hle_swkbd.c", "inline keyboard: no applet started, nothing to close", adapter__ZN2nn5swkbd14InlineKeyboard8FinalizeEv},
@@ -2746,6 +2972,14 @@ const nxrt_hle_entry nxrt_hle_table[] = {
     {"_ZN2nn2vi23SetDisplayVrrCapabilityEPNS0_7DisplayEb", NXRT_HLE_FORCED, 1, "hle_vi.c", "SWITCH2: variable refresh rate capability of the display; the host ignores it", adapter__ZN2nn2vi23SetDisplayVrrCapabilityEPNS0_7DisplayEb},
     {"_ZN2nn2vi52SetLayerNextHdrExtendedContentLuminanceRangeMetadataEPNS0_5LayerEtt", NXRT_HLE_FORCED, 1, "hle_vi.c", "SWITCH2: HDR extended luminance range metadata for the next frame; the host presents SDR", adapter__ZN2nn2vi52SetLayerNextHdrExtendedContentLuminanceRangeMetadataEPNS0_5LayerEtt},
     {"_ZN2nn2vi52SetLayerNextHdrStandardContentLuminanceRangeMetadataEPNS0_5LayerEtt", NXRT_HLE_FORCED, 1, "hle_vi.c", "SWITCH2: HDR standard luminance range metadata for the next frame; the host presents SDR", adapter__ZN2nn2vi52SetLayerNextHdrStandardContentLuminanceRangeMetadataEPNS0_5LayerEtt},
+    {"_ZN2nn2vi21QueryDisplayHdrStatusEPbPNS0_15HdrOutputFormatEPtPKNS0_7DisplayE", NXRT_HLE_FORCED, 1, "hle_vi.c", "display HDR status: SDR output (the host presents SDR)", adapter__ZN2nn2vi21QueryDisplayHdrStatusEPbPNS0_15HdrOutputFormatEPtPKNS0_7DisplayE},
+    {"_ZN2nn2vi25QueryDisplayHdrPaperWhiteEPtPKNS0_7DisplayE", NXRT_HLE_FORCED, 1, "hle_vi.c", "display HDR paper white: 203 nits (BT.2408); HDR is off", adapter__ZN2nn2vi25QueryDisplayHdrPaperWhiteEPtPKNS0_7DisplayE},
+    {"_ZN2nn2vi24QueryDisplayVrrSupportedEPbPKNS0_7DisplayE", NXRT_HLE_FORCED, 1, "hle_vi.c", "display VRR: not supported (fixed refresh rate)", adapter__ZN2nn2vi24QueryDisplayVrrSupportedEPbPKNS0_7DisplayE},
+    {"_ZN2nn2vi28SetLayerExtendedSwapIntervalEPNS0_5LayerEii", NXRT_HLE_FORCED, 1, "hle_vi.c", "layer extended swap interval: needs VRR, which the host has not; NVN's swap interval stays", adapter__ZN2nn2vi28SetLayerExtendedSwapIntervalEPNS0_5LayerEii},
+    {"_ZN2nn2vi30ClearLayerExtendedSwapIntervalEPNS0_5LayerE", NXRT_HLE_FORCED, 1, "hle_vi.c", "layer extended swap interval cleared", adapter__ZN2nn2vi30ClearLayerExtendedSwapIntervalEPNS0_5LayerE},
+    {"_ZN2nn2vi35SetLayerNextHdrContentGamutMetadataEPNS0_5LayerENS0_15HdrContentGamutE", NXRT_HLE_FORCED, 1, "hle_vi.c", "layer HDR metadata: SDR output, nothing to apply", adapter__ZN2nn2vi35SetLayerNextHdrContentGamutMetadataEPNS0_5LayerENS0_15HdrContentGamutE},
+    {"_ZN2nn2vi39SetLayerNextHdrAdjustableBezierMetadataEPNS0_5LayerEfff", NXRT_HLE_FORCED, 1, "hle_vi.c", "layer HDR metadata: SDR output, nothing to apply", adapter__ZN2nn2vi39SetLayerNextHdrAdjustableBezierMetadataEPNS0_5LayerEfff},
+    {"_ZN2nn2vi39SetLayerNextHdrToSdrToneMappingMetadataEPNS0_5LayerENS0_14HdrToneMappingE", NXRT_HLE_FORCED, 1, "hle_vi.c", "layer HDR metadata: SDR output, nothing to apply", adapter__ZN2nn2vi39SetLayerNextHdrToSdrToneMappingMetadataEPNS0_5LayerENS0_14HdrToneMappingE},
     {"getentropy", NXRT_HLE_SWHLE, 1, "hle_os.c", "C library passthrough", adapter_getentropy},
     {"memcpy", NXRT_HLE_SWHLE, 1, "hle_table.c", "C library passthrough", adapter_memcpy},
     {"memset", NXRT_HLE_SWHLE, 1, "hle_table.c", "C library passthrough", adapter_memset},
@@ -2964,6 +3198,14 @@ const nxrt_hle_entry nxrt_hle_table[] = {
     {"nvnCommandBufferSetScissor", NXRT_HLE_NVN, 1, "hle_nvn.c", "NVN entry point", adapter_nvnCommandBufferSetScissor},
     {"nvnCommandBufferSetDepthRange", NXRT_HLE_NVN, 1, "hle_nvn.c", "NVN entry point", adapter_nvnCommandBufferSetDepthRange},
     {"nvnCommandBufferBindProgram", NXRT_HLE_NVN, 1, "hle_nvn.c", "NVN entry point", adapter_nvnCommandBufferBindProgram},
+    {"nvnCommandBufferDrawMeshTasks", NXRT_HLE_NVN, 1, "hle_nvn.c", "NVN entry point", adapter_nvnCommandBufferDrawMeshTasks},
+    {"nvnCommandBufferDrawMeshTasksIndirect", NXRT_HLE_NVN, 1, "hle_nvn.c", "NVN entry point", adapter_nvnCommandBufferDrawMeshTasksIndirect},
+    {"nvnCommandBufferMultiDrawMeshTasksIndirect", NXRT_HLE_NVN, 1, "hle_nvn.c", "NVN entry point", adapter_nvnCommandBufferMultiDrawMeshTasksIndirect},
+    {"nvnCommandBufferMultiDrawMeshTasksIndirectCount", NXRT_HLE_NVN, 1, "hle_nvn.c", "NVN entry point", adapter_nvnCommandBufferMultiDrawMeshTasksIndirectCount},
+    {"nvnCommandBufferDrawMeshTasks3D", NXRT_HLE_NVN, 1, "hle_nvn.c", "NVN entry point", adapter_nvnCommandBufferDrawMeshTasks3D},
+    {"nvnCommandBufferDrawMeshTasks3DIndirect", NXRT_HLE_NVN, 1, "hle_nvn.c", "NVN entry point", adapter_nvnCommandBufferDrawMeshTasks3DIndirect},
+    {"nvnCommandBufferMultiDrawMeshTasks3DIndirect", NXRT_HLE_NVN, 1, "hle_nvn.c", "NVN entry point", adapter_nvnCommandBufferMultiDrawMeshTasks3DIndirect},
+    {"nvnCommandBufferMultiDrawMeshTasks3DIndirectCount", NXRT_HLE_NVN, 1, "hle_nvn.c", "NVN entry point", adapter_nvnCommandBufferMultiDrawMeshTasks3DIndirectCount},
     {"nvnCommandBufferBindBlendState", NXRT_HLE_NVN, 1, "hle_nvn.c", "NVN entry point", adapter_nvnCommandBufferBindBlendState},
     {"nvnCommandBufferBindColorState", NXRT_HLE_NVN, 1, "hle_nvn.c", "NVN entry point", adapter_nvnCommandBufferBindColorState},
     {"nvnCommandBufferBindChannelMaskState", NXRT_HLE_NVN, 1, "hle_nvn.c", "NVN entry point", adapter_nvnCommandBufferBindChannelMaskState},
@@ -3206,6 +3448,12 @@ const nxrt_hle_entry nxrt_hle_table[] = {
     {"nvnCommandBufferSetCommandMemoryCallbackEnabled", NXRT_HLE_NVN, 1, "hle_nvn.c", "NVN entry point", adapter_nvnCommandBufferSetCommandMemoryCallbackEnabled},
     {"nvnProgramSetShadersExt", NXRT_HLE_NVN, 1, "hle_nvn.c", "NVN entry point", adapter_nvnProgramSetShadersExt},
     {"nvnProgramSetSampleShading", NXRT_HLE_NVN, 1, "hle_nvn.c", "NVN entry point", adapter_nvnProgramSetSampleShading},
+    {"nvnProgramBuilderSetDefaults", NXRT_HLE_NVN, 1, "hle_nvn.c", "NVN entry point", adapter_nvnProgramBuilderSetDefaults},
+    {"nvnProgramBuilderSetDevice", NXRT_HLE_NVN, 1, "hle_nvn.c", "NVN entry point", adapter_nvnProgramBuilderSetDevice},
+    {"nvnProgramBuilderGetDevice", NXRT_HLE_NVN, 1, "hle_nvn.c", "NVN entry point", adapter_nvnProgramBuilderGetDevice},
+    {"nvnProgramBuilderSetShaders", NXRT_HLE_NVN, 1, "hle_nvn.c", "NVN entry point", adapter_nvnProgramBuilderSetShaders},
+    {"nvnProgramBuilderGetShaderCount", NXRT_HLE_NVN, 1, "hle_nvn.c", "NVN entry point", adapter_nvnProgramBuilderGetShaderCount},
+    {"nvnProgramInitializeFromBuilder", NXRT_HLE_NVN, 1, "hle_nvn.c", "NVN entry point", adapter_nvnProgramInitializeFromBuilder},
     {"nvnCommandBufferCallCommands", NXRT_HLE_NVN, 1, "hle_nvn.c", "NVN entry point", adapter_nvnCommandBufferCallCommands},
     {"nvnCommandBufferBindTexture", NXRT_HLE_NVN, 1, "hle_nvn.c", "NVN entry point", adapter_nvnCommandBufferBindTexture},
     {"nvnCommandBufferBindTextures", NXRT_HLE_NVN, 1, "hle_nvn.c", "NVN entry point", adapter_nvnCommandBufferBindTextures},
@@ -3228,6 +3476,7 @@ const nxrt_hle_entry nxrt_hle_table[] = {
     {"nvnCommandBufferSetDepthClamp", NXRT_HLE_NVN, 1, "hle_nvn.c", "NVN entry point", adapter_nvnCommandBufferSetDepthClamp},
     {"nvnCommandBufferSetViewportSwizzles", NXRT_HLE_NVN, 1, "hle_nvn.c", "NVN entry point", adapter_nvnCommandBufferSetViewportSwizzles},
     {"nvnCommandBufferSetAlphaRef", NXRT_HLE_NVN, 1, "hle_nvn.c", "NVN entry point", adapter_nvnCommandBufferSetAlphaRef},
+    {"nvnCommandBufferPushGraphicsConstants", NXRT_HLE_NVN, 1, "hle_nvn.c", "NVN entry point", adapter_nvnCommandBufferPushGraphicsConstants},
     {"nvnCommandBufferSetLineWidth", NXRT_HLE_NVN, 1, "hle_nvn.c", "NVN entry point", adapter_nvnCommandBufferSetLineWidth},
     {"nvnCommandBufferSetPointSize", NXRT_HLE_NVN, 1, "hle_nvn.c", "NVN entry point", adapter_nvnCommandBufferSetPointSize},
     {"nvnCommandBufferSetPrimitiveRestart", NXRT_HLE_NVN, 1, "hle_nvn.c", "NVN entry point", adapter_nvnCommandBufferSetPrimitiveRestart},
@@ -3265,10 +3514,6 @@ const nxrt_hle_entry nxrt_hle_table[] = {
     {"nvnCommandBufferCopyAccelerationStructure", NXRT_HLE_NVN, 0, "names.txt", "NVN entry point", adapter_nvnCommandBufferCopyAccelerationStructure},
     {"nvnCommandBufferDispatchRays", NXRT_HLE_NVN, 0, "names.txt", "NVN entry point", adapter_nvnCommandBufferDispatchRays},
     {"nvnCommandBufferDispatchRaysIndirect", NXRT_HLE_NVN, 0, "names.txt", "NVN entry point", adapter_nvnCommandBufferDispatchRaysIndirect},
-    {"nvnCommandBufferDrawMeshTasks", NXRT_HLE_NVN, 0, "names.txt", "NVN entry point", adapter_nvnCommandBufferDrawMeshTasks},
-    {"nvnCommandBufferDrawMeshTasks3D", NXRT_HLE_NVN, 0, "names.txt", "NVN entry point", adapter_nvnCommandBufferDrawMeshTasks3D},
-    {"nvnCommandBufferDrawMeshTasks3DIndirect", NXRT_HLE_NVN, 0, "names.txt", "NVN entry point", adapter_nvnCommandBufferDrawMeshTasks3DIndirect},
-    {"nvnCommandBufferDrawMeshTasksIndirect", NXRT_HLE_NVN, 0, "names.txt", "NVN entry point", adapter_nvnCommandBufferDrawMeshTasksIndirect},
     {"nvnCommandBufferEnableExclusiveScissor", NXRT_HLE_NVN, 0, "names.txt", "NVN entry point", adapter_nvnCommandBufferEnableExclusiveScissor},
     {"nvnCommandBufferEndDeviceCommands", NXRT_HLE_NVN, 0, "names.txt", "NVN entry point", adapter_nvnCommandBufferEndDeviceCommands},
     {"nvnCommandBufferEvaluateDlss", NXRT_HLE_NVN, 0, "names.txt", "NVN entry point", adapter_nvnCommandBufferEvaluateDlss},
@@ -3277,10 +3522,6 @@ const nxrt_hle_entry nxrt_hle_table[] = {
     {"nvnCommandBufferInsertCheckpointStatic", NXRT_HLE_NVN, 0, "names.txt", "NVN entry point", adapter_nvnCommandBufferInsertCheckpointStatic},
     {"nvnCommandBufferInsertDebugMarkerCompute", NXRT_HLE_NVN, 0, "names.txt", "NVN entry point", adapter_nvnCommandBufferInsertDebugMarkerCompute},
     {"nvnCommandBufferInsertDebugMarkerGraphics", NXRT_HLE_NVN, 0, "names.txt", "NVN entry point", adapter_nvnCommandBufferInsertDebugMarkerGraphics},
-    {"nvnCommandBufferMultiDrawMeshTasks3DIndirect", NXRT_HLE_NVN, 0, "names.txt", "NVN entry point", adapter_nvnCommandBufferMultiDrawMeshTasks3DIndirect},
-    {"nvnCommandBufferMultiDrawMeshTasks3DIndirectCount", NXRT_HLE_NVN, 0, "names.txt", "NVN entry point", adapter_nvnCommandBufferMultiDrawMeshTasks3DIndirectCount},
-    {"nvnCommandBufferMultiDrawMeshTasksIndirect", NXRT_HLE_NVN, 0, "names.txt", "NVN entry point", adapter_nvnCommandBufferMultiDrawMeshTasksIndirect},
-    {"nvnCommandBufferMultiDrawMeshTasksIndirectCount", NXRT_HLE_NVN, 0, "names.txt", "NVN entry point", adapter_nvnCommandBufferMultiDrawMeshTasksIndirectCount},
     {"nvnCommandBufferOverrideSubtileSize", NXRT_HLE_NVN, 0, "names.txt", "NVN entry point", adapter_nvnCommandBufferOverrideSubtileSize},
     {"nvnCommandBufferPopDebugGroupCompute", NXRT_HLE_NVN, 0, "names.txt", "NVN entry point", adapter_nvnCommandBufferPopDebugGroupCompute},
     {"nvnCommandBufferPopDebugGroupGraphics", NXRT_HLE_NVN, 0, "names.txt", "NVN entry point", adapter_nvnCommandBufferPopDebugGroupGraphics},
@@ -3288,7 +3529,6 @@ const nxrt_hle_entry nxrt_hle_table[] = {
     {"nvnCommandBufferPushComputeConstantsDeferred", NXRT_HLE_NVN, 0, "names.txt", "NVN entry point", adapter_nvnCommandBufferPushComputeConstantsDeferred},
     {"nvnCommandBufferPushDebugGroupCompute", NXRT_HLE_NVN, 0, "names.txt", "NVN entry point", adapter_nvnCommandBufferPushDebugGroupCompute},
     {"nvnCommandBufferPushDebugGroupGraphics", NXRT_HLE_NVN, 0, "names.txt", "NVN entry point", adapter_nvnCommandBufferPushDebugGroupGraphics},
-    {"nvnCommandBufferPushGraphicsConstants", NXRT_HLE_NVN, 0, "names.txt", "NVN entry point", adapter_nvnCommandBufferPushGraphicsConstants},
     {"nvnCommandBufferPushGraphicsConstantsDeferred", NXRT_HLE_NVN, 0, "names.txt", "NVN entry point", adapter_nvnCommandBufferPushGraphicsConstantsDeferred},
     {"nvnCommandBufferRelocateAccelerationStructure", NXRT_HLE_NVN, 0, "names.txt", "NVN entry point", adapter_nvnCommandBufferRelocateAccelerationStructure},
     {"nvnCommandBufferResetDeviceMessageBuffer", NXRT_HLE_NVN, 0, "names.txt", "NVN entry point", adapter_nvnCommandBufferResetDeviceMessageBuffer},
@@ -3426,32 +3666,26 @@ const nxrt_hle_entry nxrt_hle_table[] = {
     {"nvnMultisampleStateGetSampleLocations", NXRT_HLE_NVN, 0, "names.txt", "NVN entry point", adapter_nvnMultisampleStateGetSampleLocations},
     {"nvnMultisampleStateSetCoverageTruncationEnable", NXRT_HLE_NVN, 0, "names.txt", "NVN entry point", adapter_nvnMultisampleStateSetCoverageTruncationEnable},
     {"nvnProgramBuilderGetDebugDataHashes", NXRT_HLE_NVN, 0, "names.txt", "NVN entry point", adapter_nvnProgramBuilderGetDebugDataHashes},
-    {"nvnProgramBuilderGetDevice", NXRT_HLE_NVN, 0, "names.txt", "NVN entry point", adapter_nvnProgramBuilderGetDevice},
     {"nvnProgramBuilderGetMaxCallableRecursionDepth", NXRT_HLE_NVN, 0, "names.txt", "NVN entry point", adapter_nvnProgramBuilderGetMaxCallableRecursionDepth},
     {"nvnProgramBuilderGetMaxTraceRecursionDepth", NXRT_HLE_NVN, 0, "names.txt", "NVN entry point", adapter_nvnProgramBuilderGetMaxTraceRecursionDepth},
     {"nvnProgramBuilderGetProgramRayTracingFlags", NXRT_HLE_NVN, 0, "names.txt", "NVN entry point", adapter_nvnProgramBuilderGetProgramRayTracingFlags},
     {"nvnProgramBuilderGetRayTracingModuleCount", NXRT_HLE_NVN, 0, "names.txt", "NVN entry point", adapter_nvnProgramBuilderGetRayTracingModuleCount},
     {"nvnProgramBuilderGetRayTracingModuleData", NXRT_HLE_NVN, 0, "names.txt", "NVN entry point", adapter_nvnProgramBuilderGetRayTracingModuleData},
     {"nvnProgramBuilderGetSampleShading", NXRT_HLE_NVN, 0, "names.txt", "NVN entry point", adapter_nvnProgramBuilderGetSampleShading},
-    {"nvnProgramBuilderGetShaderCount", NXRT_HLE_NVN, 0, "names.txt", "NVN entry point", adapter_nvnProgramBuilderGetShaderCount},
     {"nvnProgramBuilderGetShaders", NXRT_HLE_NVN, 0, "names.txt", "NVN entry point", adapter_nvnProgramBuilderGetShaders},
     {"nvnProgramBuilderGetSubroutineLinkage", NXRT_HLE_NVN, 0, "names.txt", "NVN entry point", adapter_nvnProgramBuilderGetSubroutineLinkage},
     {"nvnProgramBuilderGetSubroutineLinkageCount", NXRT_HLE_NVN, 0, "names.txt", "NVN entry point", adapter_nvnProgramBuilderGetSubroutineLinkageCount},
     {"nvnProgramBuilderSetDebugDataHashes", NXRT_HLE_NVN, 0, "names.txt", "NVN entry point", adapter_nvnProgramBuilderSetDebugDataHashes},
-    {"nvnProgramBuilderSetDefaults", NXRT_HLE_NVN, 0, "names.txt", "NVN entry point", adapter_nvnProgramBuilderSetDefaults},
-    {"nvnProgramBuilderSetDevice", NXRT_HLE_NVN, 0, "names.txt", "NVN entry point", adapter_nvnProgramBuilderSetDevice},
     {"nvnProgramBuilderSetMaxCallableRecursionDepth", NXRT_HLE_NVN, 0, "names.txt", "NVN entry point", adapter_nvnProgramBuilderSetMaxCallableRecursionDepth},
     {"nvnProgramBuilderSetMaxTraceRecursionDepth", NXRT_HLE_NVN, 0, "names.txt", "NVN entry point", adapter_nvnProgramBuilderSetMaxTraceRecursionDepth},
     {"nvnProgramBuilderSetProgramRayTracingFlags", NXRT_HLE_NVN, 0, "names.txt", "NVN entry point", adapter_nvnProgramBuilderSetProgramRayTracingFlags},
     {"nvnProgramBuilderSetRayTracingModules", NXRT_HLE_NVN, 0, "names.txt", "NVN entry point", adapter_nvnProgramBuilderSetRayTracingModules},
     {"nvnProgramBuilderSetSampleShading", NXRT_HLE_NVN, 0, "names.txt", "NVN entry point", adapter_nvnProgramBuilderSetSampleShading},
-    {"nvnProgramBuilderSetShaders", NXRT_HLE_NVN, 0, "names.txt", "NVN entry point", adapter_nvnProgramBuilderSetShaders},
     {"nvnProgramBuilderSetSubroutineLinkage", NXRT_HLE_NVN, 0, "names.txt", "NVN entry point", adapter_nvnProgramBuilderSetSubroutineLinkage},
     {"nvnProgramGetDeviceComputeMemorySize", NXRT_HLE_NVN, 0, "names.txt", "NVN entry point", adapter_nvnProgramGetDeviceComputeMemorySize},
     {"nvnProgramGetScratchBytesPerWarp", NXRT_HLE_NVN, 0, "names.txt", "NVN entry point", adapter_nvnProgramGetScratchBytesPerWarp},
     {"nvnProgramGetShaderGroupHandle", NXRT_HLE_NVN, 0, "names.txt", "NVN entry point", adapter_nvnProgramGetShaderGroupHandle},
     {"nvnProgramGetSubtileSize", NXRT_HLE_NVN, 0, "names.txt", "NVN entry point", adapter_nvnProgramGetSubtileSize},
-    {"nvnProgramInitializeFromBuilder", NXRT_HLE_NVN, 0, "names.txt", "NVN entry point", adapter_nvnProgramInitializeFromBuilder},
     {"nvnQueueBuilderGetCommandFlushThreshold", NXRT_HLE_NVN, 0, "names.txt", "NVN entry point", adapter_nvnQueueBuilderGetCommandFlushThreshold},
     {"nvnQueueBuilderGetCommandMemorySize", NXRT_HLE_NVN, 0, "names.txt", "NVN entry point", adapter_nvnQueueBuilderGetCommandMemorySize},
     {"nvnQueueBuilderGetComputeMemorySize", NXRT_HLE_NVN, 0, "names.txt", "NVN entry point", adapter_nvnQueueBuilderGetComputeMemorySize},
@@ -3543,4 +3777,4 @@ const nxrt_hle_entry nxrt_hle_table[] = {
     {"nvnWindowBuilderGetPresentInterval", NXRT_HLE_NVN, 0, "nvn_protos.h", "NVN entry point", adapter_nvnWindowBuilderGetPresentInterval},
     {"nvnWindowGetNativeWindow", NXRT_HLE_NVN, 0, "nvn_protos.h", "NVN entry point", adapter_nvnWindowGetNativeWindow},
 };
-const unsigned nxrt_hle_count = 1769;
+const unsigned nxrt_hle_count = 1886;

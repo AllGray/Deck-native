@@ -52,3 +52,15 @@ NXRT_API void adapter__ZN2nv22DumpGraphicsMemoryInfoEv(NxwGuestCpu *cpu) {
     h_nv_Dump();
 }
 
+NXRT_API void adapter__ZN2nv9InitCheckEv(NxwGuestCpu *cpu) {
+    uint64_t *x = cpu->x; (void)x;
+    h_nv_InitCheck();
+}
+
+NXRT_API void adapter__ZN2nn2gs3sdk30CheckGraphicsSystemInitializedEPKcm(NxwGuestCpu *cpu) {
+    uint64_t *x = cpu->x; (void)x;
+    const char * a0 = (const char *)(uintptr_t)x[0];
+    uint64_t a1 = (uint64_t)x[1];
+    h_gs_CheckInit(a0, a1);
+}
+

@@ -1194,32 +1194,6 @@ NXRT_API void adapter__ZN2nn3hid12GetJcmsStateEPNS0_9JcmsStateERKNS0_10JcmsHandl
     x[0] = (uint64_t)r;
 }
 
-NXRT_API void adapter__ZN2nn3hid13VibrationNode6UpdateEv(NxwGuestCpu *cpu) {
-    uint64_t *x = cpu->x; (void)x;
-    void * a0 = (void *)(uintptr_t)x[0];
-    h_hid_VnUpdate(a0);
-}
-
-NXRT_API void adapter__ZN2nn3hid13VibrationNode15SetModulationToEPKS1_RKNS0_19VibrationModulationE(NxwGuestCpu *cpu) {
-    uint64_t *x = cpu->x; (void)x;
-    void * a0 = (void *)(uintptr_t)x[0];
-    const void * a1 = (const void *)(uintptr_t)x[1];
-    const void * a2 = (const void *)(uintptr_t)x[2];
-    h_hid_VnMod(a0, a1, a2);
-}
-
-NXRT_API void adapter__ZN2nn3hid23VibrationNodeConnectionC1Ev(NxwGuestCpu *cpu) {
-    uint64_t *x = cpu->x; (void)x;
-    void * a0 = (void *)(uintptr_t)x[0];
-    h_hid_VcCtor(a0);
-}
-
-NXRT_API void adapter__ZN2nn3hid23VibrationNodeConnectionD1Ev(NxwGuestCpu *cpu) {
-    uint64_t *x = cpu->x; (void)x;
-    void * a0 = (void *)(uintptr_t)x[0];
-    h_hid_VcDtor(a0);
-}
-
 NXRT_API void adapter__ZN2nn3hid23VibrationNodeConnection7ConnectEPNS0_13VibrationNodeES3_(NxwGuestCpu *cpu) {
     uint64_t *x = cpu->x; (void)x;
     void * a0 = (void *)(uintptr_t)x[0];
@@ -1229,24 +1203,6 @@ NXRT_API void adapter__ZN2nn3hid23VibrationNodeConnection7ConnectEPNS0_13Vibrati
     x[0] = (uint64_t)r;
 }
 
-NXRT_API void adapter__ZN2nn3hid23VibrationNodeConnection10DisconnectEv(NxwGuestCpu *cpu) {
-    uint64_t *x = cpu->x; (void)x;
-    void * a0 = (void *)(uintptr_t)x[0];
-    h_hid_VcDisc(a0);
-}
-
-NXRT_API void adapter__ZN2nn3hid15VibrationPlayerC1Ev(NxwGuestCpu *cpu) {
-    uint64_t *x = cpu->x; (void)x;
-    void * a0 = (void *)(uintptr_t)x[0];
-    h_hid_VpCtor(a0);
-}
-
-NXRT_API void adapter__ZN2nn3hid15VibrationPlayerD1Ev(NxwGuestCpu *cpu) {
-    uint64_t *x = cpu->x; (void)x;
-    void * a0 = (void *)(uintptr_t)x[0];
-    h_hid_VpDtor(a0);
-}
-
 NXRT_API void adapter__ZN2nn3hid15VibrationPlayer4LoadEPKvm(NxwGuestCpu *cpu) {
     uint64_t *x = cpu->x; (void)x;
     void * a0 = (void *)(uintptr_t)x[0];
@@ -1254,51 +1210,6 @@ NXRT_API void adapter__ZN2nn3hid15VibrationPlayer4LoadEPKvm(NxwGuestCpu *cpu) {
     uint64_t a2 = (uint64_t)x[2];
     Result r = h_hid_VpLoad(a0, a1, a2);
     x[0] = (uint64_t)r;
-}
-
-NXRT_API void adapter__ZN2nn3hid15VibrationPlayer4PlayEv(NxwGuestCpu *cpu) {
-    uint64_t *x = cpu->x; (void)x;
-    void * a0 = (void *)(uintptr_t)x[0];
-    h_hid_VpPlay(a0);
-}
-
-NXRT_API void adapter__ZN2nn3hid15VibrationPlayer4StopEv(NxwGuestCpu *cpu) {
-    uint64_t *x = cpu->x; (void)x;
-    void * a0 = (void *)(uintptr_t)x[0];
-    h_hid_VpStop(a0);
-}
-
-NXRT_API void adapter__ZN2nn3hid15VibrationPlayer7SetLoopEb(NxwGuestCpu *cpu) {
-    uint64_t *x = cpu->x; (void)x;
-    void * a0 = (void *)(uintptr_t)x[0];
-    unsigned a1 = (unsigned)x[1];
-    h_hid_VpLoop(a0, a1);
-}
-
-NXRT_API void adapter__ZN2nn3hid15VibrationPlayer15SetLoopIntervalEi(NxwGuestCpu *cpu) {
-    uint64_t *x = cpu->x; (void)x;
-    void * a0 = (void *)(uintptr_t)x[0];
-    int a1 = (int)x[1];
-    h_hid_VpLoopIv(a0, a1);
-}
-
-NXRT_API void adapter__ZN2nn3hid15VibrationPlayer18SetCurrentPositionEi(NxwGuestCpu *cpu) {
-    uint64_t *x = cpu->x; (void)x;
-    void * a0 = (void *)(uintptr_t)x[0];
-    int a1 = (int)x[1];
-    h_hid_VpPos(a0, a1);
-}
-
-NXRT_API void adapter__ZN2nn3hid15VibrationTargetC1Ev(NxwGuestCpu *cpu) {
-    uint64_t *x = cpu->x; (void)x;
-    void * a0 = (void *)(uintptr_t)x[0];
-    h_hid_VtCtor(a0);
-}
-
-NXRT_API void adapter__ZN2nn3hid15VibrationTargetD1Ev(NxwGuestCpu *cpu) {
-    uint64_t *x = cpu->x; (void)x;
-    void * a0 = (void *)(uintptr_t)x[0];
-    h_hid_VtDtor(a0);
 }
 
 NXRT_API void adapter__ZN2nn3hid15VibrationTarget24GetVibrationDeviceHandleEv(NxwGuestCpu *cpu) {
@@ -1313,19 +1224,6 @@ NXRT_API void adapter__ZN2nn3hid15VibrationTarget24SetVibrationDeviceHandleERKNS
     void * a0 = (void *)(uintptr_t)x[0];
     const void * a1 = (const void *)(uintptr_t)x[1];
     h_hid_VtSet(a0, a1);
-}
-
-NXRT_API void adapter__ZN2nn3hid18VibrationConverterC1Ei(NxwGuestCpu *cpu) {
-    uint64_t *x = cpu->x; (void)x;
-    void * a0 = (void *)(uintptr_t)x[0];
-    int a1 = (int)x[1];
-    h_hid_VcvCtor(a0, a1);
-}
-
-NXRT_API void adapter__ZN2nn3hid18VibrationConverterD1Ev(NxwGuestCpu *cpu) {
-    uint64_t *x = cpu->x; (void)x;
-    void * a0 = (void *)(uintptr_t)x[0];
-    h_hid_VcvDtor(a0);
 }
 
 NXRT_API void adapter__ZN2nn3hid18VibrationConverter12ProcessChunkEPNS0_14VibrationValueEPKsi(NxwGuestCpu *cpu) {

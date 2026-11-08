@@ -617,7 +617,7 @@ static int keys_hash(const NVNshaderData *sd, int mapped, uint8_t out[8]) {
     memcpy(&ncode, (const uint8_t *)sd->control + 0x704, 4);
     // SWITCH2 (private bring-up): GLSLC 0x00220015 control blocks are 0xe0 bytes (+4 = 0xc9, +8 = 0x11, +0x18 = the version); the code area is +0x40 (instructions and padding) plus +0x30 (the 0xe0 reflection trailer)
     int s2 = 0; { uint32_t a_, b_, v_; memcpy(&a_, (const uint8_t *)sd->control + 4, 4); memcpy(&b_, (const uint8_t *)sd->control + 8, 4); memcpy(&v_, (const uint8_t *)sd->control + 0x18, 4);
-      if (a_ == 0xc9 && (b_ == 0x11 || b_ == 0xb) /* SDK 21 leaves the version field (+0x18) at 0 (Mario Kart World), so only the NVN2 magic decides */) { uint32_t p_; memcpy(&p_, (const uint8_t *)sd->control + 0x44, 4); ncode = p_;   /* +0x44 only: the 0xe0 trailer never reaches GPU memory (the next object follows the padding) */ s2 = 1; } }
+      if (a_ == 0xc9 && (b_ == 0x11 || b_ == 0xb || b_ == 0x7) /* SDK 21 leaves the version field (+0x18) at 0 (Mario Kart World), so only the NVN2 magic decides */) { uint32_t p_; memcpy(&p_, (const uint8_t *)sd->control + 0x44, 4); ncode = p_;   /* +0x44 only: the 0xe0 trailer never reaches GPU memory (the next object follows the padding) */ s2 = 1; } }
     int code = sd->data && ncode && ncode < (1u << 24);
     if (mapped && !(code && gfx_addr(sd->data, ncode, &mb, &mo))) return 0;
     // Control +0x20 holds the section's own length: sections of at least 0x880 bytes (all of Mario's, Engage's, Dread's and 13 Sentinels') use the first 0x880; SDK 10's 3D World has 0x850-byte ones followed by other data, so only their own length is used (shader_split.py ctl_len)
@@ -651,7 +651,7 @@ NVN(nvnProgramSetShaders, NVNboolean, NVNprogram *p, int n, const NVNshaderData 
     k->ok = 0;
     for (int i = 0; i < n; i++) {
         // SWITCH2 (private bring-up): with a Switch 2 control block the code area is not final at SetShaders (4 of 6 keys hashed here differed from the code at the first draw); key it lazily in prog_key
-        int s2_ = 0; if (sd[i].control) { uint32_t a_, b_, v_; memcpy(&a_, (const uint8_t *)sd[i].control + 4, 4); memcpy(&b_, (const uint8_t *)sd[i].control + 8, 4); memcpy(&v_, (const uint8_t *)sd[i].control + 0x18, 4); s2_ = a_ == 0xc9 && (b_ == 0x11 || b_ == 0xb) /* SDK 21 leaves the version field (+0x18) at 0 (Mario Kart World), so only the NVN2 magic decides */; }
+        int s2_ = 0; if (sd[i].control) { uint32_t a_, b_, v_; memcpy(&a_, (const uint8_t *)sd[i].control + 4, 4); memcpy(&b_, (const uint8_t *)sd[i].control + 8, 4); memcpy(&v_, (const uint8_t *)sd[i].control + 0x18, 4); s2_ = a_ == 0xc9 && (b_ == 0x11 || b_ == 0xb || b_ == 0x7) /* SDK 21 leaves the version field (+0x18) at 0 (Mario Kart World), so only the NVN2 magic decides */; }
         if (!s2_ && keys_hash(&sd[i], 1, k->key[i])) k->ok |= (uint8_t)(1u << i);
         // Diagnostic: trace the loader of selected shader keys (comma-separated hex).
         if (trace && (k->ok & (1u << i))) {
@@ -1821,6 +1821,30 @@ NVN_NOPROTO(nvnProgramSetShadersExt, NVNboolean, NVNprogram *p, int n, const sha
 // what PIXLD.MYINDEX translates to) or interpolates at a sample, and once per pixel otherwise, so the mode is not applied; on the single-sample targets met so far the two agree
 NVN_NOPROTO(nvnProgramSetSampleShading, NVNboolean, NVNprogram *p, int mode) { (void)p; ONCE_LOG("nvnProgramSetSampleShading mode %d: Metal shades per sample only where the shader reads the sample index", mode); return 1; }
 
+// NVN2 ProgramBuilder (Mario Kart World's NDSR SMAA programs: SetDefaults, SetDevice, SetShaders, then ProgramInitializeFromBuilder). Unported, the program
+// stayed empty (serial 0, no stages) and every draw with it was skipped, among them SMAA's output into the HUD target: a black 3D scene under the HUD.
+// The builder keeps the game's shader array (set right before InitializeFromBuilder) and InitializeFromBuilder hands it to SetShaders.
+typedef struct { uint32_t magic; int n; const uint64_t *sd; NVNdevice *dev; } prog_builder_t;
+NVN_NOPROTO(nvnProgramBuilderSetDefaults, void, void *b) { prog_builder_t *o = b; memset(o, 0, sizeof *o); o->magic = MAGIC('P', 'R', 'B', 'L'); }
+NVN_NOPROTO(nvnProgramBuilderSetDevice, void, void *b, NVNdevice *d) { ((prog_builder_t *)b)->dev = d; }
+NVN_NOPROTO(nvnProgramBuilderGetDevice, NVNdevice *, const void *b) { return ((const prog_builder_t *)b)->dev; }
+NVN_NOPROTO(nvnProgramBuilderSetShaders, void, void *b, int n, const void *sd) { prog_builder_t *o = b; o->n = n; o->sd = sd; }
+NVN_NOPROTO(nvnProgramBuilderGetShaderCount, int, const void *b) { return ((const prog_builder_t *)b)->n; }
+NVN_NOPROTO(nvnProgramInitializeFromBuilder, NVNboolean, NVNprogram *p, const void *b) {
+    const prog_builder_t *o = b;
+    h_nvnProgramInitialize(p, o->dev);
+    if (o->n <= 0 || !o->sd) return 1;
+    if (o->n > 6) { LOG("[RED] ProgramInitializeFromBuilder stage count %d", o->n); return 0; }
+    // Entries of 16 bytes {data, control} or 24 {data, control, ext} as SetShadersExt: with 16, word 2 is the next stage's code address, near word 0 (one pool)
+    const uint64_t *w = o->sd; uint64_t d = w[2] > w[0] ? w[2] - w[0] : w[0] - w[2]; int stride = o->n > 1 && d < (1ull << 28) ? 2 : 3;
+    static _Atomic int logged; if (atomic_fetch_add(&logged, 1) < 2)
+        LOG("[nvn] ProgramInitializeFromBuilder %d stages, entries of %d bytes: %#llx %#llx %#llx %#llx %#llx %#llx", o->n, stride * 8, (unsigned long long)w[0], (unsigned long long)w[1],
+            (unsigned long long)w[2], (unsigned long long)w[3], (unsigned long long)w[4], (unsigned long long)w[5]);
+    NVNshaderData plain[6];
+    for (int i = 0; i < o->n; i++) { plain[i].data = w[i * stride]; plain[i].control = (const void *)(uintptr_t)w[i * stride + 1]; }
+    return h_nvnProgramSetShaders(p, o->n, plain);
+}
+
 // ---------- Commands used by newer-SDK games (SMBW): most map onto existing record formats, the replay layer is unchanged ----------
 // Singular / combined forms → plural / separate forms; state the replay layer does not have yet (conditional render, depth bounds, ...) is logged once and drawing continues (better to over-draw than to drop).
 #include "nvn_texio.h"
@@ -1975,6 +1999,14 @@ NVN(nvnCommandBufferSetViewportSwizzles, void, NVNcommandBuffer *c, int first, i
     for (int i = 0; i < n; i++) for (int k = 0; k < 4; k++) r->sw[i][k] = (uint8_t)((s[4 * i + k] ^ 2 * k) & 7);
 }
 NVN(nvnCommandBufferSetAlphaRef, void, NVNcommandBuffer *c, float r) { REC(c, OP_ALPHA_REF, p_alpha_ref)->ref = r; }
+// NVN2 push constants of graphics shaders (Mario Kart World's NDSR SMAA: {1/W, 1/H, W, H}), read by the shaders as constant bank 24. Taken as (offset, data, size) in bytes
+NVN_NOPROTO(nvnCommandBufferPushGraphicsConstants, void, NVNcommandBuffer *c, uint32_t block, uint32_t off, uint64_t n, const void *data) {
+    // (block, byte offset, size, data): Mario Kart World's SMAA pushes block 0, offset 0, 16 bytes {1/W, 1/H, W, H} (seen at run time)
+    if (block != 0) { static int once; if (!once++) LOG("[RED] PushGraphicsConstants block %u: only block 0 (constant bank 24) is bound", block); return; }
+    if (!data || off >= PUSH_GFX_MAX || n == 0) { LOG("[RED] PushGraphicsConstants off %u size %llu: not recorded", off, (unsigned long long)n); return; }
+    if (off + n > PUSH_GFX_MAX) n = PUSH_GFX_MAX - off;
+    p_push_gfx *r = REC(c, OP_PUSH_GFX, p_push_gfx); r->off = off; r->n = (uint32_t)n; memset(r->d, 0, sizeof r->d); memcpy(r->d, data, (size_t)n);
+}
 NVN(nvnCommandBufferSetLineWidth, void, NVNcommandBuffer *c, float w) { (void)c; if (w != 1.0f) ONCE_LOG("SetLineWidth %.2f: Metal has only 1-pixel lines", w); }
 NVN(nvnCommandBufferSetPointSize, void, NVNcommandBuffer *c, float s) { (void)c; (void)s; ONCE_LOG("SetPointSize: the point size comes from the shader"); }
 NVN(nvnCommandBufferSetPrimitiveRestart, void, NVNcommandBuffer *c, uint32_t en, int idx) { *REC(c, OP_PRIM_RESTART, p_prim_restart) = (p_prim_restart){(en & 0xff) != 0, (uint32_t)idx}; }

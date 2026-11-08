@@ -993,3 +993,42 @@ NXRT_API void adapter__ZN2nn3hid17ResetPalmaPlayLogERKNS0_21PalmaConnectionHandl
     x[0] = (uint64_t)r;
 }
 
+NXRT_API void adapter__ZN2nn3hid8StopJcmsERKNS0_10JcmsHandleE(NxwGuestCpu *cpu) {
+    uint64_t *x = cpu->x; (void)x;
+    const uint32_t * a0 = (const uint32_t *)(uintptr_t)x[0];
+    h_hid_JcmsStop(a0);
+}
+
+NXRT_API void adapter__ZN2nn3hid13GetJcmsStatesEPNS0_9JcmsStateEiRKNS0_10JcmsHandleE(NxwGuestCpu *cpu) {
+    uint64_t *x = cpu->x; (void)x;
+    void * a0 = (void *)(uintptr_t)x[0];
+    int a1 = (int)x[1];
+    const uint32_t * a2 = (const uint32_t *)(uintptr_t)x[2];
+    int r = h_hid_JcmsStates(a0, a1, a2);
+    x[0] = (uint64_t)(int64_t)r;
+}
+
+NXRT_API void adapter__ZN2nn3hid22SetNmousePointerRangesEii(NxwGuestCpu *cpu) {
+    uint64_t *x = cpu->x; (void)x;
+    int a0 = (int)x[0];
+    int a1 = (int)x[1];
+    h_hid_NmouseRanges(a0, a1);
+}
+
+NXRT_API void adapter__ZN2nn3hid19EnableNmousePointerENS0_12NmouseHandleEb(NxwGuestCpu *cpu) {
+    uint64_t *x = cpu->x; (void)x;
+    uint64_t a0 = (uint64_t)x[0];
+    int a1 = (int)x[1];
+    bool r = h_hid_NmouseEnable(a0, a1);
+    x[0] = (uint64_t)r;
+}
+
+NXRT_API void adapter__ZN2nn3hid24SetNmousePointerPositionENS0_12NmouseHandleEii(NxwGuestCpu *cpu) {
+    uint64_t *x = cpu->x; (void)x;
+    uint64_t a0 = (uint64_t)x[0];
+    int a1 = (int)x[1];
+    int a2 = (int)x[2];
+    bool r = h_hid_NmousePos(a0, a1, a2);
+    x[0] = (uint64_t)r;
+}
+

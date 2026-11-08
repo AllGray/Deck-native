@@ -152,3 +152,71 @@ NXRT_API void adapter__ZN2nn2vi52SetLayerNextHdrStandardContentLuminanceRangeMet
     x[0] = (uint64_t)r;
 }
 
+NXRT_API void adapter__ZN2nn2vi21QueryDisplayHdrStatusEPbPNS0_15HdrOutputFormatEPtPKNS0_7DisplayE(NxwGuestCpu *cpu) {
+    uint64_t *x = cpu->x; (void)x;
+    uint8_t * a0 = (uint8_t *)(uintptr_t)x[0];
+    uint32_t * a1 = (uint32_t *)(uintptr_t)x[1];
+    uint16_t * a2 = (uint16_t *)(uintptr_t)x[2];
+    const void * a3 = (const void *)(uintptr_t)x[3];
+    Result r = h_vi_HdrStatus(a0, a1, a2, a3);
+    x[0] = (uint64_t)r;
+}
+
+NXRT_API void adapter__ZN2nn2vi25QueryDisplayHdrPaperWhiteEPtPKNS0_7DisplayE(NxwGuestCpu *cpu) {
+    uint64_t *x = cpu->x; (void)x;
+    uint16_t * a0 = (uint16_t *)(uintptr_t)x[0];
+    const void * a1 = (const void *)(uintptr_t)x[1];
+    Result r = h_vi_PaperWhite(a0, a1);
+    x[0] = (uint64_t)r;
+}
+
+NXRT_API void adapter__ZN2nn2vi24QueryDisplayVrrSupportedEPbPKNS0_7DisplayE(NxwGuestCpu *cpu) {
+    uint64_t *x = cpu->x; (void)x;
+    uint8_t * a0 = (uint8_t *)(uintptr_t)x[0];
+    const void * a1 = (const void *)(uintptr_t)x[1];
+    Result r = h_vi_VrrSupported(a0, a1);
+    x[0] = (uint64_t)r;
+}
+
+NXRT_API void adapter__ZN2nn2vi28SetLayerExtendedSwapIntervalEPNS0_5LayerEii(NxwGuestCpu *cpu) {
+    uint64_t *x = cpu->x; (void)x;
+    void * a0 = (void *)(uintptr_t)x[0];
+    int a1 = (int)x[1];
+    int a2 = (int)x[2];
+    Result r = h_vi_ExtSwap(a0, a1, a2);
+    x[0] = (uint64_t)r;
+}
+
+NXRT_API void adapter__ZN2nn2vi30ClearLayerExtendedSwapIntervalEPNS0_5LayerE(NxwGuestCpu *cpu) {
+    uint64_t *x = cpu->x; (void)x;
+    void * a0 = (void *)(uintptr_t)x[0];
+    Result r = h_vi_ExtSwapClear(a0);
+    x[0] = (uint64_t)r;
+}
+
+NXRT_API void adapter__ZN2nn2vi35SetLayerNextHdrContentGamutMetadataEPNS0_5LayerENS0_15HdrContentGamutE(NxwGuestCpu *cpu) {
+    uint64_t *x = cpu->x; (void)x;
+    void * a0 = (void *)(uintptr_t)x[0];
+    int a1 = (int)x[1];
+    Result r = h_vi_HdrGamut(a0, a1);
+    x[0] = (uint64_t)r;
+}
+
+NXRT_API void adapter__ZN2nn2vi39SetLayerNextHdrAdjustableBezierMetadataEPNS0_5LayerEfff(NxwGuestCpu *cpu) {
+    uint64_t *x = cpu->x; (void)x;
+    void * a0 = (void *)(uintptr_t)x[0];
+    float a1 = (float)nxrt_ldf32(cpu->q[0]);
+    float a2 = (float)nxrt_ldf32(cpu->q[1]);
+    float a3 = (float)nxrt_ldf32(cpu->q[2]);
+    Result r = h_vi_HdrBezier(a0, a1, a2, a3);
+    x[0] = (uint64_t)r;
+}
+
+NXRT_API void adapter__ZN2nn2vi39SetLayerNextHdrToSdrToneMappingMetadataEPNS0_5LayerENS0_14HdrToneMappingE(NxwGuestCpu *cpu) {
+    uint64_t *x = cpu->x; (void)x;
+    void * a0 = (void *)(uintptr_t)x[0];
+    int a1 = (int)x[1];
+    Result r = h_vi_HdrToneMap(a0, a1);
+    x[0] = (uint64_t)r;
+}
+

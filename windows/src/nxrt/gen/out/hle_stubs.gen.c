@@ -259,50 +259,6 @@ NXRT_API void adapter__ZN2nn2ro20UnregisterModuleInfoEPNS0_16RegistrationInfoE(N
     (void)cpu;
 }
 
-NXRT_API void adapter__ZN2nn2sf4hipc31InitializeHipcServiceResolutionEv(NxwGuestCpu *cpu) {   /* nxnative: 0 */
-    cpu->x[0] = (uint64_t)(uint32_t)(0);
-}
-
-NXRT_API void adapter__ZN2nn2sf4hipc29FinalizeHipcServiceResolutionEv(NxwGuestCpu *cpu) {
-    static uint8_t seen; nxrt_stub_log("_ZN2nn2sf4hipc29FinalizeHipcServiceResolutionEv", "hle_sf.c", &seen, cpu);
-    cpu->x[0] = cpu->x[1] = 0; memset(cpu->q, 0, 4 * 16);
-}
-
-NXRT_API void adapter__ZN2nn2sf4hipc20ConnectToHipcServiceEPNS_3svc6HandleEPKc(NxwGuestCpu *cpu) {
-    static uint8_t seen; nxrt_stub_log("_ZN2nn2sf4hipc20ConnectToHipcServiceEPNS_3svc6HandleEPKc", "hle_sf.c", &seen, cpu);
-    cpu->x[0] = cpu->x[1] = 0; memset(cpu->q, 0, 4 * 16);
-}
-
-NXRT_API void adapter__ZN2nn2sf4hipc24CloseClientSessionHandleENS_3svc6HandleE(NxwGuestCpu *cpu) {
-    static uint8_t seen; nxrt_stub_log("_ZN2nn2sf4hipc24CloseClientSessionHandleENS_3svc6HandleE", "hle_sf.c", &seen, cpu);
-    cpu->x[0] = cpu->x[1] = 0; memset(cpu->q, 0, 4 * 16);
-}
-
-NXRT_API void adapter__ZN2nn2sf4hipc6client22QueryPointerBufferSizeEPtNS_3svc6HandleE(NxwGuestCpu *cpu) {
-    static uint8_t seen; nxrt_stub_log("_ZN2nn2sf4hipc6client22QueryPointerBufferSizeEPtNS_3svc6HandleE", "hle_sf.c", &seen, cpu);
-    cpu->x[0] = cpu->x[1] = 0; memset(cpu->q, 0, 4 * 16);
-}
-
-NXRT_API void adapter__ZN2nn2sf4hipc6client22ConvertSessionToDomainEPNS0_4cmif18CmifDomainObjectIdENS_3svc6HandleE(NxwGuestCpu *cpu) {
-    static uint8_t seen; nxrt_stub_log("_ZN2nn2sf4hipc6client22ConvertSessionToDomainEPNS0_4cmif18CmifDomainObjectIdENS_3svc6HandleE", "hle_sf.c", &seen, cpu);
-    cpu->x[0] = cpu->x[1] = 0; memset(cpu->q, 0, 4 * 16);
-}
-
-NXRT_API void adapter__ZN2nn2sf4hipc6client16DuplicateSessionEPNS_3svc6HandleES4_(NxwGuestCpu *cpu) {
-    static uint8_t seen; nxrt_stub_log("_ZN2nn2sf4hipc6client16DuplicateSessionEPNS_3svc6HandleES4_", "hle_sf.c", &seen, cpu);
-    cpu->x[0] = cpu->x[1] = 0; memset(cpu->q, 0, 4 * 16);
-}
-
-NXRT_API void adapter__ZN2nn2sf4hipc6client18DuplicateSessionExEPNS_3svc6HandleES4_j(NxwGuestCpu *cpu) {
-    static uint8_t seen; nxrt_stub_log("_ZN2nn2sf4hipc6client18DuplicateSessionExEPNS_3svc6HandleES4_j", "hle_sf.c", &seen, cpu);
-    cpu->x[0] = cpu->x[1] = 0; memset(cpu->q, 0, 4 * 16);
-}
-
-NXRT_API void adapter__ZN2nn2sf4hipc15SendSyncRequestENS_3svc6HandleEPvm(NxwGuestCpu *cpu) {
-    static uint8_t seen; nxrt_stub_log("_ZN2nn2sf4hipc15SendSyncRequestENS_3svc6HandleEPvm", "hle_sf.c", &seen, cpu);
-    cpu->x[0] = cpu->x[1] = 0; memset(cpu->q, 0, 4 * 16);
-}
-
 NXRT_API void adapter_nvnBufferBuilderGetDevice(NxwGuestCpu *cpu) {
     static uint8_t seen; nxrt_stub_log("nvnBufferBuilderGetDevice", "names.txt", &seen, cpu);
     cpu->x[0] = cpu->x[1] = 0; memset(cpu->q, 0, 4 * 16);
@@ -403,26 +359,6 @@ NXRT_API void adapter_nvnCommandBufferDispatchRaysIndirect(NxwGuestCpu *cpu) {
     cpu->x[0] = cpu->x[1] = 0; memset(cpu->q, 0, 4 * 16);
 }
 
-NXRT_API void adapter_nvnCommandBufferDrawMeshTasks(NxwGuestCpu *cpu) {
-    static uint8_t seen; nxrt_stub_log("nvnCommandBufferDrawMeshTasks", "names.txt", &seen, cpu);
-    cpu->x[0] = cpu->x[1] = 0; memset(cpu->q, 0, 4 * 16);
-}
-
-NXRT_API void adapter_nvnCommandBufferDrawMeshTasks3D(NxwGuestCpu *cpu) {
-    static uint8_t seen; nxrt_stub_log("nvnCommandBufferDrawMeshTasks3D", "names.txt", &seen, cpu);
-    cpu->x[0] = cpu->x[1] = 0; memset(cpu->q, 0, 4 * 16);
-}
-
-NXRT_API void adapter_nvnCommandBufferDrawMeshTasks3DIndirect(NxwGuestCpu *cpu) {
-    static uint8_t seen; nxrt_stub_log("nvnCommandBufferDrawMeshTasks3DIndirect", "names.txt", &seen, cpu);
-    cpu->x[0] = cpu->x[1] = 0; memset(cpu->q, 0, 4 * 16);
-}
-
-NXRT_API void adapter_nvnCommandBufferDrawMeshTasksIndirect(NxwGuestCpu *cpu) {
-    static uint8_t seen; nxrt_stub_log("nvnCommandBufferDrawMeshTasksIndirect", "names.txt", &seen, cpu);
-    cpu->x[0] = cpu->x[1] = 0; memset(cpu->q, 0, 4 * 16);
-}
-
 NXRT_API void adapter_nvnCommandBufferEnableExclusiveScissor(NxwGuestCpu *cpu) {
     static uint8_t seen; nxrt_stub_log("nvnCommandBufferEnableExclusiveScissor", "names.txt", &seen, cpu);
     cpu->x[0] = cpu->x[1] = 0; memset(cpu->q, 0, 4 * 16);
@@ -463,26 +399,6 @@ NXRT_API void adapter_nvnCommandBufferInsertDebugMarkerGraphics(NxwGuestCpu *cpu
     cpu->x[0] = cpu->x[1] = 0; memset(cpu->q, 0, 4 * 16);
 }
 
-NXRT_API void adapter_nvnCommandBufferMultiDrawMeshTasks3DIndirect(NxwGuestCpu *cpu) {
-    static uint8_t seen; nxrt_stub_log("nvnCommandBufferMultiDrawMeshTasks3DIndirect", "names.txt", &seen, cpu);
-    cpu->x[0] = cpu->x[1] = 0; memset(cpu->q, 0, 4 * 16);
-}
-
-NXRT_API void adapter_nvnCommandBufferMultiDrawMeshTasks3DIndirectCount(NxwGuestCpu *cpu) {
-    static uint8_t seen; nxrt_stub_log("nvnCommandBufferMultiDrawMeshTasks3DIndirectCount", "names.txt", &seen, cpu);
-    cpu->x[0] = cpu->x[1] = 0; memset(cpu->q, 0, 4 * 16);
-}
-
-NXRT_API void adapter_nvnCommandBufferMultiDrawMeshTasksIndirect(NxwGuestCpu *cpu) {
-    static uint8_t seen; nxrt_stub_log("nvnCommandBufferMultiDrawMeshTasksIndirect", "names.txt", &seen, cpu);
-    cpu->x[0] = cpu->x[1] = 0; memset(cpu->q, 0, 4 * 16);
-}
-
-NXRT_API void adapter_nvnCommandBufferMultiDrawMeshTasksIndirectCount(NxwGuestCpu *cpu) {
-    static uint8_t seen; nxrt_stub_log("nvnCommandBufferMultiDrawMeshTasksIndirectCount", "names.txt", &seen, cpu);
-    cpu->x[0] = cpu->x[1] = 0; memset(cpu->q, 0, 4 * 16);
-}
-
 NXRT_API void adapter_nvnCommandBufferOverrideSubtileSize(NxwGuestCpu *cpu) {
     static uint8_t seen; nxrt_stub_log("nvnCommandBufferOverrideSubtileSize", "names.txt", &seen, cpu);
     cpu->x[0] = cpu->x[1] = 0; memset(cpu->q, 0, 4 * 16);
@@ -515,11 +431,6 @@ NXRT_API void adapter_nvnCommandBufferPushDebugGroupCompute(NxwGuestCpu *cpu) {
 
 NXRT_API void adapter_nvnCommandBufferPushDebugGroupGraphics(NxwGuestCpu *cpu) {
     static uint8_t seen; nxrt_stub_log("nvnCommandBufferPushDebugGroupGraphics", "names.txt", &seen, cpu);
-    cpu->x[0] = cpu->x[1] = 0; memset(cpu->q, 0, 4 * 16);
-}
-
-NXRT_API void adapter_nvnCommandBufferPushGraphicsConstants(NxwGuestCpu *cpu) {
-    static uint8_t seen; nxrt_stub_log("nvnCommandBufferPushGraphicsConstants", "names.txt", &seen, cpu);
     cpu->x[0] = cpu->x[1] = 0; memset(cpu->q, 0, 4 * 16);
 }
 
@@ -1208,11 +1119,6 @@ NXRT_API void adapter_nvnProgramBuilderGetDebugDataHashes(NxwGuestCpu *cpu) {
     cpu->x[0] = cpu->x[1] = 0; memset(cpu->q, 0, 4 * 16);
 }
 
-NXRT_API void adapter_nvnProgramBuilderGetDevice(NxwGuestCpu *cpu) {
-    static uint8_t seen; nxrt_stub_log("nvnProgramBuilderGetDevice", "names.txt", &seen, cpu);
-    cpu->x[0] = cpu->x[1] = 0; memset(cpu->q, 0, 4 * 16);
-}
-
 NXRT_API void adapter_nvnProgramBuilderGetMaxCallableRecursionDepth(NxwGuestCpu *cpu) {
     static uint8_t seen; nxrt_stub_log("nvnProgramBuilderGetMaxCallableRecursionDepth", "names.txt", &seen, cpu);
     cpu->x[0] = cpu->x[1] = 0; memset(cpu->q, 0, 4 * 16);
@@ -1243,11 +1149,6 @@ NXRT_API void adapter_nvnProgramBuilderGetSampleShading(NxwGuestCpu *cpu) {
     cpu->x[0] = cpu->x[1] = 0; memset(cpu->q, 0, 4 * 16);
 }
 
-NXRT_API void adapter_nvnProgramBuilderGetShaderCount(NxwGuestCpu *cpu) {
-    static uint8_t seen; nxrt_stub_log("nvnProgramBuilderGetShaderCount", "names.txt", &seen, cpu);
-    cpu->x[0] = cpu->x[1] = 0; memset(cpu->q, 0, 4 * 16);
-}
-
 NXRT_API void adapter_nvnProgramBuilderGetShaders(NxwGuestCpu *cpu) {
     static uint8_t seen; nxrt_stub_log("nvnProgramBuilderGetShaders", "names.txt", &seen, cpu);
     cpu->x[0] = cpu->x[1] = 0; memset(cpu->q, 0, 4 * 16);
@@ -1265,16 +1166,6 @@ NXRT_API void adapter_nvnProgramBuilderGetSubroutineLinkageCount(NxwGuestCpu *cp
 
 NXRT_API void adapter_nvnProgramBuilderSetDebugDataHashes(NxwGuestCpu *cpu) {
     static uint8_t seen; nxrt_stub_log("nvnProgramBuilderSetDebugDataHashes", "names.txt", &seen, cpu);
-    cpu->x[0] = cpu->x[1] = 0; memset(cpu->q, 0, 4 * 16);
-}
-
-NXRT_API void adapter_nvnProgramBuilderSetDefaults(NxwGuestCpu *cpu) {
-    static uint8_t seen; nxrt_stub_log("nvnProgramBuilderSetDefaults", "names.txt", &seen, cpu);
-    cpu->x[0] = cpu->x[1] = 0; memset(cpu->q, 0, 4 * 16);
-}
-
-NXRT_API void adapter_nvnProgramBuilderSetDevice(NxwGuestCpu *cpu) {
-    static uint8_t seen; nxrt_stub_log("nvnProgramBuilderSetDevice", "names.txt", &seen, cpu);
     cpu->x[0] = cpu->x[1] = 0; memset(cpu->q, 0, 4 * 16);
 }
 
@@ -1303,11 +1194,6 @@ NXRT_API void adapter_nvnProgramBuilderSetSampleShading(NxwGuestCpu *cpu) {
     cpu->x[0] = cpu->x[1] = 0; memset(cpu->q, 0, 4 * 16);
 }
 
-NXRT_API void adapter_nvnProgramBuilderSetShaders(NxwGuestCpu *cpu) {
-    static uint8_t seen; nxrt_stub_log("nvnProgramBuilderSetShaders", "names.txt", &seen, cpu);
-    cpu->x[0] = cpu->x[1] = 0; memset(cpu->q, 0, 4 * 16);
-}
-
 NXRT_API void adapter_nvnProgramBuilderSetSubroutineLinkage(NxwGuestCpu *cpu) {
     static uint8_t seen; nxrt_stub_log("nvnProgramBuilderSetSubroutineLinkage", "names.txt", &seen, cpu);
     cpu->x[0] = cpu->x[1] = 0; memset(cpu->q, 0, 4 * 16);
@@ -1330,11 +1216,6 @@ NXRT_API void adapter_nvnProgramGetShaderGroupHandle(NxwGuestCpu *cpu) {
 
 NXRT_API void adapter_nvnProgramGetSubtileSize(NxwGuestCpu *cpu) {
     static uint8_t seen; nxrt_stub_log("nvnProgramGetSubtileSize", "names.txt", &seen, cpu);
-    cpu->x[0] = cpu->x[1] = 0; memset(cpu->q, 0, 4 * 16);
-}
-
-NXRT_API void adapter_nvnProgramInitializeFromBuilder(NxwGuestCpu *cpu) {
-    static uint8_t seen; nxrt_stub_log("nvnProgramInitializeFromBuilder", "names.txt", &seen, cpu);
     cpu->x[0] = cpu->x[1] = 0; memset(cpu->q, 0, 4 * 16);
 }
 

@@ -154,3 +154,15 @@ NXRT_API void adapter__ZN2nn5audio21GetActiveChannelCountEv(NxwGuestCpu *cpu) {
     x[0] = (uint64_t)(int64_t)r;
 }
 
+NXRT_API void adapter__ZN2nn5audio40SetDeviceOutputVolumeAutoTuneModeEnabledEb(NxwGuestCpu *cpu) {
+    uint64_t *x = cpu->x; (void)x;
+    unsigned a0 = (unsigned)x[0];
+    h_ad_SetAutoTune(a0);
+}
+
+NXRT_API void adapter__ZN2nn5audio39IsDeviceOutputVolumeAutoTuneModeEnabledEv(NxwGuestCpu *cpu) {
+    uint64_t *x = cpu->x; (void)x;
+    unsigned r = h_ad_AutoTune();
+    x[0] = (uint64_t)r;
+}
+

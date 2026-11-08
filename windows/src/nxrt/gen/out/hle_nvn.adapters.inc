@@ -18,6 +18,62 @@ NXRT_API void adapter_nvnBootstrapLoader(NxwGuestCpu *cpu) {
     x[0] = (uint64_t)(uintptr_t)r;
 }
 
+NXRT_API void adapter__Z32nvnNativeImageBuilderSetDefaultsP21NVNnativeImageBuilder(NxwGuestCpu *cpu) {
+    uint64_t *x = cpu->x; (void)x;
+    native_builder_t * a0 = (native_builder_t *)(uintptr_t)x[0];
+    h_ni_defaults(a0);
+}
+
+NXRT_API void adapter__Z30nvnNativeImageBuilderSetDeviceP21NVNnativeImageBuilderP9NVNdevice(NxwGuestCpu *cpu) {
+    uint64_t *x = cpu->x; (void)x;
+    native_builder_t * a0 = (native_builder_t *)(uintptr_t)x[0];
+    NVNdevice * a1 = (NVNdevice *)(uintptr_t)x[1];
+    h_ni_device(a0, a1);
+}
+
+NXRT_API void adapter__Z41nvnNativeImageBuilderSetNativeImageHandleP21NVNnativeImageBuilderN2nn2gs17NativeImageHandleE(NxwGuestCpu *cpu) {
+    uint64_t *x = cpu->x; (void)x;
+    native_builder_t * a0 = (native_builder_t *)(uintptr_t)x[0];
+    uint32_t a1 = (uint32_t)x[1];
+    h_ni_handle(a0, a1);
+}
+
+NXRT_API void adapter__Z40nvnNativeImageBuilderSetMemoryPermissionP21NVNnativeImageBuilder30NVNnativeImageMemoryPermission(NxwGuestCpu *cpu) {
+    uint64_t *x = cpu->x; (void)x;
+    native_builder_t * a0 = (native_builder_t *)(uintptr_t)x[0];
+    int a1 = (int)x[1];
+    h_ni_perm(a0, a1);
+}
+
+NXRT_API void adapter__Z30nvnNativeImageBuilderSetFormatP21NVNnativeImageBuilder9NVNformat(NxwGuestCpu *cpu) {
+    uint64_t *x = cpu->x; (void)x;
+    native_builder_t * a0 = (native_builder_t *)(uintptr_t)x[0];
+    NVNformat a1 = (NVNformat)x[1];
+    h_ni_format(a0, a1);
+}
+
+NXRT_API void adapter__Z24nvnNativeImageInitializeP14NVNnativeImagePK21NVNnativeImageBuilder(NxwGuestCpu *cpu) {
+    uint64_t *x = cpu->x; (void)x;
+    native_image_t * a0 = (native_image_t *)(uintptr_t)x[0];
+    const native_builder_t * a1 = (const native_builder_t *)(uintptr_t)x[1];
+    NVNboolean r = h_ni_init(a0, a1);
+    x[0] = (uint64_t)r;
+}
+
+NXRT_API void adapter__Z22nvnNativeImageFinalizeP14NVNnativeImage(NxwGuestCpu *cpu) {
+    uint64_t *x = cpu->x; (void)x;
+    native_image_t * a0 = (native_image_t *)(uintptr_t)x[0];
+    h_ni_fini(a0);
+}
+
+NXRT_API void adapter__Z35nvnTextureInitializeFromNativeImageP10NVNtextureP14NVNnativeImage(NxwGuestCpu *cpu) {
+    uint64_t *x = cpu->x; (void)x;
+    NVNtexture * a0 = (NVNtexture *)(uintptr_t)x[0];
+    native_image_t * a1 = (native_image_t *)(uintptr_t)x[1];
+    NVNboolean r = h_ni_texture(a0, a1);
+    x[0] = (uint64_t)r;
+}
+
 NXRT_API void adapter_nvnDeviceBuilderSetDefaults(NxwGuestCpu *cpu) {
     uint64_t *x = cpu->x; (void)x;
     NVNdeviceBuilder * a0 = (NVNdeviceBuilder *)(uintptr_t)x[0];
@@ -1194,6 +1250,75 @@ NXRT_API void adapter_nvnCommandBufferBindProgram(NxwGuestCpu *cpu) {
     const NVNprogram * a1 = (const NVNprogram *)(uintptr_t)x[1];
     int a2 = (int)x[2];
     h_nvnCommandBufferBindProgram(a0, a1, a2);
+}
+
+NXRT_API void adapter_nvnCommandBufferDrawMeshTasks(NxwGuestCpu *cpu) {
+    uint64_t *x = cpu->x; (void)x;
+    NVNcommandBuffer * a0 = (NVNcommandBuffer *)(uintptr_t)x[0];
+    int a1 = (int)x[1];
+    int a2 = (int)x[2];
+    h_nvnCommandBufferDrawMeshTasks(a0, a1, a2);
+}
+
+NXRT_API void adapter_nvnCommandBufferDrawMeshTasksIndirect(NxwGuestCpu *cpu) {
+    uint64_t *x = cpu->x; (void)x;
+    NVNcommandBuffer * a0 = (NVNcommandBuffer *)(uintptr_t)x[0];
+    uint64_t a1 = (uint64_t)x[1];
+    h_nvnCommandBufferDrawMeshTasksIndirect(a0, a1);
+}
+
+NXRT_API void adapter_nvnCommandBufferMultiDrawMeshTasksIndirect(NxwGuestCpu *cpu) {
+    uint64_t *x = cpu->x; (void)x;
+    NVNcommandBuffer * a0 = (NVNcommandBuffer *)(uintptr_t)x[0];
+    uint64_t a1 = (uint64_t)x[1];
+    int a2 = (int)x[2];
+    int a3 = (int)x[3];
+    h_nvnCommandBufferMultiDrawMeshTasksIndirect(a0, a1, a2, a3);
+}
+
+NXRT_API void adapter_nvnCommandBufferMultiDrawMeshTasksIndirectCount(NxwGuestCpu *cpu) {
+    uint64_t *x = cpu->x; (void)x;
+    NVNcommandBuffer * a0 = (NVNcommandBuffer *)(uintptr_t)x[0];
+    uint64_t a1 = (uint64_t)x[1];
+    uint64_t a2 = (uint64_t)x[2];
+    int a3 = (int)x[3];
+    int a4 = (int)x[4];
+    h_nvnCommandBufferMultiDrawMeshTasksIndirectCount(a0, a1, a2, a3, a4);
+}
+
+NXRT_API void adapter_nvnCommandBufferDrawMeshTasks3D(NxwGuestCpu *cpu) {
+    uint64_t *x = cpu->x; (void)x;
+    NVNcommandBuffer * a0 = (NVNcommandBuffer *)(uintptr_t)x[0];
+    int a1 = (int)x[1];
+    int a2 = (int)x[2];
+    int a3 = (int)x[3];
+    h_nvnCommandBufferDrawMeshTasks3D(a0, a1, a2, a3);
+}
+
+NXRT_API void adapter_nvnCommandBufferDrawMeshTasks3DIndirect(NxwGuestCpu *cpu) {
+    uint64_t *x = cpu->x; (void)x;
+    NVNcommandBuffer * a0 = (NVNcommandBuffer *)(uintptr_t)x[0];
+    uint64_t a1 = (uint64_t)x[1];
+    h_nvnCommandBufferDrawMeshTasks3DIndirect(a0, a1);
+}
+
+NXRT_API void adapter_nvnCommandBufferMultiDrawMeshTasks3DIndirect(NxwGuestCpu *cpu) {
+    uint64_t *x = cpu->x; (void)x;
+    NVNcommandBuffer * a0 = (NVNcommandBuffer *)(uintptr_t)x[0];
+    uint64_t a1 = (uint64_t)x[1];
+    int a2 = (int)x[2];
+    int a3 = (int)x[3];
+    h_nvnCommandBufferMultiDrawMeshTasks3DIndirect(a0, a1, a2, a3);
+}
+
+NXRT_API void adapter_nvnCommandBufferMultiDrawMeshTasks3DIndirectCount(NxwGuestCpu *cpu) {
+    uint64_t *x = cpu->x; (void)x;
+    NVNcommandBuffer * a0 = (NVNcommandBuffer *)(uintptr_t)x[0];
+    uint64_t a1 = (uint64_t)x[1];
+    uint64_t a2 = (uint64_t)x[2];
+    int a3 = (int)x[3];
+    int a4 = (int)x[4];
+    h_nvnCommandBufferMultiDrawMeshTasks3DIndirectCount(a0, a1, a2, a3, a4);
 }
 
 NXRT_API void adapter_nvnCommandBufferBindBlendState(NxwGuestCpu *cpu) {
@@ -3049,6 +3174,49 @@ NXRT_API void adapter_nvnProgramSetSampleShading(NxwGuestCpu *cpu) {
     x[0] = (uint64_t)r;
 }
 
+NXRT_API void adapter_nvnProgramBuilderSetDefaults(NxwGuestCpu *cpu) {
+    uint64_t *x = cpu->x; (void)x;
+    void * a0 = (void *)(uintptr_t)x[0];
+    h_nvnProgramBuilderSetDefaults(a0);
+}
+
+NXRT_API void adapter_nvnProgramBuilderSetDevice(NxwGuestCpu *cpu) {
+    uint64_t *x = cpu->x; (void)x;
+    void * a0 = (void *)(uintptr_t)x[0];
+    NVNdevice * a1 = (NVNdevice *)(uintptr_t)x[1];
+    h_nvnProgramBuilderSetDevice(a0, a1);
+}
+
+NXRT_API void adapter_nvnProgramBuilderGetDevice(NxwGuestCpu *cpu) {
+    uint64_t *x = cpu->x; (void)x;
+    const void * a0 = (const void *)(uintptr_t)x[0];
+    NVNdevice * r = h_nvnProgramBuilderGetDevice(a0);
+    x[0] = (uint64_t)(uintptr_t)r;
+}
+
+NXRT_API void adapter_nvnProgramBuilderSetShaders(NxwGuestCpu *cpu) {
+    uint64_t *x = cpu->x; (void)x;
+    void * a0 = (void *)(uintptr_t)x[0];
+    int a1 = (int)x[1];
+    const void * a2 = (const void *)(uintptr_t)x[2];
+    h_nvnProgramBuilderSetShaders(a0, a1, a2);
+}
+
+NXRT_API void adapter_nvnProgramBuilderGetShaderCount(NxwGuestCpu *cpu) {
+    uint64_t *x = cpu->x; (void)x;
+    const void * a0 = (const void *)(uintptr_t)x[0];
+    int r = h_nvnProgramBuilderGetShaderCount(a0);
+    x[0] = (uint64_t)(int64_t)r;
+}
+
+NXRT_API void adapter_nvnProgramInitializeFromBuilder(NxwGuestCpu *cpu) {
+    uint64_t *x = cpu->x; (void)x;
+    NVNprogram * a0 = (NVNprogram *)(uintptr_t)x[0];
+    const void * a1 = (const void *)(uintptr_t)x[1];
+    NVNboolean r = h_nvnProgramInitializeFromBuilder(a0, a1);
+    x[0] = (uint64_t)r;
+}
+
 NXRT_API void adapter_nvnCommandBufferCallCommands(NxwGuestCpu *cpu) {
     uint64_t *x = cpu->x; (void)x;
     NVNcommandBuffer * a0 = (NVNcommandBuffer *)(uintptr_t)x[0];
@@ -3251,6 +3419,16 @@ NXRT_API void adapter_nvnCommandBufferSetAlphaRef(NxwGuestCpu *cpu) {
     NVNcommandBuffer * a0 = (NVNcommandBuffer *)(uintptr_t)x[0];
     float a1 = (float)nxrt_ldf32(cpu->q[0]);
     h_nvnCommandBufferSetAlphaRef(a0, a1);
+}
+
+NXRT_API void adapter_nvnCommandBufferPushGraphicsConstants(NxwGuestCpu *cpu) {
+    uint64_t *x = cpu->x; (void)x;
+    NVNcommandBuffer * a0 = (NVNcommandBuffer *)(uintptr_t)x[0];
+    uint32_t a1 = (uint32_t)x[1];
+    uint32_t a2 = (uint32_t)x[2];
+    uint64_t a3 = (uint64_t)x[3];
+    const void * a4 = (const void *)(uintptr_t)x[4];
+    h_nvnCommandBufferPushGraphicsConstants(a0, a1, a2, a3, a4);
 }
 
 NXRT_API void adapter_nvnCommandBufferSetLineWidth(NxwGuestCpu *cpu) {
