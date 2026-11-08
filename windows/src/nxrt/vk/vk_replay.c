@@ -1089,7 +1089,10 @@ static void draw(const p_draw *dw, const p_draw_idx *di) {
                 if (ok) PD("    storage pool %p +%#llx mem %p flags %#x layout %d size %#llx image %p", (const void *)r.t.pool, (unsigned long long)r.t.off, (const void *)r.t.mem, r.t.d.flags, r.t.has_layout, (unsigned long long)r.t.L.size, (void *)im); }
             else if (bb->kind == VKB_CBUF || bb->kind == VKB_SBUF) { const p_bind_buf *u = bb->kind == VKB_CBUF ? &S->ubo[s][bb->reg] : &S->ssbo[s][bb->reg];
                 float f[8] = {0}; if (u->addr && u->size >= 32) memcpy(f, (const void *)(uintptr_t)u->addr, 32); else if (u->addr && u->size >= 16) memcpy(f, (const void *)(uintptr_t)u->addr, 16);
-                PD("  st%d b%u %s slot%d addr=%#llx size=%llu first %g,%g,%g,%g %g,%g,%g,%g", s, bb->binding, bb->kind == VKB_CBUF ? "cbuf" : "sbuf", bb->reg, (unsigned long long)u->addr, (unsigned long long)u->size, f[0], f[1], f[2], f[3], f[4], f[5], f[6], f[7]); }
+                PD("  st%d b%u %s slot%d addr=%#llx size=%llu first %g,%g,%g,%g %g,%g,%g,%g", s, bb->binding, bb->kind == VKB_CBUF ? "cbuf" : "sbuf", bb->reg, (unsigned long long)u->addr, (unsigned long long)u->size, f[0], f[1], f[2], f[3], f[4], f[5], f[6], f[7]);
+                { const char *ix = getenv("NXRT_VK_PD_CBUF");   // NXRT_VK_PD_CBUF=48,70: those vec4s of every constant buffer in the pass dump
+                  for (const char *q = ix; q && *q && bb->kind == VKB_CBUF && u->addr; ) { char *e; long k = strtol(q, &e, 0); if (e == q) break; q = *e == ',' ? e + 1 : e;
+                      if (k >= 0 && (uint64_t)(k + 1) * 16 <= u->size) { float g[4]; memcpy(g, (const void *)(uintptr_t)(u->addr + (uint64_t)k * 16), 16); PD("    [%ld] %g %g %g %g", k, g[0], g[1], g[2], g[3]); } } } }
         }
         if (di && di->count > 0 && di->count <= 12) { char t[200]; int o = 0; int isz = di->itype == 0 ? 1 : di->itype == 1 ? 2 : 4;
             for (int k = 0; k < di->count; k++) { uint32_t x = 0; memcpy(&x, (const uint8_t *)(uintptr_t)di->ibuf + (size_t)k * isz, (size_t)isz); o += snprintf(t + o, sizeof t - o, " %u", x); }

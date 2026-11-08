@@ -132,6 +132,15 @@ static vkt_image *image_create(const tex_t *t, int cls) {
     { static int tmax = -1; if (tmax < 0) { const char *e = getenv("NXRT_VK_TEX_MAX"); tmax = e && *e ? atoi(e) : 1024; }
       if (tmax > 0 && cls == VKT_STORAGE && (fi->flags & VKF_COMPRESSED) && type == VK_IMAGE_TYPE_2D && !(t->d.flags & NVN_TEXTURE_FLAGS_SPARSE))
           while (im->levels - im->drop > 1 && (mip(im->w, im->drop) > (uint32_t)tmax || mip(im->h, im->drop) > (uint32_t)tmax)) im->drop++;
+      if (sparse_sampled(t) && type == VK_IMAGE_TYPE_2D) {
+          const char *e = getenv("NXRT_VK_SPARSE_DENSE_MB"); uint64_t cap = (uint64_t)(e ? atoi(e) : 128) << 20;
+          for (;;) {
+              uint64_t sum = 0;
+              for (uint32_t l = im->drop; l < im->levels; l++) { uint32_t vb = (fi->flags & VKF_COMPRESSED) ? 4 : 1; uint64_t bx = (mip(im->w, l) + vb - 1) / vb, by = (mip(im->h, l) + vb - 1) / vb; sum += bx * by * fi->vbpb * (im->layers ? im->layers : 1); }
+              if (sum <= cap || im->levels - im->drop <= 1) break;
+              im->drop++;
+          }
+      }
       if (im->drop) { im->w = mip(im->w, im->drop); im->h = mip(im->h, im->drop); im->levels -= im->drop; } }
     VkImageUsageFlags u = VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
     int depth = (fi->flags & (VKF_DEPTH | VKF_STENCIL)) != 0;
@@ -252,12 +261,7 @@ static int64_t upload(vkt_image *im, const tex_t *t, VkCommandBuffer cb) {
                      VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, 0, VK_PIPELINE_STAGE_2_COPY_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT);
     img_batch b; b.n = 0; b.src = VK_NULL_HANDLE;
     int is3d = t->d.target == NVN_TEXTURE_TARGET_3D;
-    uint8_t *sp = NULL; const uint8_t *src = t->mem;
-    if (sparse_sampled(t)) {
-        if (!(sp = malloc(t->L.size ? t->L.size : 1))) return -1;
-        uint64_t miss = nvn_sparse_copy(t->pool, sp, (uint64_t)(uintptr_t)t->mem, t->L.size); src = sp;
-        static int n; if (n++ < 6) VKLOG("sparse texture ser%llu %ux%u %s: uploaded through the page table, %llu of %llu bytes unmapped", (unsigned long long)t->serial, im->w, im->h, fi->name, (unsigned long long)miss, (unsigned long long)t->L.size);
-    }
+    uint8_t *sp = NULL; int sparse = sparse_sampled(t); uint64_t smiss = 0, sall = 0;
     for (uint32_t level = 0; level < im->levels; level++)
         for (uint32_t layer = 0; layer < im->layers; layer++) {
             s2tex_surface s; uint64_t base; size_t row = 0;
@@ -267,9 +271,15 @@ static int64_t upload(vkt_image *im, const tex_t *t, VkCommandBuffer cb) {
             size_t lrow = (size_t)s.width * s.bytes_per_block, lsize = lrow * s.height * s.depth;
             uint8_t *lin = malloc(lsize ? lsize : 1);
             int rc;
+            const uint8_t *src = t->mem; uint64_t sbase = base, savail = t->L.size - base;
+            if (sparse) {   // this surface's bytes, gathered through the sparse pool's page table
+                uint64_t need = k == 1 ? (uint64_t)row * s.height : s2tex_size(&s); if (need > savail) need = savail;
+                free(sp); sp = malloc(need ? need : 1); if (!sp) { free(lin); continue; }
+                smiss += nvn_sparse_copy(t->pool, sp, (uint64_t)(uintptr_t)t->mem + base, need); sall += need; src = sp; sbase = 0; savail = need;
+            }
             if (k == 1) {   // linear: rows at the texture's stride
-                rc = 0; for (uint32_t y = 0; y < s.height && !rc; y++) rc = guarded_copy(lin + y * lrow, src + base + y * row, lrow);
-            } else rc = guarded_deswizzle(&s, src + base, (size_t)(t->L.size - base), lin, lrow, lrow * s.height);
+                rc = 0; for (uint32_t y = 0; y < s.height && !rc; y++) rc = guarded_copy(lin + y * lrow, src + sbase + y * row, lrow);
+            } else rc = guarded_deswizzle(&s, src + sbase, (size_t)savail, lin, lrow, lrow * s.height);
             if (rc) { static int n; if (n++ < 8) VKRED("texture %ux%u format %s: level %u layer %u storage could not be read (%d)", im->w, im->h, fi->name, level, layer, rc); free(lin); continue; }
             // what goes to the staging buffer, and how Vulkan reads it
             const uint8_t *out = lin; size_t out_size = lsize; uint8_t *conv = NULL; uint32_t row_texels = s.width * fi->bw, img_rows = s.height * fi->bh;
@@ -326,6 +336,8 @@ static int64_t upload(vkt_image *im, const tex_t *t, VkCommandBuffer cb) {
     vk_image_barrier(cb, im->img, all, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, im->rest, VK_PIPELINE_STAGE_2_COPY_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT,
                      VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, VK_ACCESS_2_SHADER_READ_BIT | VK_ACCESS_2_TRANSFER_READ_BIT);
     free(sp);
+    if (sparse) { static int n; if (n++ < 12) VKLOG("sparse texture ser%llu %ux%ux%u layers %u levels %u (from level %u) %s: uploaded through the page table, %llu of %llu bytes unmapped",
+                  (unsigned long long)t->serial, im->w, im->h, im->depth, im->layers, im->levels, im->drop, fi->name, (unsigned long long)smiss, (unsigned long long)sall); }
     im->content = 1; im->uploads++;
     atomic_fetch_add(&s_up_bytes, (uint64_t)total); atomic_fetch_add(&s_up_ns, now_ns() - t0);
     return total;
