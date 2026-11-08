@@ -2069,6 +2069,7 @@ static int mirror_prepare(const tex_t *t, unsigned level, unsigned layer) {   //
     return 0;
 }
 int nvn_tex_mirror_b2t(const tex_t *t, unsigned level, unsigned layer0, const NVNcopyRegion *r, const uint8_t *src, size_t row, size_t img) {
+    if (nvn_sparse_pool(t->pool)) return -1;   // as above
     int bw, bh, bpb = nvn_fmt_bpb(t->d.format, &bw, &bh);
     if (!t->mem || !bpb || t->d.target == NVN_TEXTURE_TARGET_3D || level >= t->d.levels) return -1;
     int nz = r->depth ? r->depth : 1;
@@ -2077,6 +2078,7 @@ int nvn_tex_mirror_b2t(const tex_t *t, unsigned level, unsigned layer0, const NV
 }
 int nvn_tex_mirror_t2t(const tex_t *s, unsigned sl, unsigned ss, const NVNcopyRegion *sr, const tex_t *d, unsigned dl, unsigned ds, const NVNcopyRegion *dr) {
     int bw, bh, bpb = nvn_fmt_bpb(s->d.format, &bw, &bh), dbw, dbh, dbpb = nvn_fmt_bpb(d->d.format, &dbw, &dbh);
+    if (nvn_sparse_pool(s->pool) || nvn_sparse_pool(d->pool)) return -1;   // a sparse pool has no CPU address behind its range (Linux): only its page table
     if (!s->mem || !d->mem || !bpb || bpb != dbpb || bw != dbw || bh != dbh || s->d.target == NVN_TEXTURE_TARGET_3D || d->d.target == NVN_TEXTURE_TARGET_3D) return -1;
     if (sl >= s->d.levels || dl >= d->d.levels || sr->width != dr->width || sr->height != dr->height || sr->xoffset < 0 || sr->yoffset < 0) return -1;
     int nz = sr->depth ? sr->depth : 1;

@@ -36,9 +36,25 @@ static int cpu_written(uint64_t serial) { return serial && vk_hm_get(&g_cpu, &se
 // From storage: a packaged layout; textures the CPU wrote (flushes, WriteTexels); and every block-compressed texture of a CPU-writable pool, IMAGE flag or
 // not. A BC or ASTC texture cannot be a render target or a storage image, so its storage is the only place its content can be: Pokopia's icons are BC1 /
 // BC7 textures flagged IMAGE whose storage the CPU rewrites, and treating IMAGE as "GPU-owned" left them stale (research/01 lesson 17)
+int nvn_sparse_pool(const void *pool); uint64_t nvn_sparse_gen(void); uint64_t nvn_sparse_copy(const void *pool, void *dst, uint64_t a, uint64_t n);
+// A sampled texture of a sparse virtual pool (MKW's terrain tiles): its storage is reachable only through the pool's page table (Linux, like Windows, keeps no alias of
+// the physical pages at the pool's range), so it is gathered with nvn_sparse_copy and uploaded again when a mapping changes (Banana Native's tex_from_storage on Vulkan)
+static int sparse_sampled(const tex_t *t) {
+    static int on = -1; if (on < 0) { const char *e = getenv("NXRT_VK_SPARSE_READ"); on = !(e && *e == '0'); }
+    return on && t->mem && t->pool && nvn_sparse_pool(t->pool) && t->d.samples <= 1 &&
+           !(t->d.flags & (NVN_TEXTURE_FLAGS_IMAGE | NVN_TEXTURE_FLAGS_COMPRESSIBLE | NVN_TEXTURE_FLAGS_LINEAR | NVN_TEXTURE_FLAGS_LINEAR_RENDER_TARGET));
+}
 static int from_storage(const tex_t *t) {
     if (!t->mem || t->d.target == NVN_TEXTURE_TARGET_BUFFER) return 0;
     if (t->has_layout || cpu_written(t->serial)) return 1;
+    if (sparse_sampled(t)) return 1;
+    // Switch 2: a small uncompressed colour texture in a CPU-cached pool that the CPU fills after nvnTextureInitialize and never flushes (MKW's terrain tiles, 260x260 /
+    // 516x516 R11G11B10F, RG8 with 9 levels, RGBA16 68x68 in a CPU_CACHED | GPU_CACHED pool) is tracked: uploaded from its storage and again when its pages change
+    // (Banana Native's ST_TRACK). Render targets are larger and in GPU pools. NXRT_VK_TRACK_TILES=0 turns it off
+    { static int on = -1; if (on < 0) { const char *e = getenv("NXRT_VK_TRACK_TILES"); on = !(e && *e == '0'); }
+      if (on && pool_cpu_writable(t->pool) && (t->pool->flags & NVN_MEMORY_POOL_FLAGS_CPU_CACHED) && t->d.samples <= 1 && t->d.width <= 1024 && t->d.height <= 1024 &&
+          !(t->d.flags & (NVN_TEXTURE_FLAGS_IMAGE | NVN_TEXTURE_FLAGS_COMPRESSIBLE | NVN_TEXTURE_FLAGS_LINEAR | NVN_TEXTURE_FLAGS_SPARSE | NVN_TEXTURE_FLAGS_LINEAR_RENDER_TARGET)) &&
+          t->d.target != NVN_TEXTURE_TARGET_3D) return 1; }
     // A linear texture in a CPU-writable pool is pool memory the CPU writes in place (nxnative makes it a view of the pool's buffer: zero-copy). Pokopia's 2x1
     // exposure texture is one: the game writes it on the CPU each frame and a draw copies it into a render target (M5-C)
     if ((t->d.flags & NVN_TEXTURE_FLAGS_LINEAR) && !(t->d.flags & NVN_TEXTURE_FLAGS_LINEAR_RENDER_TARGET) && pool_cpu_writable(t->pool) && t->d.samples <= 1) return 1;
@@ -138,6 +154,11 @@ static vkt_image *image_create(const tex_t *t, int cls) {
               const vkf_info *bc = vkf_get((fi->flags & VKF_SRGB) ? NVN_FORMAT_BPTC_UNORM_SRGB : NVN_FORMAT_BPTC_UNORM);
               if (bc && vkGetPhysicalDeviceImageFormatProperties(g_vk.pd, bc->vk, type, VK_IMAGE_TILING_OPTIMAL, u, sf, &ip) == VK_SUCCESS) { fi = bc; im->fi = bc; fr = VK_SUCCESS; }
           }
+          // NXRT_VK_SPARSE_MAXMB (default 512): a smaller sparse texture is backed fully. MKW renders its terrain atlas (6144x6144x2 RGBA8SN, 382 MB) and reads it
+          // back: unbacked, its writes were dropped and the terrain shaded from zeros. The 8192x8192x68 arrays stay unbacked
+          { const char *mm = getenv(sparse_sampled(t) ? "NXRT_VK_SPARSE_SAMPLED_MB" : "NXRT_VK_SPARSE_MAXMB"); uint64_t lim = (uint64_t)(mm ? atoi(mm) : sparse_sampled(t) ? 256 : 512) << 20;
+            uint64_t est = (uint64_t)im->w * im->h * (im->layers ? im->layers : 1) * (fi->vbpb ? fi->vbpb : 4) / ((fi->flags & VKF_COMPRESSED) ? 16 : 1) * 4 / 3;
+            if (est < lim) fr = VK_ERROR_FEATURE_NOT_PRESENT; }
           if (fr == VK_SUCCESS) { cf = sf; im->unbacked = 1; }
       } }
     // drop what this format cannot have in this combination (storage on an sRGB format, a sample count)
@@ -231,6 +252,12 @@ static int64_t upload(vkt_image *im, const tex_t *t, VkCommandBuffer cb) {
                      VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, 0, VK_PIPELINE_STAGE_2_COPY_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT);
     img_batch b; b.n = 0; b.src = VK_NULL_HANDLE;
     int is3d = t->d.target == NVN_TEXTURE_TARGET_3D;
+    uint8_t *sp = NULL; const uint8_t *src = t->mem;
+    if (sparse_sampled(t)) {
+        if (!(sp = malloc(t->L.size ? t->L.size : 1))) return -1;
+        uint64_t miss = nvn_sparse_copy(t->pool, sp, (uint64_t)(uintptr_t)t->mem, t->L.size); src = sp;
+        static int n; if (n++ < 6) VKLOG("sparse texture ser%llu %ux%u %s: uploaded through the page table, %llu of %llu bytes unmapped", (unsigned long long)t->serial, im->w, im->h, fi->name, (unsigned long long)miss, (unsigned long long)t->L.size);
+    }
     for (uint32_t level = 0; level < im->levels; level++)
         for (uint32_t layer = 0; layer < im->layers; layer++) {
             s2tex_surface s; uint64_t base; size_t row = 0;
@@ -241,8 +268,8 @@ static int64_t upload(vkt_image *im, const tex_t *t, VkCommandBuffer cb) {
             uint8_t *lin = malloc(lsize ? lsize : 1);
             int rc;
             if (k == 1) {   // linear: rows at the texture's stride
-                rc = 0; for (uint32_t y = 0; y < s.height && !rc; y++) rc = guarded_copy(lin + y * lrow, t->mem + base + y * row, lrow);
-            } else rc = guarded_deswizzle(&s, t->mem + base, (size_t)(t->L.size - base), lin, lrow, lrow * s.height);
+                rc = 0; for (uint32_t y = 0; y < s.height && !rc; y++) rc = guarded_copy(lin + y * lrow, src + base + y * row, lrow);
+            } else rc = guarded_deswizzle(&s, src + base, (size_t)(t->L.size - base), lin, lrow, lrow * s.height);
             if (rc) { static int n; if (n++ < 8) VKRED("texture %ux%u format %s: level %u layer %u storage could not be read (%d)", im->w, im->h, fi->name, level, layer, rc); free(lin); continue; }
             // what goes to the staging buffer, and how Vulkan reads it
             const uint8_t *out = lin; size_t out_size = lsize; uint8_t *conv = NULL; uint32_t row_texels = s.width * fi->bw, img_rows = s.height * fi->bh;
@@ -298,6 +325,7 @@ static int64_t upload(vkt_image *im, const tex_t *t, VkCommandBuffer cb) {
     ib_flush(&b, im, cb);
     vk_image_barrier(cb, im->img, all, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, im->rest, VK_PIPELINE_STAGE_2_COPY_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT,
                      VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, VK_ACCESS_2_SHADER_READ_BIT | VK_ACCESS_2_TRANSFER_READ_BIT);
+    free(sp);
     im->content = 1; im->uploads++;
     atomic_fetch_add(&s_up_bytes, (uint64_t)total); atomic_fetch_add(&s_up_ns, now_ns() - t0);
     return total;
@@ -339,11 +367,16 @@ static int init_fill(const tex_t *t, const vkt_image *im) {
     if (!t->mem || !t->pool || (t->pool->flags & NVN_MEMORY_POOL_FLAGS_VIRTUAL) || t->has_layout || t->d.samples > 1 || (t->d.flags & NVN_TEXTURE_FLAGS_COMPRESSIBLE)) return 0;
     if ((im->aspect & (VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT)) || (im->fi->flags & VKF_COMPRESSED)) return 0;
     int no_cpu = (t->pool->flags & NVN_MEMORY_POOL_FLAGS_CPU_NO_ACCESS) != 0, uncached = (t->pool->flags & NVN_MEMORY_POOL_FLAGS_CPU_UNCACHED) != 0;
-    if (!no_cpu && !uncached && !nvn_flushed(t->mem, t->L.size)) return 0;
+    // Switch 2: NVN2's FlushMappedRange / FlushTexels are bare returns, so a game stores texels with the CPU and never flushes (MKW's terrain tiles: R16 height, RG8
+    // material, RGBA8 / R11G11B10F colour in a CPU_CACHED | GPU_CACHED pool). An uncompressed colour texture that is not IMAGE / COMPRESSIBLE / LINEAR / SPARSE is filled
+    // from its storage anyway (kartnative tex_cpu_content, Banana Native's DM_VK_STORAGE_FIRST_USE). NXRT_VK_STORAGE_FIRST_USE=0 turns it off
+    static int s2 = -1; if (s2 < 0) { const char *e = getenv("NXRT_VK_STORAGE_FIRST_USE"); s2 = !(e && *e == '0'); }
+    int s2_take = s2 && !(t->d.flags & (NVN_TEXTURE_FLAGS_IMAGE | NVN_TEXTURE_FLAGS_COMPRESSIBLE | NVN_TEXTURE_FLAGS_LINEAR | NVN_TEXTURE_FLAGS_SPARSE | NVN_TEXTURE_FLAGS_LINEAR_RENDER_TARGET));
+    if (!no_cpu && !uncached && !s2_take && !nvn_flushed(t->mem, t->L.size)) return 0;
     if (!mem_any(t->mem, t->L.size)) return 0;
-    int why = no_cpu ? 0 : uncached ? 1 : 2;
-    static uint64_t n[3]; if (n[why]++ < 4) VKLOG("initial content: ser=%llu %ux%ux%u format %#x filled from its storage, %s (%llu so far)", (unsigned long long)t->serial, t->d.width, t->d.height, t->d.depth, t->d.format,
-                                                 (const char *[]){"a CPU_NO_ACCESS pool's", "a CPU_UNCACHED pool's", "flushed by the CPU before its first use"}[why], (unsigned long long)n[why]);
+    int why = no_cpu ? 0 : uncached ? 1 : nvn_flushed(t->mem, t->L.size) ? 2 : 3;
+    static uint64_t n[4]; if (n[why]++ < 4) VKLOG("initial content: ser=%llu %ux%ux%u format %#x filled from its storage, %s (%llu so far)", (unsigned long long)t->serial, t->d.width, t->d.height, t->d.depth, t->d.format,
+                                                 (const char *[]){"a CPU_NO_ACCESS pool's", "a CPU_UNCACHED pool's", "flushed by the CPU before its first use", "written by the CPU before its first use (NVN2, no flush)"}[why], (unsigned long long)n[why]);
     return 1;
 }
 
@@ -353,6 +386,12 @@ static void cb_put(VkCommandBuffer cb, int once) { if (once) vk_once_end(cb); }
 
 // Uploads a storage-backed image when its pages were written since its last upload (nxnative's order: stamp, protect, then read). Caller holds g_lk
 static void refresh(vkt_image *im, const tex_t *t) {
+    if (sparse_sampled(t)) {
+        uint64_t g = nvn_sparse_gen(); if (im->content && im->stamp == g) return;
+        int once; VkCommandBuffer cb = cb_get(&once); if (!cb) return;
+        if (upload(im, t, cb) >= 0) im->stamp = g;
+        cb_put(cb, once); return;
+    }
     if (!im->span) im->span = nvn_dirty_span(t->mem, (size_t)t->L.size);
     if (im->content && im->span && !nvn_dirty_since_span(im->span, t->mem, (size_t)t->L.size, im->stamp)) return;
     int once; VkCommandBuffer cb = cb_get(&once);
