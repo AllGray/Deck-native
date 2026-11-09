@@ -144,7 +144,10 @@ static vkt_image *image_create(const tex_t *t, int cls) {
       if (im->drop) { im->w = mip(im->w, im->drop); im->h = mip(im->h, im->drop); im->levels -= im->drop; } }
     VkImageUsageFlags u = VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
     int depth = (fi->flags & (VKF_DEPTH | VKF_STENCIL)) != 0;
-    if (cls == VKT_GPU && !(fi->flags & VKF_COMPRESSED)) {   // NVN has no flag for "render target": every uncompressed GPU texture may be one
+    // A texture whose first content comes from its storage can still be rendered to later (MKW renders its colour-grading tables, 256x64 / 64x64 RGBA16F,
+    // and its 6144x6144 terrain atlas into such textures): without attachment use those draws were lost. NXRT_VK_RT_STORAGE=0 keeps them sampled only
+    static int rt_st = -1; if (rt_st < 0) { const char *e = getenv("NXRT_VK_RT_STORAGE"); rt_st = e ? atoi(e) : 1; }
+    if ((cls == VKT_GPU || (rt_st && cls == VKT_STORAGE)) && !(fi->flags & VKF_COMPRESSED)) {   // NVN has no flag for "render target": every uncompressed GPU texture may be one
         if (depth && (fi->feat & VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT)) u |= VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
         if (!depth && (fi->feat & VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BIT)) u |= VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
         if ((t->d.flags & NVN_TEXTURE_FLAGS_IMAGE) && (fi->feat & VK_FORMAT_FEATURE_STORAGE_IMAGE_BIT)) u |= VK_IMAGE_USAGE_STORAGE_BIT;

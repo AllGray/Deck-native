@@ -315,7 +315,9 @@ static void pass_end(void) {
     wb_flush();
     static uint64_t pi_ser = (uint64_t)-1; static unsigned pi_n;   // NXRT_VK_PASSIMG=<serial>: in the texdump frame, that image after every pass
     if (pi_ser == (uint64_t)-1) { const char *e = getenv("NXRT_VK_PASSIMG"); pi_ser = e ? strtoull(e, NULL, 0) : 0; }
-    if (pi_ser && (g_td_on || g_pd) && pi_n < 400) {
+    static int pi_from = -1; if (pi_from < 0) { const char *e = getenv("NXRT_VK_PASSIMG_FROM"); pi_from = e ? atoi(e) : 0; }
+    if (pi_ser && (g_td_on || g_pd) && pi_n < 400 && pi_n < (unsigned)pi_from) pi_n++;
+    else if (pi_ser && (g_td_on || g_pd) && pi_n < 400) {
         vkt_image *im = P.ncolor ? P.ci[0] : NULL;   // the pass's first colour target, when at least <PASSIMG> wide
         if (im && im->w >= pi_ser && !(im->aspect & VK_IMAGE_ASPECT_DEPTH_BIT) && !(im->fi->flags & VKF_COMPRESSED)) { char path[1200]; const char *lp = nxrt_log_path();
             snprintf(path, sizeof path, "%s.passimg-%03u-ser%llu.png", lp && *lp ? lp : "nxrt", pi_n, (unsigned long long)im->serial);
