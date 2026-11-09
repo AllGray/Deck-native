@@ -2909,7 +2909,7 @@ inline LoweredProgram LowerToMaxwell(std::span<const Instruction> code,
                 return fail(index, "native byte-to-float conversion mode");
             emit(base(0x5cb8000000000000ULL) | (u64{2} << 8) | (u64{size} << 10) |
                  (u64{insn.Bits(74, 1)} << 13) | (u64{insn.Bits(78, 2)} << 39) |
-                 (u64{selector} << 41) | (u64{i2f_source} << 20));
+                 (u64{size == 1 ? selector * 2 : selector} << 41) | (u64{i2f_source} << 20));   // Ampere selects a half-word for 16-bit sources, Maxwell bits 41-42 always a byte: H1 is byte 2
             break;
         }
         case 0x245: case 0xa45: case 0xc45: { // I2FP.F32.U32

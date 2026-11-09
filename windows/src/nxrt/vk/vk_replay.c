@@ -306,12 +306,29 @@ static int pimg_capture(VkCommandBuffer cb, vkt_image *im, uint32_t level, uint3
     vks_post_fn(pimg_done, p);
     return 0;
 }
+// NXRT_VK_PD_DRAWTEX=<fs keys>: the textures such a draw samples, captured when its pass ends (3D: four slices)
+static vkt_image *g_dtx[16]; static unsigned g_dtx_b[16]; static char g_dtx_k[16][20]; static int g_ndtx;
+static void dtx_flush(VkCommandBuffer cb) {
+    for (int i = 0; i < g_ndtx; i++) { vkt_image *im = g_dtx[i]; int is3 = im->vtype == VK_IMAGE_VIEW_TYPE_3D;
+        uint32_t zs[4] = {0, im->depth / 4, im->depth / 2, im->depth ? im->depth - 1 : 0}; int nz = is3 ? 4 : 1;
+        for (int k = 0; k < nz; k++) { char path[1200]; const char *lp = nxrt_log_path();
+            snprintf(path, sizeof path, "%s.drawtex-%s-b%u-ser%llu-z%u.png", lp && *lp ? lp : "nxrt", g_dtx_k[i], g_dtx_b[i], (unsigned long long)im->serial, zs[k]);
+            barrier_all(cb);
+            if (!pimg_capture(cb, im, 0, zs[k], im->w, im->h, path, 950 + k)) PD("draw texture queued %s b%u z%u: %ux%ux%u fmt %d %s", g_dtx_k[i], g_dtx_b[i], zs[k], im->w, im->h, im->depth, (int)im->fi->vk, path); }
+        if (!is3 && im->levels > 1) for (uint32_t lv = 1; lv < im->levels; lv++) { char path[1200]; const char *lp = nxrt_log_path(); uint32_t w = im->w >> lv, h = im->h >> lv; if (!w) w = 1; if (!h) h = 1;
+            snprintf(path, sizeof path, "%s.drawtex-%s-b%u-ser%llu-lv%u.png", lp && *lp ? lp : "nxrt", g_dtx_k[i], g_dtx_b[i], (unsigned long long)im->serial, lv);
+            barrier_all(cb);
+            if (!pimg_capture(cb, im, lv, 0, w, h, path, 960 + lv)) PD("draw texture queued %s b%u lv%u: %ux%u %s", g_dtx_k[i], g_dtx_b[i], lv, w, h, path); }
+    }
+    g_ndtx = 0;
+}
 static void pass_end(void) {
     if (!P.open) return;
     VkCommandBuffer cb = vks_cb();
     if (P.query >= 0) { vkCmdEndQuery(cb, R0.qp, (uint32_t)P.query); q_post(0, (uint32_t)P.query, 0); P.query = -1; }
     vkCmdEndRendering(cb);
     P.open = 0;
+    if (g_ndtx) dtx_flush(cb);
     wb_flush();
     static uint64_t pi_ser = (uint64_t)-1; static unsigned pi_n;   // NXRT_VK_PASSIMG=<serial>: in the texdump frame, that image after every pass
     if (pi_ser == (uint64_t)-1) { const char *e = getenv("NXRT_VK_PASSIMG"); pi_ser = e ? strtoull(e, NULL, 0) : 0; }
@@ -1173,6 +1190,10 @@ static void draw(const p_draw *dw, const p_draw_idx *di) {
                 PD("  st%d b%u %s slot%d tid=%d sid=%d %s ser%llu fmt%#x %ux%ux%u tgt%d lv%u view%d/%d %s", s, bb->binding, bb->kind == VKB_TEX ? "tex" : bb->kind == VKB_TBUF ? "tbuf" : "img", bb->reg, tid, (int)((h >> 20) & 0xfff),
                    ok ? "" : "(none)", ok ? (unsigned long long)r.t.serial : 0ull, ok ? r.t.d.format : 0, ok ? r.t.d.width : 0, ok ? r.t.d.height : 0, ok ? r.t.d.depth : 0, ok ? r.t.d.target : 0, ok ? r.t.d.levels : 0,
                    (int)bb->vtype, ok && r.has_view ? (int)r.v.target : -1, im ? (im->cls == VKT_STORAGE ? "storage" : "gpu") : "-");
+                { static const char *dk = (const char *)1; if (dk == (const char *)1) dk = getenv("NXRT_VK_PD_DRAWTEX");
+                  static int dn; if (dk && im && sh[1] && ({ char k6[8]; snprintf(k6, sizeof k6, "%.6s", sh[1]->key); strstr(dk, k6) != NULL; }) && bb->kind == VKB_TEX && !(im->fi->flags & VKF_COMPRESSED) && g_ndtx < 16 && dn < 16) {
+                      int dup = 0; for (int q = 0; q < g_ndtx; q++) dup |= g_dtx[q] == im;
+                      if (!dup) { g_dtx[g_ndtx] = im; g_dtx_b[g_ndtx] = bb->binding; snprintf(g_dtx_k[g_ndtx], 20, "%.6s", sh[1]->key); g_ndtx++; dn++; } } }
                 if (ok) PD("    storage pool %p +%#llx mem %p flags %#x layout %d size %#llx image %p", (const void *)r.t.pool, (unsigned long long)r.t.off, (const void *)r.t.mem, r.t.d.flags, r.t.has_layout, (unsigned long long)r.t.L.size, (void *)im); }
             else if (bb->kind == VKB_CBUF || bb->kind == VKB_SBUF) { const p_bind_buf *u = bb->kind == VKB_CBUF ? &S->ubo[s][bb->reg] : &S->ssbo[s][bb->reg];
                 float f[8] = {0}; if (u->addr && u->size >= 32) memcpy(f, (const void *)(uintptr_t)u->addr, 32); else if (u->addr && u->size >= 16) memcpy(f, (const void *)(uintptr_t)u->addr, 16);

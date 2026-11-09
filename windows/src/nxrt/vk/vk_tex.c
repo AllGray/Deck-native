@@ -179,6 +179,13 @@ static vkt_image *image_create(const tex_t *t, int cls) {
         if (vkGetPhysicalDeviceImageFormatProperties(g_vk.pd, fi->vk, type, VK_IMAGE_TILING_OPTIMAL, u, cf, &ip) == VK_SUCCESS && (ip.sampleCounts & im->samples)) break;
         if (pass == 0) u &= ~VK_IMAGE_USAGE_STORAGE_BIT; else if (pass == 1) u &= ~(VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT);
     }
+    // Maxwell lets a draw sample the colour target it renders to (MKW's fog pass a6a668 reads its own pixel). On AMD a compressed (DCC) target read that way
+    // gives garbage; NXRT_VK_FEEDBACK_LOOP=1 adds feedback-loop usage so the driver keeps such targets uncompressed (off by default: the MKW fog artefacts turned out to be an ampere-lower I2F bug)
+    { static int fbl = -1; if (fbl < 0) { const char *e = getenv("NXRT_VK_FEEDBACK_LOOP"); fbl = e ? atoi(e) : 0; }
+      if (fbl && g_vk.has.feedback_loop && (u & VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT) && (u & VK_IMAGE_USAGE_SAMPLED_BIT)) {
+          VkImageFormatProperties ip2;
+          if (vkGetPhysicalDeviceImageFormatProperties(g_vk.pd, fi->vk, type, VK_IMAGE_TILING_OPTIMAL, u | VK_IMAGE_USAGE_ATTACHMENT_FEEDBACK_LOOP_BIT_EXT, cf, &ip2) == VK_SUCCESS)
+              u |= VK_IMAGE_USAGE_ATTACHMENT_FEEDBACK_LOOP_BIT_EXT; } }
     im->usage = u;
     im->rest = (u & (VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_STORAGE_BIT)) ? VK_IMAGE_LAYOUT_GENERAL : VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
     VkImageCreateInfo ci = {VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO, NULL, cf, type, fi->vk, {im->w, im->h, im->depth}, im->levels, im->layers, im->samples,
