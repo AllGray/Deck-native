@@ -349,6 +349,10 @@ static void pass_end(void) {
 // An attachment's view: one level, the layers the NVN view names (else all from its first), the view's format through the image's fallback, identity swizzle
 static VkImageView att_view(vkt_image *im, const tex_t *t, const view_t *v, int has_v, int depth, uint32_t *w, uint32_t *h, uint32_t *nl, VkFormat *fmt, uint32_t *lv, uint32_t *l0) {
     uint32_t level = has_v && v->set_levels ? v->base_level : 0, b0 = has_v && v->set_layers ? v->min_layer : 0;
+    // An image whose top levels were left out (im->drop: NXRT_VK_TEX_MAX, the sparse cap) keeps NVN level L as level L - drop; a draw into a left-out level has
+    // nowhere to go and is skipped (drawing it into level 0 overwrote the kept picture: MKW's terrain atlas). NXRT_VK_MIPDROP_MAP=0 restores the old clamp
+    { static int mm = -1; if (mm < 0) { const char *e = getenv("NXRT_VK_MIPDROP_MAP"); mm = e ? atoi(e) : 1; }
+      if (mm && im->drop) { if (level < im->drop) { static int n0; if (n0++ < 20) VKLOG("render target ser%llu: level %u was left out (%u dropped): draw skipped", (unsigned long long)im->serial, level, im->drop); return VK_NULL_HANDLE; } level -= im->drop; } }
     if (level >= im->levels) { static int n; if (n++ < 40) VKRED("render target ser%llu %ux%u: level %u asked, the image has %u levels: drawn into level %u (its top-left corner)", (unsigned long long)im->serial, im->w, im->h, level, im->levels, im->levels - 1); level = im->levels - 1; }
     int is3d = im->vtype == VK_IMAGE_VIEW_TYPE_3D;
     uint32_t all = is3d ? mipd(im->depth, level) : im->layers, n = has_v && v->set_layers && v->nlayers ? v->nlayers : all > b0 ? all - b0 : 1;
@@ -794,9 +798,15 @@ static VkDescriptorBufferInfo ubo_info(const p_bind_buf *u) {
     return (VkDescriptorBufferInfo){b, o, n};
 }
 // Descriptor set of stage st's shader, filled from the current bindings
+// Descriptor sets are only valid for the submission whose pools they came from: a cache of identical sets (same layout, same buffers, views, samplers)
+// within one submission, so a draw that binds what an earlier draw bound reuses its set instead of allocating and writing a new one. NXRT_VK_DSCACHE=0 turns it off
+static uint64_t g_sub_gen = 1;
+typedef struct { uint64_t gen, h; VkDescriptorSetLayout dsl; VkDescriptorSet ds; } dsc_ent;
+static dsc_ent g_dsc[8192];
+static uint64_t dsc_mix(uint64_t h, uint64_t v) { h ^= v + 0x9E3779B97F4A7C15ull + (h << 6) + (h >> 2); return h * 0xff51afd7ed558ccdull; }
 static VkDescriptorSet write_set(const vks_shader *sh, int st, int *swrites) {
-    VkDescriptorSet ds = dset_alloc(sh->dsl);
-    if (!ds) return VK_NULL_HANDLE;
+    static int dsc_on = -1; if (dsc_on < 0) { const char *e = getenv("NXRT_VK_DSCACHE"); dsc_on = e ? atoi(e) : 1; }
+    VkDescriptorSet ds = VK_NULL_HANDLE;
     g_cur_sh = sh;
     if (sh->nb > MAXB) { RED_ONCE(42, "shader %s has %d bindings (more than %d)", sh->key, sh->nb, MAXB); return VK_NULL_HANDLE; }
     VkWriteDescriptorSet w[MAXB]; VkDescriptorBufferInfo bi[MAXB]; VkDescriptorImageInfo ii[MAXB]; VkBufferView bv[MAXB];
@@ -854,9 +864,18 @@ static VkDescriptorSet write_set(const vks_shader *sh, int st, int *swrites) {
                 uint64_t h = tex_slot_h(st, (unsigned)b->reg);
                 int tid = (int)(h & 0xfffff), sid = b->samp_kind == VKB_SAMP_SLOT ? (b->samp_reg >= 0 && b->samp_reg < 128 ? (int)((S->samp[st][b->samp_reg] >> 20) & 0xfff) : 0)
                                                   : b->samp_kind == VKB_SAMP_ID ? b->samp_reg : (int)((h >> 20) & 0xfff);
-                vkt_image *im;
-                o->imageView = tex_view(tid, b, &o->imageLayout, &im);
-                o->sampler = samp_get(sid);
+                // Per submission, a texture ID read the same way gives the same view (its memory was written before the submit): resolving it again took the
+                // texture registry's lock, the dirty check and the view lookup on every draw. Same for samplers. NXRT_VK_TEXCACHE=0 turns it off
+                static int tc_on = -1; if (tc_on < 0) { const char *e = getenv("NXRT_VK_TEXCACHE"); tc_on = e ? atoi(e) : 1; }
+                static struct { uint64_t gen, key; VkImageView v; VkImageLayout l; } tc[4096];
+                static struct { uint64_t gen; int sid; VkSampler s; } sc[1024];
+                uint64_t tk = (uint64_t)(uint32_t)tid | (uint64_t)b->vtype << 20 | (uint64_t)(b->ms & 1) << 24 | (uint64_t)(b->depth & 1) << 25 | (uint64_t)(b->ct & 0xff) << 26;
+                unsigned ti = (unsigned)((tk * 0x9E3779B97F4A7C15ull) >> 52), si = (unsigned)sid & 1023;
+                if (tc_on && tc[ti].gen == g_sub_gen && tc[ti].key == tk) { o->imageView = tc[ti].v; o->imageLayout = tc[ti].l; }
+                else { vkt_image *im; o->imageView = tex_view(tid, b, &o->imageLayout, &im);
+                    if (tc_on && o->imageView) { tc[ti].gen = g_sub_gen; tc[ti].key = tk; tc[ti].v = o->imageView; tc[ti].l = o->imageLayout; } }
+                if (tc_on && sc[si].gen == g_sub_gen && sc[si].sid == sid) o->sampler = sc[si].s;
+                else { o->sampler = samp_get(sid); if (tc_on) { sc[si].gen = g_sub_gen; sc[si].sid = sid; sc[si].s = o->sampler; } }
                 if (!o->imageView) o->imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
             }
             x->pImageInfo = o; break; }
@@ -871,7 +890,19 @@ static VkDescriptorSet write_set(const vks_shader *sh, int st, int *swrites) {
         }
         nw++;
     }
+    uint64_t h = dsc_mix(0, (uint64_t)(uintptr_t)sh->dsl); dsc_ent *ce = NULL;
+    if (dsc_on) {
+        for (int i = 0; i < nw; i++) { const VkWriteDescriptorSet *x = &w[i]; h = dsc_mix(h, ((uint64_t)x->dstBinding << 32) | (uint64_t)x->descriptorType);
+            if (x->pBufferInfo) { h = dsc_mix(h, (uint64_t)(uintptr_t)x->pBufferInfo->buffer); h = dsc_mix(h, x->pBufferInfo->offset); h = dsc_mix(h, x->pBufferInfo->range); }
+            else if (x->pImageInfo) { h = dsc_mix(h, (uint64_t)(uintptr_t)x->pImageInfo->imageView); h = dsc_mix(h, (uint64_t)(uintptr_t)x->pImageInfo->sampler); h = dsc_mix(h, x->pImageInfo->imageLayout); }
+            else if (x->pTexelBufferView) h = dsc_mix(h, (uint64_t)(uintptr_t)*x->pTexelBufferView); }
+        ce = &g_dsc[(h >> 20) & 8191];
+        if (ce->gen == g_sub_gen && ce->h == h && ce->dsl == sh->dsl && ce->ds) { g_st.desc_reused++; return ce->ds; }
+    }
+    if (!(ds = dset_alloc(sh->dsl))) return VK_NULL_HANDLE;
+    for (int i = 0; i < nw; i++) w[i].dstSet = ds;
     vkUpdateDescriptorSets(g_vk.dev, (uint32_t)nw, w, 0, NULL);
+    if (ce) { ce->gen = g_sub_gen; ce->h = h; ce->dsl = sh->dsl; ce->ds = ds; }
     return ds;
 }
 
@@ -1352,7 +1383,7 @@ static void dispatch(const p_dispatch *dp) {
     if (dp->ind) { VkBuffer b; VkDeviceSize o; if (!vkm_use(dp->ind, 12, &b, &o)) { RED_ONCE(70, "indirect dispatch arguments are in no memory pool"); return; } vkCmdDispatchIndirect(cb, b, o); }
     else if (dp->x > 0 && dp->y > 0 && dp->z > 0) vkCmdDispatch(cb, (uint32_t)dp->x, (uint32_t)dp->y, (uint32_t)dp->z);
     g_st.dispatches++;
-    { const char *dk = getenv("NXRT_VK_PD_DISPIMG");
+    { static const char *dk = (const char *)1; if (dk == (const char *)1) dk = getenv("NXRT_VK_PD_DISPIMG");
       if (g_pd && dk && strstr(dk, cs->key)) for (int i = 0; i < cs->nb; i++) { const vks_bind *bb = &cs->b[i]; if (bb->kind != VKB_IMG) continue;
           vkt_reg r; int tid = (int)(S->img[5][bb->reg] & 0xfffff); if (tid <= 0 || !vkt_reg_copy(tid, &r)) continue;
           vkt_image *im = vkt_resolve(&r.t); if (!im || (im->fi->flags & VKF_COMPRESSED)) continue;
@@ -1616,6 +1647,13 @@ static void report_counter(uint64_t type, uint64_t addr) {
       if (now && addr && (type == NVN_COUNTER_TYPE_TIMESTAMP || type == NVN_COUNTER_TYPE_TIMESTAMP_TOP)) {
           void dm_guest_write_prepare(void *addr, size_t len); uint64_t zero = 0;
           dm_guest_write_prepare((void *)(uintptr_t)addr, 8); memcpy((void *)(uintptr_t)addr, &zero, 8); } }
+    // Experiment (NXRT_VK_TS_AT_REPLAY=1): the timestamp half written now, at replay, instead of at completion. At completion every report of a submission got
+    // nearly the same time, so a game timing its GPU work from two of them saw ~0 ms; at replay they are as far apart as the replay of the work between them
+    { static int tr = -1; if (tr < 0) { const char *e = getenv("NXRT_VK_TS_AT_REPLAY"); tr = e ? atoi(e) : 0; }
+      if (tr && addr && (type == NVN_COUNTER_TYPE_TIMESTAMP || type == NVN_COUNTER_TYPE_TIMESTAMP_TOP)) {
+          extern uint64_t nvn_timestamp_from_ns(uint64_t); void dm_guest_write_prepare(void *addr, size_t len);
+          uint64_t rec[2] = {0, nvn_timestamp_from_ns(guest_ns())};
+          dm_guest_write_prepare((void *)(uintptr_t)addr, 16); memcpy((void *)(uintptr_t)addr, rec, 16); return; } }
     vks_post_counter(addr, (uint32_t)type);
 }
 static void reset_counter(uint64_t type) {
@@ -1763,7 +1801,7 @@ void vkr_exec(const uint8_t *handle) {
 
 // ---------- Submissions, queues ----------
 void vkr_sub_begin(void) {
-    memset(&g_sub, 0, sizeof g_sub);
+    memset(&g_sub, 0, sizeof g_sub); g_sub_gen++;
     P.valid = 0; P.open = 0; P.query = -1; g_last_pipe = VK_NULL_HANDLE; g_nwb = 0;
     if (!S) S = rs_get(0);
     // the slot's reset is recorded (VUID-vkResetQueryPool-firstQuery-02741: a host reset may meet the slot's last use still running while loading floods the queue)
@@ -1773,7 +1811,7 @@ void vkr_sub_end(void) {
     pass_end();
     if (g_nwb) { barrier_all(vks_cb()); wb_flush(); }
     if (g_sub.tq) vkCmdWriteTimestamp2(vks_cb(), VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, g_tqp, 2 * (uint32_t)(g_sub.tq - 1) + 1);
-    subres *r = malloc(sizeof *r); *r = g_sub; memset(&g_sub, 0, sizeof g_sub);
+    subres *r = malloc(sizeof *r); *r = g_sub; memset(&g_sub, 0, sizeof g_sub); g_sub_gen++;
     vks_post_fn(subres_done, r);
     P.valid = 0;
 }

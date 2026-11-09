@@ -1011,10 +1011,18 @@ static vks_shader *get_l(const nxs_shader *n) {   // g_shl held
     s->uses++;
     return s;
 }
+// A program's serial changes whenever its shaders are set, so serial + stage name one resolved shader for good: a small per-thread cache in front of the
+// key / cache lookup, which formatted and locked on every draw (8 % of the CPU in a profile). NXRT_VK_SHCACHE=0 turns it off
 const vks_shader *vksh_get(const prog_t *p, unsigned i) {
+    static int on = -1; if (on < 0) { const char *e = getenv("NXRT_VK_SHCACHE"); on = e ? atoi(e) : 1; }
+    static __thread struct { uint64_t serial; unsigned st; const vks_shader *s; } c[4096];
+    unsigned h = 0;
+    if (on && p) { h = ((unsigned)((p->serial * 0x9E3779B97F4A7C15ull) >> 52) ^ (i * 977u)) & 4095;
+        if (c[h].s && c[h].serial == p->serial && c[h].st == i) return c[h].s; }
     const nxs_shader *n = NULL;
     if (!p || nxs_resolve(p, i, &n) != 1 || !n) return NULL;
     AcquireSRWLockExclusive(&g_shl); vks_shader *s = get_l(n); ReleaseSRWLockExclusive(&g_shl);
+    if (on && s) { c[h].serial = p->serial; c[h].st = i; c[h].s = s; }
     return s;
 }
 const vks_shader *vksh_by_key(const char *key) {

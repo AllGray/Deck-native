@@ -225,7 +225,9 @@ const nxs_shader *nxs_peek(const char *key) {
 int nxs_resolve(const prog_t *p, unsigned i, const nxs_shader **out) {
     uint8_t k[8]; char key[17];
     if (!prog_key(p, i, k)) return -1;
-    for (int j = 0; j < 8; j++) snprintf(key + 2 * j, 3, "%02x", k[j]);
+    static const char hx[] = "0123456789abcdef";
+    for (int j = 0; j < 8; j++) { key[2 * j] = hx[k[j] >> 4]; key[2 * j + 1] = hx[k[j] & 15]; }
+    key[16] = 0;
     *out = get(key, &p->sd[i]);
     return *out != NULL;
 }
