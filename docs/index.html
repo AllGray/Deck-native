@@ -1,0 +1,167 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Kiln</title>
+<meta name="description" content="Kiln: put your own game files in, get a native build out. Development log of the Mario Kart World bring-up.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,800&family=Source+Serif+4:opsz,wght@8..60,400;8..60,600&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+/* Layout: a kiln's palette (fired clay, ember, soot); hero, pipeline diagram, measurements, then a dated log */
+:root{
+  --bg:#f3efe9; --surface:#fffdf9; --fg:#24201c; --muted:#6b6259; --line:#d9d0c4;
+  --ember:#c4501e; --ok:#2f7d55; --warn:#a8741c; --code:#ebe4d9;
+  --f-display:"Bricolage Grotesque",ui-sans-serif,system-ui,sans-serif;
+  --f-body:"Source Serif 4",Georgia,serif;
+  --f-mono:"JetBrains Mono",ui-monospace,Menlo,monospace;
+}
+@media (prefers-color-scheme:dark){:root{
+  --bg:#171411; --surface:#211d19; --fg:#ece6de; --muted:#a59a8d; --line:#3a332c;
+  --ember:#f07a45; --ok:#5cc58e; --warn:#e2ac52; --code:#2b2520; color-scheme:dark}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:1.0625rem/1.65 var(--f-body);padding:0 max(16px,env(safe-area-inset-left,0px))}
+.wrap{max-width:980px;margin:0 auto;padding:56px 0 80px}
+a{color:var(--ember)}
+code{font-family:var(--f-mono);font-size:.86em;background:var(--code);padding:.08em .35em;border-radius:4px}
+.eyebrow{font:600 .75rem/1 var(--f-mono);letter-spacing:.12em;text-transform:uppercase;color:var(--ember)}
+h1{font:800 clamp(3rem,10vw,5.5rem)/.95 var(--f-display);margin:12px 0 0;letter-spacing:-.03em}
+h2{font:800 1.6rem/1.15 var(--f-display);margin:0 0 14px;text-wrap:balance}
+h3{font:500 1.2rem/1.25 var(--f-display);margin:0;text-wrap:balance}
+.lede{font-size:1.3rem;max-width:56ch;margin:18px 0 0}
+.lede b{color:var(--ember)}
+section{margin-top:64px}
+p{max-width:68ch}
+.panel{background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:20px;overflow-x:auto}
+svg text{font-family:var(--f-mono)}
+.games{width:100%;border-collapse:collapse;font-size:.95rem}
+.games th,.games td{text-align:left;padding:10px 12px;border-bottom:1px solid var(--line);vertical-align:top}
+.games th{font:600 .75rem/1 var(--f-mono);letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+.pill{display:inline-block;font:600 .7rem/1 var(--f-mono);letter-spacing:.06em;text-transform:uppercase;padding:5px 8px;border-radius:999px;border:1px solid currentColor}
+.pill.ok{color:var(--ok)} .pill.warn{color:var(--warn)}
+.log{display:grid;gap:0;border-left:2px solid var(--line);margin-left:6px}
+.item{position:relative;padding:0 0 30px 26px;display:grid;gap:6px}
+.item::before{content:"";position:absolute;left:-8px;top:6px;width:14px;height:14px;border-radius:50%;background:var(--bg);border:3px solid var(--line)}
+.item.win::before{background:var(--ok);border-color:var(--ok)}
+.item.open::before{border-color:var(--warn)}
+.when{font:600 .78rem/1.2 var(--f-mono);color:var(--muted);font-variant-numeric:tabular-nums}
+.commit{font:400 .8rem/1.4 var(--f-mono);color:var(--muted)}
+.commit b{color:var(--fg)}
+.rule{border:1px solid var(--line);border-left:4px solid var(--ember);border-radius:6px;padding:16px 18px;background:var(--surface)}
+footer{margin-top:64px;font:400 .8rem/1.5 var(--f-mono);color:var(--muted)}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header>
+  <div class="eyebrow">Native builds of games you own</div>
+  <h1>Kiln</h1>
+  <p class="lede">Put your own game files in. <b>Get a native build out.</b> No emulator in between: the game's own code runs on your CPU and its graphics go through your GPU's own API.</p>
+</header>
+
+<section>
+  <h2>How a build works</h2>
+  <p>You give Kiln your own dump. A long build step takes the game apart and translates it once, so that playing never stalls on it.</p>
+  <div class="panel">
+    <svg viewBox="0 0 900 190" width="100%" role="img" aria-label="Pipeline: your dump, unpack, translate shaders, run the code natively, native build">
+      <defs><marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="var(--muted)"/></marker></defs>
+      <g font-size="13">
+        <rect x="6" y="40" width="150" height="70" rx="8" fill="var(--code)" stroke="var(--line)"/>
+        <text x="81" y="70" text-anchor="middle" fill="var(--fg)" font-weight="600">your dump</text>
+        <text x="81" y="92" text-anchor="middle" fill="var(--muted)" font-size="11">NUP, NSP, …</text>
+        <rect x="190" y="40" width="150" height="70" rx="8" fill="var(--surface)" stroke="var(--line)"/>
+        <text x="265" y="70" text-anchor="middle" fill="var(--fg)" font-weight="600">unpack</text>
+        <text x="265" y="92" text-anchor="middle" fill="var(--muted)" font-size="11">ExeFS · RomFS</text>
+        <rect x="374" y="40" width="160" height="70" rx="8" fill="var(--surface)" stroke="var(--ember)"/>
+        <text x="454" y="70" text-anchor="middle" fill="var(--fg)" font-weight="600">translate shaders</text>
+        <text x="454" y="92" text-anchor="middle" fill="var(--muted)" font-size="11">Ampere → Maxwell → SPIR-V</text>
+        <rect x="568" y="40" width="160" height="70" rx="8" fill="var(--surface)" stroke="var(--line)"/>
+        <text x="648" y="70" text-anchor="middle" fill="var(--fg)" font-weight="600">run code natively</text>
+        <text x="648" y="92" text-anchor="middle" fill="var(--muted)" font-size="11">NVN calls → Vulkan / Metal</text>
+        <rect x="762" y="40" width="132" height="70" rx="8" fill="var(--ember)"/>
+        <text x="828" y="70" text-anchor="middle" fill="var(--bg)" font-weight="600">native build</text>
+        <text x="828" y="92" text-anchor="middle" fill="var(--bg)" font-size="11">your folder only</text>
+        <line x1="156" y1="75" x2="186" y2="75" stroke="var(--muted)" stroke-width="2" marker-end="url(#ar)"/>
+        <line x1="340" y1="75" x2="370" y2="75" stroke="var(--muted)" stroke-width="2" marker-end="url(#ar)"/>
+        <line x1="534" y1="75" x2="564" y2="75" stroke="var(--muted)" stroke-width="2" marker-end="url(#ar)"/>
+        <line x1="728" y1="75" x2="758" y2="75" stroke="var(--muted)" stroke-width="2" marker-end="url(#ar)"/>
+        <path d="M190 132 H534" stroke="var(--ember)" stroke-width="2" fill="none"/>
+        <text x="362" y="156" text-anchor="middle" fill="var(--ember)" font-size="12">the build step: once per game and version</text>
+        <path d="M568 132 H728" stroke="var(--muted)" stroke-width="2" fill="none" stroke-dasharray="4 4"/>
+        <text x="648" y="156" text-anchor="middle" fill="var(--muted)" font-size="12">every frame, while playing</text>
+      </g>
+    </svg>
+  </div>
+</section>
+
+<section>
+  <h2>Games</h2>
+  <div class="panel">
+    <table class="games">
+      <thead><tr><th>Game</th><th>Runs on</th><th>State</th></tr></thead>
+      <tbody>
+        <tr><td>Pokémon Pokopia</td><td>Mac, iPhone, Windows</td><td><span class="pill ok">Playable</span></td></tr>
+        <tr><td>Mario Kart World 1.0.0</td><td>Steam Deck, Linux (Vulkan)</td><td><span class="pill warn">Bring-up</span> full 3D, correct colours, 10–14 fps</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section>
+  <h2>Mario Kart World on the Steam Deck: speed</h2>
+  <p>Measured in a race on the Deck (RADV, Vulkan). Handheld mode renders at 1920×1080 instead of 2560×1440 and halves the GPU work, but the frame rate barely moves: the bottleneck is the CPU thread that replays the game's draw commands through Vulkan, about 3,000 draws a frame. That thread is what the current work speeds up.</p>
+  <div class="panel">
+    <svg viewBox="0 0 900 250" width="100%" role="img" aria-label="Bar chart: GPU time per frame docked 45 to 70 ms, handheld 32 to 40 ms; frames per second docked 7 to 11, handheld after optimizations 10 to 14; target 30">
+      <g font-size="12" fill="var(--muted)">
+        <text x="10" y="22" fill="var(--fg)" font-weight="600">GPU time per frame (ms)</text>
+        <line x1="150" y1="34" x2="150" y2="110" stroke="var(--line)"/>
+        <text x="140" y="58" text-anchor="end">docked</text>
+        <rect x="150" y="45" width="315" height="18" fill="var(--warn)" opacity=".35"/>
+        <rect x="150" y="45" width="202" height="18" fill="var(--warn)"/>
+        <text x="473" y="58">45–70</text>
+        <text x="140" y="92" text-anchor="end">handheld</text>
+        <rect x="150" y="79" width="180" height="18" fill="var(--ok)" opacity=".35"/>
+        <rect x="150" y="79" width="144" height="18" fill="var(--ok)"/>
+        <text x="338" y="92">32–40</text>
+        <text x="10" y="148" fill="var(--fg)" font-weight="600">Frames per second</text>
+        <line x1="150" y1="160" x2="150" y2="236" stroke="var(--line)"/>
+        <text x="140" y="184" text-anchor="end">docked</text>
+        <rect x="150" y="171" width="165" height="18" fill="var(--warn)" opacity=".35"/>
+        <rect x="150" y="171" width="105" height="18" fill="var(--warn)"/>
+        <text x="323" y="184">7–11</text>
+        <text x="140" y="218" text-anchor="end">handheld, now</text>
+        <rect x="150" y="205" width="210" height="18" fill="var(--ok)" opacity=".35"/>
+        <rect x="150" y="205" width="150" height="18" fill="var(--ok)"/>
+        <text x="368" y="218">10–14</text>
+        <line x1="600" y1="160" x2="600" y2="236" stroke="var(--ember)" stroke-dasharray="4 4"/>
+        <text x="606" y="172" fill="var(--ember)">target 30+</text>
+      </g>
+    </svg>
+  </div>
+</section>
+
+<section>
+  <h2>Development log</h2>
+  <div class="log">
+    <div class="item win"><span class="when">6 Nov 2026</span><h3>Menus and the world map render</h3><p>The game boots, sound plays, every 2D screen is right. As soon as a race starts, the screen goes black.</p></div>
+    <div class="item"><span class="when">7–8 Nov</span><h3>Hunting in the dark</h3><p>Only the HUD survives. Hundreds of render-target dumps, many theories ruled out (ASTC, the froxel fog volume, dynamic write masks). The first glimpse: the track's outline in the light buffer, so the geometry is drawn and something removes it later.</p></div>
+    <div class="item win"><span class="when">9 Nov, morning</span><h3>Tools we can trust</h3><p>Pass images were taken before their submission had run, so several conclusions were wrong. They are now copied inside the command stream and written once the GPU is done. An old EQUAL→LEQUAL depth hack turned out to do harm.</p><span class="commit"><b>51be916</b> in-stream pass images</span></div>
+    <div class="item win"><span class="when">9 Nov, 17:17</span><h3>The black screen: timestamps in the counter field</h3><p>The game uses conditional rendering ("clear if this counter is not 0") followed by a timestamp report to the same address, so the clear runs once a frame. Kiln wrote the timestamp into the counter field, and only at completion, so the finished scene was cleared again. The counter is now written as 0 immediately. The whole track appears.</p><span class="commit"><b>5877bd8</b> timestamp reports: counter 0, written at once</span></div>
+    <div class="item win"><span class="when">9 Nov</span><h3>Lost draws into storage textures</h3><p>Colour-grading tables, the 6144×6144 terrain atlas and the final upscale target were created without render-target use, so everything drawn into them vanished.</p><span class="commit"><b>394a6fb</b> storage-class textures may be render targets</span></div>
+    <div class="item win"><span class="when">9 Nov, 19:10</span><h3>Green and pink speckles: one wrong byte select</h3><p>The fog pass packs two colour channels as half-floats in one register and unpacks the high one with <code>I2F.U16.H1</code>. The Ampere→Maxwell lowering passed the half-word selector on as a byte selector, so the shader read bits 8–23 instead of 16–31 and mixed two channels. One line fixed it.</p><span class="commit"><b>9329a92</b> ampere-lower: I2F.U16 high half-word selects Maxwell byte 2</span></div>
+    <div class="item open"><span class="when">9 Nov, evening</span><h3>Speed and the remaining picture faults</h3><p>Profiling shows the replay thread is the limit. First fixes: a per-draw shader lookup that formatted strings on every draw, and descriptor sets that are now reused when a draw binds what an earlier one did. Still open: a pink cast on distant materials, flicker on dithered fades, memory growth over long sessions.</p></div>
+  </div>
+</section>
+
+<section>
+  <div class="rule">
+    <h2>Your copy, your dump, your build</h2>
+    <p>This repository contains tools only. It never contains any part of a game: no code, no data, no shaders in any form, no screenshots of game content. Everything that comes from a game is produced on your machine, from your own dump, and stays in your build folder. Kiln is an independent fan project with no affiliation with Nintendo or any game's publisher.</p>
+  </div>
+</section>
+
+<footer>Kiln is a fork of the Pokopia native builder by xFractals and builds on nxnative, Ryujinx and Eden-NS2. Source and licences: see the repository.</footer>
+</div>
+</body>
+</html>
