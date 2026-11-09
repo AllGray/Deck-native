@@ -252,7 +252,7 @@ static void pass_end(void) {
     wb_flush();
     static uint64_t pi_ser = (uint64_t)-1; static unsigned pi_n;   // NXRT_VK_PASSIMG=<serial>: in the texdump frame, that image after every pass
     if (pi_ser == (uint64_t)-1) { const char *e = getenv("NXRT_VK_PASSIMG"); pi_ser = e ? strtoull(e, NULL, 0) : 0; }
-    if (pi_ser && g_td_on && pi_n < 200) {
+    if (pi_ser && (g_td_on || g_pd) && pi_n < 400) {
         vkt_image *im = P.ncolor ? P.ci[0] : NULL;   // the pass's first colour target, when at least <PASSIMG> wide
         if (im && im->w >= pi_ser && !(im->aspect & VK_IMAGE_ASPECT_DEPTH_BIT)) { char path[1200]; const char *lp = nxrt_log_path(); vks_finish();
             snprintf(path, sizeof path, "%s.passimg-%03u-ser%llu.png", lp && *lp ? lp : "nxrt", pi_n, (unsigned long long)im->serial);
@@ -1029,7 +1029,11 @@ static void draw(const p_draw *dw, const p_draw_idx *di) {
     int bias = (S->poly.offset_en & (cls == 0 || pm == NVN_POLYGON_MODE_POINT ? 1 : cls == 1 || pm == NVN_POLYGON_MODE_LINE ? 2 : 4)) != 0;
     vkCmdSetDepthBiasEnable(cb, bias); vkCmdSetDepthBias(cb, S->po.units, g_vk.f10.depthBiasClamp ? S->po.clamp : 0.0f, S->po.factor);
     vkCmdSetBlendConstants(cb, S->blend_color);
-    vkCmdSetDepthTestEnable(cb, P.hd && S->ds.dt); vkCmdSetDepthWriteEnable(cb, P.hd && S->ds.dw); vkCmdSetDepthCompareOp(cb, vkp_compare(S->ds.df));
+    vkCmdSetDepthTestEnable(cb, P.hd && S->ds.dt); vkCmdSetDepthWriteEnable(cb, P.hd && S->ds.dw); { static int eq = -1; if (eq < 0) { const char *e = getenv("NXRT_VK_DEPTH_EQUAL"); eq = e ? atoi(e) : 1; }
+      // A colour pass over a depth pre-pass tests EQUAL against depth another vertex shader wrote: the host compilers may round the two programs' positions
+      // differently (contracted multiply-adds), and EQUAL then fails nearly everywhere (MKW: every surface black). NXRT_VK_DEPTH_EQUAL=0 keeps EQUAL
+      VkCompareOp op = vkp_compare(S->ds.df); if (eq && op == VK_COMPARE_OP_EQUAL) op = VK_COMPARE_OP_LESS_OR_EQUAL;
+      vkCmdSetDepthCompareOp(cb, op); }
     vkCmdSetDepthBoundsTestEnable(cb, VK_FALSE);
     vkCmdSetStencilTestEnable(cb, P.hs && S->ds.st);
     vkCmdSetStencilOp(cb, VK_STENCIL_FACE_FRONT_BIT, vkp_stencil_op(S->ds.fail_f), vkp_stencil_op(S->ds.zpass_f), vkp_stencil_op(S->ds.zfail_f), vkp_compare(S->ds.sf_f));
@@ -1153,6 +1157,19 @@ static void draw(const p_draw *dw, const p_draw_idx *di) {
     g_st.draws++;
     (void)swrites;
     if (g_nwb >= 240) pass_end();   // the write-back list is nearly full: record the copies now
+    // NXRT_VK_DRAWIMG=<from>,<count>: in the texdump frame, the pass is ended after draws <from>..<from+count> into a target at least NXRT_VK_PASSIMG wide, so the
+    // pass image (pass_end) shows the target after each of them; a draw's index and shader are logged beside its image
+    { static long dfrom = -2, dcnt; static long dn; static uint64_t dframe;
+      if (dfrom == -2) { const char *e = getenv("NXRT_VK_DRAWIMG"); dfrom = -1; if (e) { char *q; dfrom = strtol(e, &q, 0); dcnt = *q == ',' ? strtol(q + 1, NULL, 0) : 60; } }
+      if (dfrom >= 0 && g_pd && P.open && P.ncolor && P.ci[0] && P.ci[0]->w >= 1280) {
+          if (dframe != 1) { dframe = 1; dn = 0; }
+          long k = dn++;
+          if (k >= dfrom && k < dfrom + dcnt) {
+              const vks_shader *f = sh[1];
+              VKLOG("draw image: draw %ld into ser%llu, fs %s, count %u", k, (unsigned long long)P.ci[0]->serial, f ? f->key : "-", di ? (unsigned)di->count : dw ? (unsigned)dw->count : 0u);
+              pass_end();
+          }
+      } }
 }
 
 // ---------- Compute (nvn_mtl.m dispatch) ----------

@@ -280,6 +280,10 @@ static int64_t upload(vkt_image *im, const tex_t *t, VkCommandBuffer cb) {
             if (k == 1) {   // linear: rows at the texture's stride
                 rc = 0; for (uint32_t y = 0; y < s.height && !rc; y++) rc = guarded_copy(lin + y * lrow, src + sbase + y * row, lrow);
             } else rc = guarded_deswizzle(&s, src + sbase, (size_t)savail, lin, lrow, lrow * s.height);
+            { static int ulog = -1; if (ulog < 0) { const char *e = getenv("NXRT_VK_UPLOG"); ulog = e ? atoi(e) : 0; }   // NXRT_VK_UPLOG=n: the first n level-0 uploads, how much is not zero
+              if (ulog > 0 && !rc && level == 0 && layer == 0) { static int nn; if (nn < ulog) { nn++; size_t nz = 0; for (size_t q = 0; q < lsize; q++) nz += lin[q] != 0;
+                  VKLOG("upload ser%llu %ux%u %s cls %d: %zu of %zu bytes not zero, first bytes %02x %02x %02x %02x %02x %02x %02x %02x", (unsigned long long)t->serial, im->w, im->h, fi->name, im->cls, nz, lsize,
+                        lin[0], lin[1], lin[2], lin[3], lin[4], lin[5], lin[6], lin[7]); } } }
             if (rc) { static int n; if (n++ < 8) VKRED("texture %ux%u format %s: level %u layer %u storage could not be read (%d)", im->w, im->h, fi->name, level, layer, rc); free(lin); continue; }
             // what goes to the staging buffer, and how Vulkan reads it
             const uint8_t *out = lin; size_t out_size = lsize; uint8_t *conv = NULL; uint32_t row_texels = s.width * fi->bw, img_rows = s.height * fi->bh;
