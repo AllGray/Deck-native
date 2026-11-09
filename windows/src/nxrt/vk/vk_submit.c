@@ -81,7 +81,11 @@ void vks_flush(void) { AcquireSRWLockExclusive(&g_lk); flush_locked(); ReleaseSR
 static void post_run(post_t *p) {
     if (p->kind == 1) { if (p->mode == 1) *p->val += p->v; else *p->val = p->v; }
     else if (p->kind == 2) {   // NVN's counter record: the counter (a timestamp's own value for the timestamp counters, 0 for the rest until the replay has queries), then the time
-        uint64_t t = nvn_timestamp_from_ns(guest_ns()), rec[2] = {p->type == 0 || p->type == 0x10 ? t : 0, t};
+        // A TIMESTAMP report writes 0 into its counter field (Maxwell: the counter is the report's payload, 0; NX2navi maxwell.md 1.4 / 4.2). Games compare two such
+        // records with conditional rendering to skip clears: the timestamp in the counter made them differ, and Mario Kart World cleared its finished scene.
+        // NXRT_VK_REPORT_TS_COUNTER=1 puts the timestamp there as before
+        static int tsc = -1; if (tsc < 0) { const char *e = getenv("NXRT_VK_REPORT_TS_COUNTER"); tsc = e ? atoi(e) : 0; }
+        uint64_t t = nvn_timestamp_from_ns(guest_ns()), rec[2] = {tsc && (p->type == 0 || p->type == 0x10) ? t : 0, t};
         void dm_guest_write_prepare(void *addr, size_t len);
         dm_guest_write_prepare((void *)(uintptr_t)p->addr, sizeof rec);
         memcpy((void *)(uintptr_t)p->addr, rec, sizeof rec);

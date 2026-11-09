@@ -1586,6 +1586,13 @@ static void report_counter(uint64_t type, uint64_t addr) {
         q_post(2, 0, addr); return;
     }
     if (type != NVN_COUNTER_TYPE_TIMESTAMP && type != NVN_COUNTER_TYPE_TIMESTAMP_TOP) { static uint32_t seen; if (!(seen >> (type & 31) & 1)) { seen |= 1u << (type & 31); VKRED("counter type %llu is reported as 0 (only timestamps and samples passed are counted)", (unsigned long long)type); } }
+    // The counter half of a timestamp report is 0 whatever the GPU does: write it now, in replay order, so a conditional render later in this submission sees it.
+    // Mario Kart World clears its scene target under "render if counter != 0", then reports a timestamp there so the clear runs once per frame: written only at
+    // completion, the 0 came too late and the finished scene was cleared again. The timestamp itself is still written at completion. NXRT_VK_REPORT_NOW=0 off
+    { static int now = -1; if (now < 0) { const char *e = getenv("NXRT_VK_REPORT_NOW"); now = e ? atoi(e) : 1; }
+      if (now && addr && (type == NVN_COUNTER_TYPE_TIMESTAMP || type == NVN_COUNTER_TYPE_TIMESTAMP_TOP)) {
+          void dm_guest_write_prepare(void *addr, size_t len); uint64_t zero = 0;
+          dm_guest_write_prepare((void *)(uintptr_t)addr, 8); memcpy((void *)(uintptr_t)addr, &zero, 8); } }
     vks_post_counter(addr, (uint32_t)type);
 }
 static void reset_counter(uint64_t type) {
@@ -1668,6 +1675,7 @@ static void render_cond(const p_render_cond *rc) {   // nvn_mtl.m OP_RENDER_COND
     known &= read_u32(rc->addr, &lo) && read_u32(rc->addr + 4, &hi); x = (uint64_t)hi << 32 | lo;
     known &= read_u32(rc->addr + 16, &lo) && read_u32(rc->addr + 20, &hi); y = (uint64_t)hi << 32 | lo;
     S->render_skip = known && (rc->mode ? x == y : x != y);
+    if (g_pd) PD("render_cond mode %d at %#llx: x %llu y %llu known %d -> skip %d", rc->mode, (unsigned long long)rc->addr, (unsigned long long)x, (unsigned long long)y, known, S->render_skip);
     { static _Atomic int n; if (atomic_fetch_add(&n, 1) < 80)
         VKLOG("render_cond mode=%d addr=%#llx known=%d x=%llu y=%llu: skip=%d", rc->mode, (unsigned long long)rc->addr, known, (unsigned long long)x, (unsigned long long)y, S->render_skip); }
 }
@@ -1689,8 +1697,8 @@ static int walk(const uint8_t *p, int depth, uint64_t *budget) {
         case OP_JUMP: { const uint8_t *t; memcpy(&t, a, 8); if (!t) { bad_record(p, h, "a JUMP to 0"); return -1; } p = t; continue; }
         case OP_CALL: { uint64_t t; memcpy(&t, a, 8); if (depth >= 8 || !t) { bad_record(p, h, depth >= 8 ? "CALLs nested deeper than 8" : "a CALL of handle 0"); return -1; }
             if (walk((const uint8_t *)(uintptr_t)t, depth + 1, budget)) return -1; break; }
-        case OP_SIGNAL_EVENT: { volatile uint32_t *val; uint32_t m, v; memcpy(&val, a, 8); memcpy(&m, a + 8, 4); memcpy(&v, a + 12, 4); if (val) vks_post_event(val, m == NVN_EVENT_SIGNAL_MODE_ADD ? 1 : 0, v); break; }
-        case OP_REPORT_COUNTER: { uint64_t t, ad; memcpy(&t, a, 8); memcpy(&ad, a + 8, 8); report_counter(t, ad); break; }
+        case OP_SIGNAL_EVENT: { volatile uint32_t *val; uint32_t m, v; memcpy(&val, a, 8); memcpy(&m, a + 8, 4); memcpy(&v, a + 12, 4); if (g_pd) PD("value write %#llx mode %u value %u (now %u)", (unsigned long long)(uintptr_t)val, m, v, val ? *val : 0); if (val) vks_post_event(val, m == NVN_EVENT_SIGNAL_MODE_ADD ? 1 : 0, v); break; }
+        case OP_REPORT_COUNTER: { uint64_t t, ad; memcpy(&t, a, 8); memcpy(&ad, a + 8, 8); if (g_pd) PD("report counter type %llu at %#llx", (unsigned long long)t, (unsigned long long)ad); report_counter(t, ad); break; }
         case OP_RESET_COUNTER: { uint64_t t; memcpy(&t, a, 8); reset_counter(t); break; }
         case OP_FENCE_SYNC: { sync_t *s; memcpy(&s, a, 8); if (s) vk_note_fence_sync(s); break; }
         case OP_COPY_B2B: { uint64_t s_, d, n; memcpy(&s_, a, 8); memcpy(&d, a + 8, 8); memcpy(&n, a + 16, 8); vkr_copy(s_, d, n); break; }

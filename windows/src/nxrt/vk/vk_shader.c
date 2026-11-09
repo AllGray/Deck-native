@@ -901,6 +901,7 @@ vks_shader *vksh_make(const char *key, const uint8_t *spv, size_t spv_size, cons
     { static int ng = -1; if (ng < 0) { const char *e = getenv("NXRT_VK_FS_NANGUARD"); ng = e ? atoi(e) : 1; }
       if (ng && s->stage == VKS_FS) { size_t nn6; uint32_t *w6 = spv_fs_nanguard(w, nw, &nn6); if (w6) { free(w); w = w6; spv_size = nn6 * 4; nw = nn6; } } }
     { static int so = -1; if (so < 0) { const char *e = getenv("NXRT_VK_FS_SOLID"); so = e ? atoi(e) : 0; }
+      { const char *sk = getenv("NXRT_VK_FS_SOLID_KEYS"); if (sk && strstr(sk, key) && s->stage == VKS_FS) { size_t nn7; uint32_t *w7 = spv_fs_solid(w, nw, &nn7); if (w7) { free(w); w = w7; spv_size = nn7 * 4; nw = nn7; } } }
       if (so && s->stage == VKS_FS) { size_t nn4; uint32_t *w4 = spv_fs_solid(w, nw, &nn4); if (w4) { free(w); w = w4; spv_size = nn4 * 4; nw = nn4; } } }
     { static int vz = -1; if (vz < 0) { const char *e = getenv("NXRT_VK_VS_ZMID"); vz = e ? atoi(e) : 0; }
       int vzl = vz; { const char *ks = getenv("NXRT_VK_VS_FT_KEYS"); if (vzl == 3 && ks && !strstr(ks, key)) vzl = 0; }
