@@ -30,6 +30,7 @@ typedef struct vks_shader {
     int nb; vks_bind *b;
     int nin; struct { uint8_t loc, ct, ncomp; } in[32];   // vertex inputs: location = NVN vertex attribute
     uint32_t out_mask; uint8_t out_ct[8];                   // fragment outputs written
+    uint8_t out_comp[8];                                   // components of each fragment output the code stores (SPIR-V scan), 0xf when unknown
     uint32_t local[3];                                      // compute work group size
     uint8_t drv_read[3];                                    // driver segments c0 / c2 read at run time
     int s2cs; uint32_t s2_ssbo_base, s2_tex_base, s2_ntex;  // Switch 2 packed compute bank (s2_compute_layout)

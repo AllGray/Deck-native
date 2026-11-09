@@ -578,6 +578,310 @@ void vksh_free(vks_shader *s) {
     free(s->words); free(s);
 }
 
+// The components of each fragment output the code stores: the translator declares every output a vec4, but a shader that writes only xy leaves
+// z and w to the hardware, which on Maxwell keeps the target's old texel (the shader header's omap) while AMD exports whatever its registers hold
+static void out_comp_scan(const uint32_t *w, size_t n, uint8_t comp[8]) {
+    for (int i = 0; i < 8; i++) comp[i] = 0;
+    if (n < 5) { for (int i = 0; i < 8; i++) comp[i] = 0xf; return; }
+    uint32_t bound = w[3]; if (bound > (1u << 22)) { for (int i = 0; i < 8; i++) comp[i] = 0xf; return; }
+    int8_t *loc = malloc(bound); uint8_t *isout = calloc(bound, 1); int64_t *cval = malloc(bound * sizeof(int64_t)); int32_t *chain = malloc(bound * sizeof(int32_t));
+    if (!loc || !isout || !cval || !chain) { free(loc); free(isout); free(cval); free(chain); for (int i = 0; i < 8; i++) comp[i] = 0xf; return; }
+    memset(loc, -1, bound); for (uint32_t i = 0; i < bound; i++) { cval[i] = -1; chain[i] = -1; }
+    // chain[id] = (output id << 3) | component, or component 7 for "all"
+    for (int pass = 0; pass < 2; pass++)
+    for (size_t p = 5; p < n;) {
+        uint32_t op = w[p] & 0xffff, wc = w[p] >> 16; if (!wc || p + wc > n) break;
+        const uint32_t *o = w + p + 1;
+        if (pass == 0) {
+            if (op == 71 && wc >= 4 && o[1] == 30 && o[0] < bound) loc[o[0]] = (int8_t)(o[2] < 8 ? o[2] : -1);          // OpDecorate Location
+            else if (op == 59 && wc >= 4 && o[2] == 3 && o[1] < bound) isout[o[1]] = 1;                                 // OpVariable Output
+            else if (op == 43 && wc >= 4 && o[1] < bound) cval[o[1]] = o[2];                                             // OpConstant
+        } else {
+            if ((op == 65 || op == 66) && wc >= 4 && o[1] < bound && o[2] < bound && isout[o[2]] && loc[o[2]] >= 0) {    // OpAccessChain into an output
+                int64_t c = wc >= 5 && o[3] < bound ? cval[o[3]] : -1;
+                chain[o[1]] = (int32_t)(((uint32_t)loc[o[2]] << 3) | (c >= 0 && c < 4 ? (uint32_t)c : 7));
+            } else if (op == 62 && wc >= 3 && o[0] < bound) {                                                           // OpStore
+                if (isout[o[0]] && loc[o[0]] >= 0) comp[(int)loc[o[0]]] = 0xf;
+                else if (chain[o[0]] >= 0) { int l = chain[o[0]] >> 3, c = chain[o[0]] & 7; comp[l] |= c == 7 ? 0xf : 1u << c; }
+            } else if (op == 57 || op == 63) {                                                                          // OpFunctionCall / OpCopyMemory: give up on what they touch
+                for (uint32_t k = 0; k + 1 < wc; k++) if (o[k] < bound && isout[o[k]] && loc[o[k]] >= 0) comp[(int)loc[o[k]]] = 0xf;
+            }
+        }
+        p += wc;
+    }
+    free(loc); free(isout); free(cval); free(chain);
+}
+// Maxwell FMNMX returns the other operand when one is NaN, and a saturate takes NaN to 0; GLSL.std.450 FMin, FMax and FClamp may return either,
+// so one NaN texel spreads through lighting and bloom. NMin, NMax and NClamp match FMNMX (in place, same word count). NXRT_VK_NMINMAX=0 keeps them
+static int spv_nan_minmax(uint32_t *w, size_t n) {
+    uint32_t glsl = 0; int k = 0;
+    for (size_t p = 5; p < n;) { uint32_t op = w[p] & 0xffff, wc = w[p] >> 16; if (!wc || p + wc > n) break;
+        if (op == 11 && wc >= 3 && !memcmp(&w[p + 2], "GLSL.std.450", 12)) glsl = w[p + 1];
+        else if (op == 12 && wc >= 5 && glsl && w[p + 3] == glsl) { uint32_t *i = &w[p + 4]; if (*i == 37) { *i = 79; k++; } else if (*i == 40) { *i = 80; k++; } else if (*i == 43) { *i = 81; k++; } }
+        p += wc; }
+    return k;
+}
+// A position computed by the same code is identical in every program on Maxwell (a depth pre-pass drawn again with EQUAL): decorate it Invariant.
+// New words (caller frees the old) or NULL when there is no position or it is invariant already
+static uint32_t *spv_invariant_position(const uint32_t *w, size_t n, size_t *nn) {
+    size_t at = 0; uint32_t ins[4] = {0}; int len = 0;
+    for (size_t p = 5; p < n;) { uint32_t op = w[p] & 0xffff, wc = w[p] >> 16; if (!wc || p + wc > n) break;
+        if (op == 72 && wc >= 5 && w[p + 3] == 11 && w[p + 4] == 0) { at = p + wc; ins[0] = (4u << 16) | 72; ins[1] = w[p + 1]; ins[2] = w[p + 2]; ins[3] = 18; len = 4; }   // OpMemberDecorate s m BuiltIn Position
+        else if (op == 71 && wc >= 4 && w[p + 2] == 11 && w[p + 3] == 0) { at = p + wc; ins[0] = (3u << 16) | 71; ins[1] = w[p + 1]; ins[2] = 18; len = 3; }                // OpDecorate v BuiltIn Position
+        else if ((op == 72 && wc >= 4 && w[p + 3] == 18) || (op == 71 && wc >= 3 && w[p + 2] == 18)) return NULL;
+        p += wc; }
+    if (!at) return NULL;
+    uint32_t *o = malloc((n + len) * 4); if (!o) return NULL;
+    memcpy(o, w, at * 4); memcpy(o + at, ins, len * 4); memcpy(o + at + len, w + at, (n - at) * 4); *nn = n + len; return o;
+}
+// A register read on a path that did not write it has no defined value in the game's code (NVIDIA gives 0); an OpVariable without an initializer
+// loads an undefined value that Mesa folds freely. Every function-local variable starts at OpConstantNull. New words or NULL. NXRT_VK_ZERO_LOCALS=0 off
+static uint32_t *spv_zero_locals(const uint32_t *w, size_t n, size_t *nn) {
+    if (n < 5) return NULL;
+    uint32_t bound = w[3]; if (bound > (1u << 22)) return NULL;
+    uint32_t *pointee = calloc(bound, 4), *nul = calloc(bound, 4); if (!pointee || !nul) { free(pointee); free(nul); return NULL; }
+    size_t first_fn = 0; int nvar = 0, ntype = 0;
+    for (size_t p = 5; p < n;) { uint32_t op = w[p] & 0xffff, wc = w[p] >> 16; if (!wc || p + wc > n) break;
+        if (op == 32 && wc == 4 && w[p + 2] == 7 && w[p + 1] < bound) pointee[w[p + 1]] = w[p + 3];          // OpTypePointer Function T
+        else if (op == 54 && !first_fn) first_fn = p;                                                        // OpFunction
+        else if (op == 59 && wc == 4 && w[p + 3] == 7 && w[p + 1] < bound && pointee[w[p + 1]]) {          // OpVariable Function, no initializer
+            uint32_t t = pointee[w[p + 1]]; if (t < bound && !nul[t]) { nul[t] = bound + (uint32_t)ntype++; } nvar++; }
+        p += wc; }
+    if (!nvar || !first_fn) { free(pointee); free(nul); return NULL; }
+    uint32_t *o = malloc((n + 3 * (size_t)ntype + (size_t)nvar) * 4); if (!o) { free(pointee); free(nul); return NULL; }
+    size_t q = 0;
+    for (size_t p = 0; p < 5; p++) o[q++] = w[p];
+    o[3] = bound + (uint32_t)ntype;
+    for (size_t p = 5; p < n;) { uint32_t op = w[p] & 0xffff, wc = w[p] >> 16; if (!wc || p + wc > n) break;
+        if (p == first_fn) for (uint32_t t = 0; t < bound; t++) if (nul[t]) { o[q++] = (3u << 16) | 46; o[q++] = t; o[q++] = nul[t]; }   // OpConstantNull T
+        if (op == 59 && wc == 4 && w[p + 3] == 7 && w[p + 1] < bound && pointee[w[p + 1]] && pointee[w[p + 1]] < bound && nul[pointee[w[p + 1]]]) {
+            o[q++] = (5u << 16) | 59; o[q++] = w[p + 1]; o[q++] = w[p + 2]; o[q++] = 7; o[q++] = nul[pointee[w[p + 1]]];
+        } else { memcpy(o + q, w + p, wc * 4); q += wc; }
+        p += wc; }
+    free(pointee); free(nul); *nn = q; return o;
+}
+// Test (NXRT_VK_FS_SOLID=1): a fragment shader stores (1, 0, 0, 1) into its location-0 vec4 output before every OpReturn of its entry point. New words or NULL
+static uint32_t *spv_fs_solid(const uint32_t *w, size_t n, size_t *nn) {
+    if (n < 5) return NULL;
+    uint32_t bound = w[3], f32 = 0, v4 = 0, outvar = 0, entry = 0; size_t first_fn = 0;
+    uint32_t *loc = calloc(bound, 4), *ptype = calloc(bound, 4), *vtype = calloc(bound, 4); if (!loc || !ptype || !vtype) { free(loc); free(ptype); free(vtype); return NULL; }
+    for (uint32_t i = 0; i < bound; i++) loc[i] = 0xffffffff;
+    for (size_t p = 5; p < n;) { uint32_t op = w[p] & 0xffff, wc = w[p] >> 16; if (!wc || p + wc > n) break; const uint32_t *o = w + p + 1;
+        if (op == 15 && wc >= 3) entry = o[1];
+        else if (op == 71 && wc >= 4 && o[1] == 30 && o[0] < bound) loc[o[0]] = o[2];
+        else if (op == 22 && wc == 3 && o[1] == 32) f32 = o[0];
+        else if (op == 23 && wc == 4 && o[1] == f32 && o[2] == 4) v4 = o[0];
+        else if (op == 32 && wc == 4 && o[0] < bound) ptype[o[0]] = o[2];
+        else if (op == 59 && wc >= 4 && o[2] == 3 && o[1] < bound && o[0] < bound && loc[o[1]] == 0 && ptype[o[0]] == v4 && v4) outvar = o[1];
+        else if (op == 54 && !first_fn) first_fn = p;
+        p += wc; }
+    free(loc); free(ptype); free(vtype);
+    if (!outvar || !first_fn || !f32 || !v4 || !entry) return NULL;
+    uint32_t c1 = bound, c0 = bound + 1, cv = bound + 2;
+    uint32_t *o = malloc((n + 16 + 3 * 64) * 4 + n * 4); if (!o) return NULL;
+    size_t q = 0; for (int i = 0; i < 5; i++) o[q++] = w[i]; o[3] = bound + 3;
+    int in_entry = 0;
+    for (size_t p = 5; p < n;) { uint32_t op = w[p] & 0xffff, wc = w[p] >> 16; if (!wc || p + wc > n) break;
+        if (p == first_fn) { o[q++] = (4u << 16) | 43; o[q++] = f32; o[q++] = c1; o[q++] = 0x3f800000; o[q++] = (4u << 16) | 43; o[q++] = f32; o[q++] = c0; o[q++] = 0;
+                             o[q++] = (7u << 16) | 44; o[q++] = v4; o[q++] = cv; o[q++] = c1; o[q++] = c0; o[q++] = c0; o[q++] = c1; }
+        if (op == 54) in_entry = w[p + 2] == entry;
+        if (op == 253 && in_entry) { o[q++] = (3u << 16) | 62; o[q++] = outvar; o[q++] = cv; }
+        memcpy(o + q, w + p, wc * 4); q += wc; p += wc; }
+    *nn = q; return o;
+}
+// Test (NXRT_VK_VS_ZMID=1): a vertex shader's position gets z = 0.5 w before every OpReturn of its entry point (keeps x, y, w); =2 also puts x, y on screen
+// (x / |w|, y / |w| clamped to +-0.95, NaN to 0, w = 1). Tells depth clipping from positions off screen. New words or NULL
+static uint32_t *spv_vs_zmid(const uint32_t *w, size_t n, int mode, size_t *nn) {
+    if (n < 5) return NULL;
+    uint32_t bound = w[3], f32 = 0, v4 = 0, i32 = 0, glsl = 0, boolt = 0, entry = 0, posvar = 0, posmember = 0xffffffff, ptr_out_v4 = 0, ptr_out_f = 0; size_t first_fn = 0;
+    uint32_t *ptype = calloc(bound, 4), *psc = calloc(bound, 4), *blockpos = calloc(bound, 4); if (!ptype || !psc || !blockpos) { free(ptype); free(psc); free(blockpos); return NULL; }
+    uint32_t posdirect = 0;
+    for (size_t p = 5; p < n;) { uint32_t op = w[p] & 0xffff, wc = w[p] >> 16; if (!wc || p + wc > n) break; const uint32_t *o = w + p + 1;
+        if (op == 15 && wc >= 3) entry = o[1];
+        else if (op == 11 && wc >= 3 && !memcmp(&o[1], "GLSL.std.450", 12)) glsl = o[0];
+        else if (op == 72 && wc >= 5 && o[2] == 11 && o[3] == 0 && o[0] < bound) { blockpos[o[0]] = 1; posmember = o[1]; }
+        else if (op == 71 && wc >= 4 && o[1] == 11 && o[2] == 0) posdirect = o[0];
+        else if (op == 22 && wc == 3 && o[1] == 32) f32 = o[0];
+        else if (op == 21 && wc == 4 && o[1] == 32 && o[2] == 1) i32 = o[0];
+        else if (op == 20 && wc == 2) boolt = o[0];
+        else if (op == 23 && wc == 4 && o[1] == f32 && o[2] == 4) v4 = o[0];
+        else if (op == 32 && wc == 4 && o[0] < bound) { ptype[o[0]] = o[2]; psc[o[0]] = o[1]; if (o[1] == 3 && o[2] == v4 && v4) ptr_out_v4 = o[0]; if (o[1] == 3 && o[2] == f32 && f32) ptr_out_f = o[0]; }
+        else if (op == 59 && wc >= 4 && o[2] == 3 && o[1] < bound && o[0] < bound) { uint32_t t = ptype[o[0]]; if ((t < bound && blockpos[t]) || o[1] == posdirect) posvar = o[1]; }
+        else if (op == 54 && !first_fn) first_fn = p;
+        p += wc; }
+    int block = posvar && posvar != posdirect;
+    free(ptype); free(psc); free(blockpos);
+    if (!posvar || !first_fn || !f32 || !v4 || !entry || !glsl || (block && !i32)) return NULL;
+    uint32_t id = bound;
+    uint32_t c_half = id++, c_mem = id++, pt = ptr_out_v4 ? ptr_out_v4 : id++, c0 = id++, c95 = id++, cn95 = id++, c1 = id++, bt = boolt ? boolt : id++, c_eps = id++;
+    uint32_t *o = malloc((n + 64 + 64 * 64) * 4 + n * 4); if (!o) return NULL;
+    size_t q = 0; for (int i = 0; i < 5; i++) o[q++] = w[i];
+    int in_entry = 0; uint32_t fresh = 0;
+    // reserve: ids per return are allocated below; patch bound at the end
+    for (size_t p = 5; p < n;) { uint32_t op = w[p] & 0xffff, wc = w[p] >> 16; if (!wc || p + wc > n) break;
+        if (p == first_fn) {
+            if (!boolt) { o[q++] = (2u << 16) | 20; o[q++] = bt; }
+            if (!ptr_out_v4) { o[q++] = (4u << 16) | 32; o[q++] = pt; o[q++] = 3; o[q++] = v4; }
+            o[q++] = (4u << 16) | 43; o[q++] = f32; o[q++] = c_half; o[q++] = 0x3f000000;
+            if (block) { o[q++] = (4u << 16) | 43; o[q++] = i32; o[q++] = c_mem; o[q++] = posmember; } else { o[q++] = (4u << 16) | 43; o[q++] = f32; o[q++] = c_mem; o[q++] = 0; }
+            o[q++] = (4u << 16) | 43; o[q++] = f32; o[q++] = c0; o[q++] = 0;
+            o[q++] = (4u << 16) | 43; o[q++] = f32; o[q++] = c95; o[q++] = 0x3f733333;
+            o[q++] = (4u << 16) | 43; o[q++] = f32; o[q++] = cn95; o[q++] = 0xbf733333;
+            o[q++] = (4u << 16) | 43; o[q++] = f32; o[q++] = c1; o[q++] = 0x3f800000;
+            o[q++] = (4u << 16) | 43; o[q++] = f32; o[q++] = c_eps; o[q++] = 0x358637bd;
+        }
+        if (op == 54) in_entry = w[p + 2] == entry;
+        if (op == 253 && in_entry) {
+            uint32_t ptr = posvar;
+            if (block) { ptr = id++; o[q++] = (5u << 16) | 65; o[q++] = pt; o[q++] = ptr; o[q++] = posvar; o[q++] = c_mem; }
+            uint32_t v = id++; o[q++] = (4u << 16) | 61; o[q++] = v4; o[q++] = v; o[q++] = ptr;
+            uint32_t x = id++, y = id++, ww = id++;
+            o[q++] = (5u << 16) | 81; o[q++] = f32; o[q++] = x; o[q++] = v; o[q++] = 0;
+            o[q++] = (5u << 16) | 81; o[q++] = f32; o[q++] = y; o[q++] = v; o[q++] = 1;
+            o[q++] = (5u << 16) | 81; o[q++] = f32; o[q++] = ww; o[q++] = v; o[q++] = 3;
+            uint32_t nv = id++;
+            if (mode == 1) { uint32_t z = id++; o[q++] = (5u << 16) | 133; o[q++] = f32; o[q++] = z; o[q++] = ww; o[q++] = c_half;
+                             o[q++] = (7u << 16) | 80; o[q++] = v4; o[q++] = nv; o[q++] = x; o[q++] = y; o[q++] = z; o[q++] = ww; }
+            else {
+                uint32_t aw = id++, aw2 = id++, xd = id++, yd = id++, xn = id++, yn = id++, xs = id++, ys = id++, xc = id++, yc = id++;
+                o[q++] = (6u << 16) | 12; o[q++] = f32; o[q++] = aw; o[q++] = glsl; o[q++] = 4; o[q++] = ww;            // FAbs
+                o[q++] = (7u << 16) | 12; o[q++] = f32; o[q++] = aw2; o[q++] = glsl; o[q++] = 40; o[q++] = aw; o[q++] = c_eps;   // FMax
+                o[q++] = (5u << 16) | 136; o[q++] = f32; o[q++] = xd; o[q++] = x; o[q++] = aw2;   // FDiv
+                o[q++] = (5u << 16) | 136; o[q++] = f32; o[q++] = yd; o[q++] = y; o[q++] = aw2;
+                o[q++] = (4u << 16) | 156; o[q++] = bt; o[q++] = xn; o[q++] = xd;                 // IsNan
+                o[q++] = (4u << 16) | 156; o[q++] = bt; o[q++] = yn; o[q++] = yd;
+                o[q++] = (6u << 16) | 169; o[q++] = f32; o[q++] = xs; o[q++] = xn; o[q++] = c0; o[q++] = xd;   // Select
+                o[q++] = (6u << 16) | 169; o[q++] = f32; o[q++] = ys; o[q++] = yn; o[q++] = c0; o[q++] = yd;
+                o[q++] = (8u << 16) | 12; o[q++] = f32; o[q++] = xc; o[q++] = glsl; o[q++] = 43; o[q++] = xs; o[q++] = cn95; o[q++] = c95;   // FClamp
+                o[q++] = (8u << 16) | 12; o[q++] = f32; o[q++] = yc; o[q++] = glsl; o[q++] = 43; o[q++] = ys; o[q++] = cn95; o[q++] = c95;
+                o[q++] = (7u << 16) | 80; o[q++] = v4; o[q++] = nv; o[q++] = xc; o[q++] = yc; o[q++] = c_half; o[q++] = c1;
+            }
+            o[q++] = (3u << 16) | 62; o[q++] = ptr; o[q++] = nv;
+            fresh++;
+        }
+        memcpy(o + q, w + p, wc * 4); q += wc; p += wc; }
+    o[3] = id; *nn = q; return o;
+}
+// Test (NXRT_VK_VS_ZMID=3): the position becomes a screen-covering triangle from gl_VertexIndex: x = (i & 1) * 4 - 1, y = (i & 2) * 2 - 1, z 0.5, w 1.
+// Adds a VertexIndex input (and lists it on the entry point) when the shader has none. New words or NULL
+static uint32_t *spv_vs_fulltri(const uint32_t *w, size_t n, size_t *nn) {
+    if (n < 5) return NULL;
+    uint32_t bound = w[3], f32 = 0, v4 = 0, i32 = 0, entry = 0, posvar = 0, posmember = 0xffffffff, ptr_out_v4 = 0, ptr_in_i = 0, vidx = 0, posdirect = 0;
+    size_t first_fn = 0, ep_at = 0, first_dec = 0;
+    uint32_t *ptype = calloc(bound, 4), *blockpos = calloc(bound, 4); if (!ptype || !blockpos) { free(ptype); free(blockpos); return NULL; }
+    for (size_t p = 5; p < n;) { uint32_t op = w[p] & 0xffff, wc = w[p] >> 16; if (!wc || p + wc > n) break; const uint32_t *o = w + p + 1;
+        if (op == 15 && wc >= 3) { entry = o[1]; ep_at = p; }
+        else if ((op == 71 || op == 72) && !first_dec) first_dec = p;
+        if (op == 72 && wc >= 5 && o[2] == 11 && o[3] == 0 && o[0] < bound) { blockpos[o[0]] = 1; posmember = o[1]; }
+        else if (op == 71 && wc >= 4 && o[1] == 11 && o[2] == 0) posdirect = o[0];
+        else if (op == 71 && wc >= 4 && o[1] == 11 && o[2] == 42) vidx = o[0];
+        else if (op == 22 && wc == 3 && o[1] == 32) f32 = o[0];
+        else if (op == 21 && wc == 4 && o[1] == 32 && o[2] == 1) i32 = o[0];
+        else if (op == 23 && wc == 4 && o[1] == f32 && o[2] == 4) v4 = o[0];
+        else if (op == 32 && wc == 4 && o[0] < bound) { ptype[o[0]] = o[2]; if (o[1] == 3 && o[2] == v4 && v4) ptr_out_v4 = o[0]; if (o[1] == 1 && o[2] == i32 && i32) ptr_in_i = o[0]; }
+        else if (op == 59 && wc >= 4 && o[2] == 3 && o[1] < bound && o[0] < bound) { uint32_t t = ptype[o[0]]; if ((t < bound && blockpos[t]) || o[1] == posdirect) posvar = o[1]; }
+        else if (op == 54 && !first_fn) first_fn = p;
+        p += wc; }
+    int block = posvar && posvar != posdirect;
+    free(ptype); free(blockpos);
+    if (!posvar || !first_fn || !f32 || !v4 || !i32 || !entry || !ep_at || !first_dec) return NULL;
+    uint32_t id = bound;
+    uint32_t pt = ptr_out_v4 ? ptr_out_v4 : id++, pti = ptr_in_i ? ptr_in_i : id++, vi = vidx ? vidx : id++;
+    uint32_t c_mem = id++, c1i = id++, c2i = id++, c4i = id++, cm1i = id++, c_half = id++, c_one = id++; uint32_t c_small = id++;
+    uint32_t *o = malloc((n + 128 + 64 * 32) * 4 + n * 4); if (!o) return NULL;
+    size_t q = 0; for (int i = 0; i < 5; i++) o[q++] = w[i];
+    int in_entry = 0;
+    for (size_t p = 5; p < n;) { uint32_t op = w[p] & 0xffff, wc = w[p] >> 16; if (!wc || p + wc > n) break;
+        if (p == ep_at && !vidx) {   // entry point with the new input listed
+            o[q++] = ((wc + 1) << 16) | 15; memcpy(o + q, w + p + 1, (wc - 1) * 4); q += wc - 1; o[q++] = vi; p += wc; continue; }
+        if (p == first_dec && !vidx) { o[q++] = (4u << 16) | 71; o[q++] = vi; o[q++] = 11; o[q++] = 42; }
+        if (p == first_fn) {
+            if (!ptr_out_v4) { o[q++] = (4u << 16) | 32; o[q++] = pt; o[q++] = 3; o[q++] = v4; }
+            if (!ptr_in_i) { o[q++] = (4u << 16) | 32; o[q++] = pti; o[q++] = 1; o[q++] = i32; }
+            if (!vidx) { o[q++] = (4u << 16) | 59; o[q++] = pti; o[q++] = vi; o[q++] = 1; }
+            o[q++] = (4u << 16) | 43; o[q++] = i32; o[q++] = c_mem; o[q++] = block ? posmember : 0;
+            o[q++] = (4u << 16) | 43; o[q++] = i32; o[q++] = c1i; o[q++] = 1;
+            o[q++] = (4u << 16) | 43; o[q++] = i32; o[q++] = c2i; o[q++] = 2;
+            o[q++] = (4u << 16) | 43; o[q++] = i32; o[q++] = c4i; o[q++] = 4;
+            o[q++] = (4u << 16) | 43; o[q++] = i32; o[q++] = cm1i; o[q++] = 0xffffffff;
+            o[q++] = (4u << 16) | 43; o[q++] = f32; o[q++] = c_half; o[q++] = 0x3f000000;
+            o[q++] = (4u << 16) | 43; o[q++] = f32; o[q++] = c_one; o[q++] = 0x3f800000;
+            o[q++] = (4u << 16) | 43; o[q++] = f32; o[q++] = c_small; o[q++] = 0x3d4ccccd;
+        }
+        if (op == 54) in_entry = w[p + 2] == entry;
+        if (op == 253 && in_entry) {
+            uint32_t ptr = posvar;
+            if (block) { ptr = id++; o[q++] = (5u << 16) | 65; o[q++] = pt; o[q++] = ptr; o[q++] = posvar; o[q++] = c_mem; }
+            uint32_t l = id++, a1 = id++, m4 = id++, xi = id++, a2 = id++, m2 = id++, yi = id++, xf = id++, yf = id++, nv = id++;
+            o[q++] = (4u << 16) | 61; o[q++] = i32; o[q++] = l; o[q++] = vi;
+            o[q++] = (5u << 16) | 199; o[q++] = i32; o[q++] = a1; o[q++] = l; o[q++] = c1i;      // BitwiseAnd
+            o[q++] = (5u << 16) | 132; o[q++] = i32; o[q++] = m4; o[q++] = a1; o[q++] = c4i;     // IMul
+            o[q++] = (5u << 16) | 128; o[q++] = i32; o[q++] = xi; o[q++] = m4; o[q++] = cm1i;    // IAdd
+            o[q++] = (5u << 16) | 199; o[q++] = i32; o[q++] = a2; o[q++] = l; o[q++] = c2i;
+            o[q++] = (5u << 16) | 132; o[q++] = i32; o[q++] = m2; o[q++] = a2; o[q++] = c2i;
+            o[q++] = (5u << 16) | 128; o[q++] = i32; o[q++] = yi; o[q++] = m2; o[q++] = cm1i;
+            o[q++] = (4u << 16) | 111; o[q++] = f32; o[q++] = xf; o[q++] = xi;                 // ConvertSToF
+            o[q++] = (4u << 16) | 111; o[q++] = f32; o[q++] = yf; o[q++] = yi;
+            uint32_t xs = id++, ys = id++;
+            o[q++] = (5u << 16) | 133; o[q++] = f32; o[q++] = xs; o[q++] = xf; o[q++] = c_small;
+            o[q++] = (5u << 16) | 133; o[q++] = f32; o[q++] = ys; o[q++] = yf; o[q++] = c_small;
+            o[q++] = (7u << 16) | 80; o[q++] = v4; o[q++] = nv; o[q++] = xs; o[q++] = ys; o[q++] = c_half; o[q++] = c_one;
+            o[q++] = (3u << 16) | 62; o[q++] = ptr; o[q++] = nv;
+        }
+        memcpy(o + q, w + p, wc * 4); q += wc; p += wc; }
+    o[3] = id; *nn = q; return o;
+}
+// A float colour output carries no NaN or infinity to its target (as Maxwell's ROP effectively does for blended targets): one NaN texel added into a scene
+// target turns it black, and blur and downsample passes spread it. Before every OpReturn of the entry point each vec4 float output is loaded, NaN becomes 0
+// and the rest is clamped to +-1e30. New words or NULL. NXRT_VK_FS_NANGUARD=0 off
+static uint32_t *spv_fs_nanguard(const uint32_t *w, size_t n, size_t *nn) {
+    if (n < 5) return NULL;
+    uint32_t bound = w[3], f32 = 0, v4 = 0, boolt = 0, bv4 = 0, glsl = 0, entry = 0; size_t first_fn = 0;
+    uint32_t outs[8]; int nout = 0;
+    uint32_t *loc = calloc(bound, 4), *ptype = calloc(bound, 4), *psc = calloc(bound, 4); if (!loc || !ptype || !psc) { free(loc); free(ptype); free(psc); return NULL; }
+    for (uint32_t i = 0; i < bound; i++) loc[i] = 0xffffffff;
+    for (size_t p = 5; p < n;) { uint32_t op = w[p] & 0xffff, wc = w[p] >> 16; if (!wc || p + wc > n) break; const uint32_t *o = w + p + 1;
+        if (op == 15 && wc >= 3) entry = o[1];
+        else if (op == 11 && wc >= 3 && !memcmp(&o[1], "GLSL.std.450", 12)) glsl = o[0];
+        else if (op == 71 && wc >= 4 && o[1] == 30 && o[0] < bound) loc[o[0]] = o[2];
+        else if (op == 22 && wc == 3 && o[1] == 32) f32 = o[0];
+        else if (op == 20 && wc == 2) boolt = o[0];
+        else if (op == 23 && wc == 4 && o[1] == f32 && o[2] == 4 && f32) v4 = o[0];
+        else if (op == 23 && wc == 4 && o[1] == boolt && o[2] == 4 && boolt) bv4 = o[0];
+        else if (op == 32 && wc == 4 && o[0] < bound) { ptype[o[0]] = o[2]; psc[o[0]] = o[1]; }
+        else if (op == 59 && wc >= 4 && o[2] == 3 && o[1] < bound && o[0] < bound && loc[o[1]] < 8 && v4 && ptype[o[0]] == v4 && nout < 8) outs[nout++] = o[1];
+        else if (op == 54 && !first_fn) first_fn = p;
+        p += wc; }
+    free(loc); free(ptype); free(psc);
+    if (!nout || !first_fn || !glsl || !entry || !v4) return NULL;
+    uint32_t id = bound;
+    uint32_t bt = boolt ? boolt : id++, bvt = bv4 ? bv4 : id++, c0 = id++, cp = id++, cn = id++, v0 = id++, vp = id++, vn = id++;
+    uint32_t *o = malloc((n + 64 + (size_t)nout * 32 * 64) * 4); if (!o) return NULL;
+    size_t q = 0; for (int i = 0; i < 5; i++) o[q++] = w[i];
+    int in_entry = 0; size_t cap = n + 64 + (size_t)nout * 32 * 64;
+    for (size_t p = 5; p < n;) { uint32_t op = w[p] & 0xffff, wc = w[p] >> 16; if (!wc || p + wc > n) break;
+        if (p == first_fn) {
+            if (!boolt) { o[q++] = (2u << 16) | 20; o[q++] = bt; }
+            if (!bv4) { o[q++] = (4u << 16) | 23; o[q++] = bvt; o[q++] = bt; o[q++] = 4; }
+            o[q++] = (4u << 16) | 43; o[q++] = f32; o[q++] = c0; o[q++] = 0;
+            o[q++] = (4u << 16) | 43; o[q++] = f32; o[q++] = cp; o[q++] = 0x7149f2ca;   // 1e30
+            o[q++] = (4u << 16) | 43; o[q++] = f32; o[q++] = cn; o[q++] = 0xf149f2ca;   // -1e30
+            o[q++] = (7u << 16) | 44; o[q++] = v4; o[q++] = v0; o[q++] = c0; o[q++] = c0; o[q++] = c0; o[q++] = c0;
+            o[q++] = (7u << 16) | 44; o[q++] = v4; o[q++] = vp; o[q++] = cp; o[q++] = cp; o[q++] = cp; o[q++] = cp;
+            o[q++] = (7u << 16) | 44; o[q++] = v4; o[q++] = vn; o[q++] = cn; o[q++] = cn; o[q++] = cn; o[q++] = cn;
+        }
+        if (op == 54) in_entry = w[p + 2] == entry;
+        if (op == 253 && in_entry && q + (size_t)nout * 32 + wc < cap) for (int k = 0; k < nout; k++) {
+            uint32_t l = id++, isn = id++, cl = id++, sel = id++;
+            o[q++] = (4u << 16) | 61; o[q++] = v4; o[q++] = l; o[q++] = outs[k];
+            o[q++] = (4u << 16) | 156; o[q++] = bvt; o[q++] = isn; o[q++] = l;
+            o[q++] = (8u << 16) | 12; o[q++] = v4; o[q++] = cl; o[q++] = glsl; o[q++] = 43; o[q++] = l; o[q++] = vn; o[q++] = vp;
+            o[q++] = (6u << 16) | 169; o[q++] = v4; o[q++] = sel; o[q++] = isn; o[q++] = v0; o[q++] = cl;
+            o[q++] = (3u << 16) | 62; o[q++] = outs[k]; o[q++] = sel;
+        }
+        memcpy(o + q, w + p, wc * 4); q += wc; p += wc; }
+    o[3] = id; *nn = q; return o;
+}
 vks_shader *vksh_make(const char *key, const uint8_t *spv, size_t spv_size, const char *json, size_t json_size, const char **why) {
     *why = NULL;
     vj *j = vj_parse(json, json_size);
@@ -589,6 +893,18 @@ vks_shader *vksh_make(const char *key, const uint8_t *spv, size_t spv_size, cons
     s->set = vksh_set_of(s->stage);
     size_t nw = spv_size / 4;
     uint32_t *w = malloc(spv_size); memcpy(w, spv, spv_size);
+    { static int nm = -1, iv = -1; if (nm < 0) { const char *e = getenv("NXRT_VK_NMINMAX"); nm = e ? atoi(e) : 1; e = getenv("NXRT_VK_INVARIANT_POS"); iv = e ? atoi(e) : 1; }
+      if (nm) spv_nan_minmax(w, spv_size / 4);
+      if (iv) { size_t nn2; uint32_t *w2 = spv_invariant_position(w, spv_size / 4, &nn2); if (w2) { free(w); w = w2; spv_size = nn2 * 4; nw = nn2; } } }
+    { static int zl = -1; if (zl < 0) { const char *e = getenv("NXRT_VK_ZERO_LOCALS"); zl = e ? atoi(e) : 1; }
+      if (zl) { size_t nn3; uint32_t *w3 = spv_zero_locals(w, nw, &nn3); if (w3) { free(w); w = w3; spv_size = nn3 * 4; nw = nn3; } } }
+    { static int ng = -1; if (ng < 0) { const char *e = getenv("NXRT_VK_FS_NANGUARD"); ng = e ? atoi(e) : 1; }
+      if (ng && s->stage == VKS_FS) { size_t nn6; uint32_t *w6 = spv_fs_nanguard(w, nw, &nn6); if (w6) { free(w); w = w6; spv_size = nn6 * 4; nw = nn6; } } }
+    { static int so = -1; if (so < 0) { const char *e = getenv("NXRT_VK_FS_SOLID"); so = e ? atoi(e) : 0; }
+      if (so && s->stage == VKS_FS) { size_t nn4; uint32_t *w4 = spv_fs_solid(w, nw, &nn4); if (w4) { free(w); w = w4; spv_size = nn4 * 4; nw = nn4; } } }
+    { static int vz = -1; if (vz < 0) { const char *e = getenv("NXRT_VK_VS_ZMID"); vz = e ? atoi(e) : 0; }
+      int vzl = vz; { const char *ks = getenv("NXRT_VK_VS_FT_KEYS"); if (vzl == 3 && ks && !strstr(ks, key)) vzl = 0; }
+      if (vzl && s->stage == VKS_VS) { size_t nn5; uint32_t *w5 = vzl == 3 ? spv_vs_fulltri(w, nw, &nn5) : spv_vs_zmid(w, nw, vzl, &nn5); if (w5) { free(w); w = w5; spv_size = nn5 * 4; nw = nn5; } } }
     if (vkspv_set_descriptor_set(w, nw, (uint32_t)s->set) < 0) { free(w); *why = "malformed SPIR-V"; goto fail; }
     if (s->stage != VKS_FS && s->stage != VKS_CS && s->stage != VKS_TS && s->stage != VKS_MS && g_vk.props.limits.maxCombinedClipAndCullDistances) {
         size_t tn = vkspv_trim_cull(&w, nw, g_vk.props.limits.maxCombinedClipAndCullDistances);
@@ -635,6 +951,12 @@ vks_shader *vksh_make(const char *key, const uint8_t *spv, size_t spv_size, cons
     for (int i = 0; out && i < out->n && s->stage == VKS_FS; i++) {
         const vj *e = vj_at(out, i); int l = vj_int(vj_get(e, "location"), -1);
         if (l >= 0 && l < 8) { s->out_mask |= 1u << l; s->out_ct[l] = (uint8_t)ct_of(vj_str(vj_get(e, "type"), "float")); }
+    }
+    if (s->stage == VKS_FS) {
+        static int on = -1; if (on < 0) { const char *e = getenv("NXRT_VK_COMP_MASK"); on = e ? atoi(e) : 1; }
+        uint8_t c[8]; out_comp_scan(w, nw, c);
+        for (int l = 0; l < 8; l++) s->out_comp[l] = on && (s->out_mask >> l & 1) && c[l] ? c[l] : 0xf;
+        static int nlog; for (int l = 0; l < 8; l++) if (on && (s->out_mask >> l & 1) && c[l] != 0xf && nlog++ < 40) VKLOG("shader %s writes components %#x of output %d: the rest keep the target's texel", key, c[l], l);
     }
     const vj *ls = vj_get(j, "local_size");
     for (int i = 0; i < 3; i++) s->local[i] = (uint32_t)vj_int(vj_at(ls, i), 1);

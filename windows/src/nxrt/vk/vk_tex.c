@@ -495,6 +495,12 @@ VkImageView vkt_view(vkt_image *im, const view_t *v, int set_swz, uint16_t swz) 
     }
     VkImageAspectFlags asp = im->aspect;
     if (asp == (VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT)) asp = v && v->set_dsmode && v->dsmode == 1 ? VK_IMAGE_ASPECT_STENCIL_BIT : VK_IMAGE_ASPECT_DEPTH_BIT;
+    if (asp == VK_IMAGE_ASPECT_DEPTH_BIT) {   // a sampled depth texture: Maxwell returns the depth in every channel the swizzle does not override; Vulkan gives (D, 0, 0, 1)
+        static int rr = -1; if (rr < 0) { const char *e = getenv("NXRT_VK_DEPTH_RRRR"); rr = e ? atoi(e) : 0; }
+        static int nlog; if (nlog++ < 12) VKLOG("depth view %ux%u fmt %#x swz set %d %#x view swz %d %d,%d,%d,%d -> mapping %d,%d,%d,%d", im->w, im->h, im->d.format, set_swz, swz,
+                                               v && v->set_swizzle, v ? v->swz[0] : -1, v ? v->swz[1] : -1, v ? v->swz[2] : -1, v ? v->swz[3] : -1, m.r, m.g, m.b, m.a);
+        if (rr) { VkComponentSwizzle *c[4] = {&m.r, &m.g, &m.b, &m.a}; for (int k = 0; k < 4; k++) if (*c[k] == VK_COMPONENT_SWIZZLE_IDENTITY || (k && *c[k] == (VkComponentSwizzle)(VK_COMPONENT_SWIZZLE_R + k)) || *c[k] == VK_COMPONENT_SWIZZLE_G || *c[k] == VK_COMPONENT_SWIZZLE_B || *c[k] == VK_COMPONENT_SWIZZLE_A) *c[k] = VK_COMPONENT_SWIZZLE_R; }
+    }
     if ((vt == VK_IMAGE_VIEW_TYPE_CUBE || vt == VK_IMAGE_VIEW_TYPE_CUBE_ARRAY) && !(im->vtype == VK_IMAGE_VIEW_TYPE_CUBE || im->vtype == VK_IMAGE_VIEW_TYPE_CUBE_ARRAY)) {
         static int n; if (n++ < 8) VKRED("a cube view of a %ux%u texture that is not a cube map: viewed as a 2D array", im->w, im->h);
         vt = VK_IMAGE_VIEW_TYPE_2D_ARRAY;

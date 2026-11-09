@@ -42,6 +42,10 @@ static void td_note(vkt_image *im) { if (!g_td_on || !im) return; for (int i = 0
 const char *nxrt_log_path(void);
 static int g_origin_ll = 1, g_queue_origin_ll = 1, g_depth_zero = 0;
 static VkPipeline g_last_pipe;   // the graphics pipeline bound last in this submission
+// Debug readbacks in the middle of a submission: vks_finish() submits only committed submissions, not the one being recorded, so an image read back mid-recording shows
+// it as it was before this submission. This commits the recording one, begins a new one and waits; command buffer state is gone, so the next draw binds its pipeline again
+uint64_t vks_commit(void); void vks_begin(void); int vks_recording(void);
+static void dbg_finish_now(void) { if (vks_recording()) { vks_commit(); vks_begin(); g_last_pipe = VK_NULL_HANDLE; } vks_finish(); }
 
 // ---------- Resources that live with a submission: arena chunks, descriptor pools, buffer views (returned at completion) ----------
 typedef struct rchunk { VkBuffer buf; vk_alloc mem; VkDeviceSize size, used; struct rchunk *next; } rchunk;
@@ -243,6 +247,65 @@ typedef struct {
 static pass_t P = {.query = -1};
 static uint32_t mipd(uint32_t s, uint32_t l) { s >>= l; return s ? s : 1; }
 
+// Pass-dump check (NXRT_VK_PD_GPUPEEK=n): the bytes the GPU's pool mirror holds at a guest address, for the first n vertex attributes of the dump, to compare
+// with guest memory. 0 on success
+static int gpu_peek(uint64_t addr, uint8_t *out, uint32_t n) {
+    VkBuffer src; VkDeviceSize so; if (!vkm_use(addr, n, &src, &so)) return -1;
+    dbg_finish_now();
+    VkBufferCreateInfo bci = {VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO, NULL, 0, 256, VK_BUFFER_USAGE_TRANSFER_DST_BIT, VK_SHARING_MODE_EXCLUSIVE, 0, NULL};
+    VkBuffer b; vk_alloc m; if (vkCreateBuffer(g_vk.dev, &bci, NULL, &b) != VK_SUCCESS) return -1;
+    VkMemoryRequirements mr; vkGetBufferMemoryRequirements(g_vk.dev, b, &mr);
+    if (vk_alloc_mem(&mr, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, 0, &m)) { vkDestroyBuffer(g_vk.dev, b, NULL); return -1; }
+    vkBindBufferMemory(g_vk.dev, b, m.mem, m.off);
+    VkCommandBuffer cb = vk_once_begin();
+    vk_mem_barrier(cb, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, VK_ACCESS_2_MEMORY_WRITE_BIT, VK_PIPELINE_STAGE_2_COPY_BIT, VK_ACCESS_2_TRANSFER_READ_BIT);
+    VkBufferCopy c = {so, 0, n}; vkCmdCopyBuffer(cb, src, b, 1, &c);
+    vk_mem_barrier(cb, VK_PIPELINE_STAGE_2_COPY_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT, VK_PIPELINE_STAGE_2_HOST_BIT, VK_ACCESS_2_HOST_READ_BIT);
+    int rc = vk_once_end(cb);
+    if (!rc) memcpy(out, m.map, n);
+    vkDestroyBuffer(g_vk.dev, b, NULL); vk_free_mem(&m);
+    return rc;
+}
+// In-stream pass images: the copy is recorded in the submission right after the pass, and the PNG written when the GPU has finished it (completion thread), so
+// the picture is the target as the pass left it. At most NXRT_VK_PASSIMG_MAX (default 48) are waiting at a time (15 MB each at 2560x1440)
+#include "vk_shot.h"
+void vks_post_fn(void (*fn)(void *), void *arg);
+typedef struct { VkBuffer b; vk_alloc m; uint32_t w, h; VkFormat f; char path[1200]; unsigned idx; } pimg_t;
+static _Atomic int g_pimg_wait;
+static void pimg_done(void *a) {
+    pimg_t *p = a; size_t n = (size_t)p->w * p->h; uint8_t *out = malloc(n * 4); int rc = -1;
+    if (out && p->m.map && p->f == VK_FORMAT_D32_SFLOAT) {   // depth: 1.0 black, nearer brighter, stretched over the last 1 % (most of a scene sits near 1)
+        const float *d = (const float *)p->m.map; uint32_t lo = 0, mid = 0, one = 0;
+        for (size_t i = 0; i < n; i++) { float v = d[i]; float t = (1.0f - v) * 100.0f; t = t < 0 ? 0 : t > 1 ? 1 : t; uint8_t g = (uint8_t)(t * 255.0f);
+            out[4 * i] = out[4 * i + 1] = out[4 * i + 2] = g; out[4 * i + 3] = 255; if (v >= 1.0f) one++; else if (v < 0.99f) lo++; else mid++; }
+        rc = vks_png_write(p->path, out, (int)p->w, (int)p->h);
+        VKLOG("depth image %u: %.1f%% at 1.0, %.1f%% in 0.99..1, %.1f%% below 0.99", p->idx, 100.0 * one / n, 100.0 * mid / n, 100.0 * lo / n);
+    } else if (out && p->m.map && !vks_to_rgba8(p->f, (const uint8_t *)p->m.map, n, out)) rc = vks_png_write(p->path, out, (int)p->w, (int)p->h);
+    VKLOG("pass image %u: %s", p->idx, rc ? "not dumped" : p->path);
+    free(out); vkDestroyBuffer(g_vk.dev, p->b, NULL); vk_free_mem(&p->m); free(p); atomic_fetch_sub(&g_pimg_wait, 1);
+}
+static int pimg_capture(VkCommandBuffer cb, vkt_image *im, uint32_t level, uint32_t layer, uint32_t w, uint32_t h, const char *path, unsigned idx) {
+    static int maxw = -1; if (maxw < 0) { const char *e = getenv("NXRT_VK_PASSIMG_MAX"); maxw = e ? atoi(e) : 48; }
+    if (atomic_load(&g_pimg_wait) >= maxw) return -1;
+    int dep = (im->aspect & VK_IMAGE_ASPECT_DEPTH_BIT) != 0;
+    VkDeviceSize bytes = (VkDeviceSize)w * h * (dep ? 4 : im->fi->vbpb);
+    pimg_t *p = calloc(1, sizeof *p); if (!p) return -1;
+    VkBufferCreateInfo bci = {VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO, NULL, 0, bytes, VK_BUFFER_USAGE_TRANSFER_DST_BIT, VK_SHARING_MODE_EXCLUSIVE, 0, NULL};
+    if (vkCreateBuffer(g_vk.dev, &bci, NULL, &p->b) != VK_SUCCESS) { free(p); return -1; }
+    VkMemoryRequirements mr; vkGetBufferMemoryRequirements(g_vk.dev, p->b, &mr);
+    if (vk_alloc_mem(&mr, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT | VK_MEMORY_PROPERTY_HOST_CACHED_BIT, 0, &p->m) &&
+        vk_alloc_mem(&mr, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, 0, &p->m)) { vkDestroyBuffer(g_vk.dev, p->b, NULL); free(p); return -1; }
+    vkBindBufferMemory(g_vk.dev, p->b, p->m.mem, p->m.off);
+    p->w = w; p->h = h; p->f = dep ? VK_FORMAT_D32_SFLOAT : im->fi->vk; p->idx = idx; snprintf(p->path, sizeof p->path, "%s", path);
+    vk_mem_barrier(cb, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, VK_ACCESS_2_MEMORY_WRITE_BIT, VK_PIPELINE_STAGE_2_COPY_BIT, VK_ACCESS_2_TRANSFER_READ_BIT);
+    int is3d = im->vtype == VK_IMAGE_VIEW_TYPE_3D;
+    VkBufferImageCopy c = {0, 0, 0, {dep ? VK_IMAGE_ASPECT_DEPTH_BIT : VK_IMAGE_ASPECT_COLOR_BIT, level, is3d ? 0 : layer, 1}, {0, 0, is3d ? (int32_t)layer : 0}, {w, h, 1}};
+    vkCmdCopyImageToBuffer(cb, im->img, im->rest, p->b, 1, &c);
+    vk_mem_barrier(cb, VK_PIPELINE_STAGE_2_COPY_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT, VK_PIPELINE_STAGE_2_HOST_BIT | VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, VK_ACCESS_2_HOST_READ_BIT | VK_ACCESS_2_MEMORY_READ_BIT);
+    atomic_fetch_add(&g_pimg_wait, 1);
+    vks_post_fn(pimg_done, p);
+    return 0;
+}
 static void pass_end(void) {
     if (!P.open) return;
     VkCommandBuffer cb = vks_cb();
@@ -254,16 +317,20 @@ static void pass_end(void) {
     if (pi_ser == (uint64_t)-1) { const char *e = getenv("NXRT_VK_PASSIMG"); pi_ser = e ? strtoull(e, NULL, 0) : 0; }
     if (pi_ser && (g_td_on || g_pd) && pi_n < 400) {
         vkt_image *im = P.ncolor ? P.ci[0] : NULL;   // the pass's first colour target, when at least <PASSIMG> wide
-        if (im && im->w >= pi_ser && !(im->aspect & VK_IMAGE_ASPECT_DEPTH_BIT)) { char path[1200]; const char *lp = nxrt_log_path(); vks_finish();
+        if (im && im->w >= pi_ser && !(im->aspect & VK_IMAGE_ASPECT_DEPTH_BIT) && !(im->fi->flags & VKF_COMPRESSED)) { char path[1200]; const char *lp = nxrt_log_path();
             snprintf(path, sizeof path, "%s.passimg-%03u-ser%llu.png", lp && *lp ? lp : "nxrt", pi_n, (unsigned long long)im->serial);
-            VKLOG("pass image %u: %s", pi_n, vks_dump_image(im, 0, path) ? "not dumped" : path); }
+            if (pimg_capture(cb, im, P.clv[0], P.cl0[0], P.cw[0], P.ch[0], path, pi_n)) VKLOG("pass image %u: skipped (too many waiting)", pi_n); else PD("pass image queued %u: %s", pi_n, path); }
+        { static int pd_dep = -1; if (pd_dep < 0) { const char *e2 = getenv("NXRT_VK_PASSIMG_DEPTH"); pd_dep = e2 ? atoi(e2) : 0; }
+          if (pd_dep && P.di && P.dw >= pi_ser && P.di->fi->vk == VK_FORMAT_D32_SFLOAT_S8_UINT) { char dpath[1200]; const char *lp = nxrt_log_path();
+              snprintf(dpath, sizeof dpath, "%s.passimg-%03u-depth-ser%llu.png", lp && *lp ? lp : "nxrt", pi_n, (unsigned long long)P.di->serial);
+              if (!pimg_capture(cb, P.di, P.dlv, P.dl0, P.dw, P.dh, dpath, pi_n)) PD("depth image queued %u: %s", pi_n, dpath); } }
         pi_n++;
     }
 }
 // An attachment's view: one level, the layers the NVN view names (else all from its first), the view's format through the image's fallback, identity swizzle
 static VkImageView att_view(vkt_image *im, const tex_t *t, const view_t *v, int has_v, int depth, uint32_t *w, uint32_t *h, uint32_t *nl, VkFormat *fmt, uint32_t *lv, uint32_t *l0) {
     uint32_t level = has_v && v->set_levels ? v->base_level : 0, b0 = has_v && v->set_layers ? v->min_layer : 0;
-    if (level >= im->levels) level = im->levels - 1;
+    if (level >= im->levels) { static int n; if (n++ < 40) VKRED("render target ser%llu %ux%u: level %u asked, the image has %u levels: drawn into level %u (its top-left corner)", (unsigned long long)im->serial, im->w, im->h, level, im->levels, im->levels - 1); level = im->levels - 1; }
     int is3d = im->vtype == VK_IMAGE_VIEW_TYPE_3D;
     uint32_t all = is3d ? mipd(im->depth, level) : im->layers, n = has_v && v->set_layers && v->nlayers ? v->nlayers : all > b0 ? all - b0 : 1;
     if (b0 >= all) b0 = all - 1; if (b0 + n > all) n = all - b0;
@@ -301,7 +368,8 @@ static void pass_targets(void) {
         if (P.cw[i] < P.w) P.w = P.cw[i]; if (P.ch[i] < P.h) P.h = P.ch[i];
         P.samples = (uint8_t)im->samples;
     }
-    if (S->has_dt) {
+    static int nodatt = -1; if (nodatt < 0) { const char *e = getenv("NXRT_VK_NO_DEPTH_ATT"); nodatt = e ? atoi(e) : 0; }   // test: passes without their depth attachment
+    if (S->has_dt && !(nodatt && P.ncolor)) {
         const tex_t *t = &S->dt; vkt_image *im = vkt_resolve(t);
         if (im && (im->usage & VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT)) {
             P.dv = att_view(im, t, &S->dview, S->has_dview, 1, &P.dw, &P.dh, &P.dnl, &P.df, &P.dlv, &P.dl0);
@@ -502,7 +570,7 @@ static void clear_ds(const p_clear_ds *c) {
         { static int n; if (!n++) VKLOG("stencil clear with mask %#x: drawn through the mask (the first of its kind)", sm); }
         clear_draw(P.di, P.df, P.dlv, P.dl0, P.dnl, 1, 0, 0, cd, sm, r, NULL, v.depthStencil.depth, v.depthStencil.stencil);
     } else clear_pass(P.dv, P.df, 1, cd, cs, r, P.dnl, v);
-    PD("clear depth %d (%g) stencil %d (%u)", cd, c->depth, cs, (unsigned)c->stencil);
+    PD("clear depth %d (%g) stencil %d (%u) ser%llu %ux%u rect %d,%d %ux%u", cd, c->depth, cs, (unsigned)c->stencil, P.di ? (unsigned long long)P.di->serial : 0ull, P.dw, P.dh, r.offset.x, r.offset.y, r.extent.width, r.extent.height);
 }
 
 // ---------- Descriptors (nvn_mtl.m encode_args_) ----------
@@ -664,6 +732,9 @@ static void drv_fill(uint8_t *d, const vks_shader *sh, int st, int bank) {
             for (int r = 0; r < 16 && sh->s2_ssbo_base + 16u * r + 16 <= sh->s2_tex_base; r++) put_range(d, sh->s2_ssbo_base + 16 * r, S->ssbo[5][r].addr, S->ssbo[5][r].size);
             for (uint32_t r = 0; r < sh->s2_ntex && sh->s2_tex_base + 8 * r + 4 <= DMSH_DRV_SIZE; r++) { uint32_t h = (uint32_t)S->tex[5][r]; memcpy(d + sh->s2_tex_base + 8 * r, &h, 4); }
             for (uint32_t r = 0; r < 8 && sh->s2_tex_base + 8 * (sh->s2_ntex + r) + 4 <= DMSH_DRV_SIZE; r++) { uint32_t h = (uint32_t)S->img[5][r]; memcpy(d + sh->s2_tex_base + 8 * (sh->s2_ntex + r), &h, 4); }
+            // NVN2 keeps the dispatch's workgroup counts at c0 + 4 (x, y, z), below the per-shader layout at 0x10: a shader that indexes by them reads 0 otherwise and every
+            // workgroup of a column writes the same entry (Banana Native DMSH_C0_DISPATCH_NVN2, upstream nxnative 0a759de7: light culling)
+            memcpy(d + 4, g_dispatch_dim, 12);
             return;
         }
         int base = c0_ssbo_base(st);
@@ -933,6 +1004,8 @@ static void draw(const p_draw *dw, const p_draw_idx *di) {
     } else {
         for (int s = 0; s < 5; s++) if (S->bst[s]) sh[s] = prog_stage(S->bst[s], s);
     }
+    { const char *sk = getenv("NXRT_VK_SKIP_FS");   // test: draws whose fragment shader is in this list are left out
+      if (sk && sh[1] && strstr(sk, sh[1]->key)) { g_st.draws_skipped++; return; } }
     if (!sh[0] || (S->bst[1] && !sh[1] && !S->rast_discard)) {
         g_st.skip_no_shader++; g_st.draws_skipped++;
         static _Atomic int n; if (atomic_fetch_add(&n, 1) < 60)
@@ -975,7 +1048,8 @@ static void draw(const p_draw *dw, const p_draw_idx *di) {
         blend_st b0 = vkp_adv_blend(S->blend[0]);
         if (vkp_blend_is_src1(b0.src_rgb) || vkp_blend_is_src1(b0.dst_rgb) || vkp_blend_is_src1(b0.src_a) || vkp_blend_is_src1(b0.dst_a)) fsv |= VKSH_FS_DUAL;
     }
-    if (sh[1] && S->color.alpha_func && S->color.alpha_func != NVN_ALPHA_FUNC_ALWAYS && (sh[1]->out_mask & 1) && !(P.ncolor && P.cv[0] && fmt_int_kind(P.cf[0]))) fsv |= VKSH_FS_ALPHA;
+    static int noat = -1; if (noat < 0) { const char *e = getenv("NXRT_VK_NO_ALPHA_TEST"); noat = e ? atoi(e) : 0; }   // test: no alpha test variants
+    if (!noat && sh[1] && S->color.alpha_func && S->color.alpha_func != NVN_ALPHA_FUNC_ALWAYS && (sh[1]->out_mask & 1) && !(P.ncolor && P.cv[0] && fmt_int_kind(P.cf[0]))) fsv |= VKSH_FS_ALPHA;
     if (fsv) { sh[1] = vksh_fs_variant(sh[1], fsv); atest = sh[1]->alpha; }
     // pipeline: what is not dynamic here
     vkp_gkey k; memset(&k, 0, sizeof k);
@@ -989,6 +1063,7 @@ static void draw(const p_draw *dw, const p_draw_idx *di) {
     for (int i = 0; i < P.ncolor; i++) {
         uint32_t m = (S->chmask.mask >> (4 * i)) & 0xf;
         if (!P.cv[i] || !fs || !(fs->out_mask >> i & 1)) m = 0;   // an output the shader does not write: Maxwell leaves the target as it was (nvn_mtl.m pso_desc)
+        else m &= fs->out_comp[i];   // and of an output it writes, the components it does not store
         blend_st bl = vkp_adv_blend(S->blend[i]);
         int en = m && (S->color.blend_en >> i & 1) && (fmt_features(P.cf[i], 0) & VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BLEND_BIT);
         if (en && (vkp_blend_is_src1(bl.src_rgb) || vkp_blend_is_src1(bl.dst_rgb) || vkp_blend_is_src1(bl.src_a) || vkp_blend_is_src1(bl.dst_a))) {
@@ -1022,14 +1097,19 @@ static void draw(const p_draw *dw, const p_draw_idx *di) {
     if (atest) { uint32_t pc[2] = {S->color.alpha_func, 0}; memcpy(&pc[1], &S->alpha_ref, 4); vkCmdPushConstants(cb, layout, VK_SHADER_STAGE_FRAGMENT_BIT, 0, VKP_ALPHA_PC_SIZE, pc); }
     // dynamic state
     vkCmdSetViewportWithCount(cb, 1, &vp); vkCmdSetScissorWithCount(cb, 1, &sc);
+    if (g_pd) PD("  raster: discard %d depth range %g..%g (state %g..%g) clamp %d depth_m1 %d hd %d hs %d dbias %d", S->rast_discard, vp.minDepth, vp.maxDepth, S->dr[0], S->dr[1], 0, !g_depth_zero, P.hd, P.hs, 0);
     vkCmdSetLineWidth(cb, 1.0f);
-    vkCmdSetCullMode(cb, vkp_cull(S->poly.cull)); vkCmdSetFrontFace(cb, vkp_front_face(S->poly.front, g_queue_origin_ll));
+    { static int cn = -1; if (cn < 0) { const char *e = getenv("NXRT_VK_CULL_NONE"); cn = e ? atoi(e) : 0; }   // test: no face culling
+      vkCmdSetCullMode(cb, cn ? VK_CULL_MODE_NONE : vkp_cull(S->poly.cull)); vkCmdSetFrontFace(cb, vkp_front_face(S->poly.front, g_queue_origin_ll)); }
     if (!mesh) vkCmdSetPrimitiveTopology(cb, topo);
     int cls = vkp_topology_class(topo), pm = S->poly.mode;
     int bias = (S->poly.offset_en & (cls == 0 || pm == NVN_POLYGON_MODE_POINT ? 1 : cls == 1 || pm == NVN_POLYGON_MODE_LINE ? 2 : 4)) != 0;
     vkCmdSetDepthBiasEnable(cb, bias); vkCmdSetDepthBias(cb, S->po.units, g_vk.f10.depthBiasClamp ? S->po.clamp : 0.0f, S->po.factor);
     vkCmdSetBlendConstants(cb, S->blend_color);
-    vkCmdSetDepthTestEnable(cb, P.hd && S->ds.dt); vkCmdSetDepthWriteEnable(cb, P.hd && S->ds.dw); { static int eq = -1; if (eq < 0) { const char *e = getenv("NXRT_VK_DEPTH_EQUAL"); eq = e ? atoi(e) : 1; }
+    { const char *off = getenv("NXRT_VK_DEPTH_OFF_FS"); int dt = P.hd && S->ds.dt;   // test: no depth test for the draws of these fragment shaders
+      if (off && sh[1] && strstr(off, sh[1]->key)) dt = 0;
+      if (off && !strcmp(off, "eq") && vkp_compare(S->ds.df) == VK_COMPARE_OP_EQUAL) dt = 0;   // test: every EQUAL draw untested
+      vkCmdSetDepthTestEnable(cb, dt); vkCmdSetDepthWriteEnable(cb, P.hd && S->ds.dw); } { static int eq = -1; if (eq < 0) { const char *e = getenv("NXRT_VK_DEPTH_EQUAL"); eq = e ? atoi(e) : 1; }
       // A colour pass over a depth pre-pass tests EQUAL against depth another vertex shader wrote: the host compilers may round the two programs' positions
       // differently (contracted multiply-adds), and EQUAL then fails nearly everywhere (MKW: every surface black). NXRT_VK_DEPTH_EQUAL=0 keeps EQUAL
       VkCompareOp op = vkp_compare(S->ds.df); if (eq && op == VK_COMPARE_OP_EQUAL) op = VK_COMPARE_OP_LESS_OR_EQUAL;
@@ -1055,6 +1135,7 @@ static void draw(const p_draw *dw, const p_draw_idx *di) {
     if (g_vkp_dyn.logic_op) vkCmdSetLogicOpEXT(cb, logic ? vkp_logic_op(S->color.logic_op) : VK_LOGIC_OP_COPY);
     if (g_vkp_dyn.a2c) vkCmdSetAlphaToCoverageEnableEXT(cb, S->ms.a2c != 0);
     if (g_vkp_dyn.polygon_mode) vkCmdSetPolygonModeEXT(cb, vkp_polygon_mode(S->poly.mode));
+    if (g_pd) PD("  pipe: poly %d (vk %d, dyn %d) topo %d restart %d expand %d nattr %d dynvi %d samples %d a2c %d", S->poly.mode, vkp_polygon_mode(S->poly.mode), g_vkp_dyn.polygon_mode, topo, restart, expand, S->nattr, g_vkp_dyn.vertex_input, P.samples, S->ms.a2c);
     if (g_vkp_dyn.depth_clamp) vkCmdSetDepthClampEnableEXT(cb, S->depth_clamp != 0 && g_vk.f10.depthClamp);
     if (!mesh) bind_vertex_buffers(cb, used, use_zero);
     // the draw's base instance for c0 + 0x644 (an indirect draw's from its record in guest memory)
@@ -1094,6 +1175,9 @@ static void draw(const p_draw *dw, const p_draw_idx *di) {
             else if (bb->kind == VKB_CBUF || bb->kind == VKB_SBUF) { const p_bind_buf *u = bb->kind == VKB_CBUF ? &S->ubo[s][bb->reg] : &S->ssbo[s][bb->reg];
                 float f[8] = {0}; if (u->addr && u->size >= 32) memcpy(f, (const void *)(uintptr_t)u->addr, 32); else if (u->addr && u->size >= 16) memcpy(f, (const void *)(uintptr_t)u->addr, 16);
                 PD("  st%d b%u %s slot%d addr=%#llx size=%llu first %g,%g,%g,%g %g,%g,%g,%g", s, bb->binding, bb->kind == VKB_CBUF ? "cbuf" : "sbuf", bb->reg, (unsigned long long)u->addr, (unsigned long long)u->size, f[0], f[1], f[2], f[3], f[4], f[5], f[6], f[7]);
+                { static int pk = -1; if (pk < 0) { const char *e = getenv("NXRT_VK_PD_GPUPEEK_CB"); pk = e ? atoi(e) : 0; }
+                  if (pk > 0 && u->addr && u->size >= 32) { pk--; float g[8]; if (!gpu_peek(u->addr, (uint8_t *)g, 32))
+                      PD("    gpu  %g,%g,%g,%g %g,%g,%g,%g %s", g[0], g[1], g[2], g[3], g[4], g[5], g[6], g[7], memcmp(g, f, 32) ? "<== DIFFERS" : "same"); } }
                 { const char *ix = getenv("NXRT_VK_PD_CBUF");   // NXRT_VK_PD_CBUF=48,70: those vec4s of every constant buffer in the pass dump
                   for (const char *q = ix; q && *q && bb->kind == VKB_CBUF && u->addr; ) { char *e; long k = strtol(q, &e, 0); if (e == q) break; q = *e == ',' ? e + 1 : e;
                       if (k >= 0 && (uint64_t)(k + 1) * 16 <= u->size) { float g[4]; memcpy(g, (const void *)(uintptr_t)(u->addr + (uint64_t)k * 16), 16); PD("    [%ld] %g %g %g %g", k, g[0], g[1], g[2], g[3]); } } } }
@@ -1101,6 +1185,11 @@ static void draw(const p_draw *dw, const p_draw_idx *di) {
         if (di && di->count > 0 && di->count <= 12) { char t[200]; int o = 0; int isz = di->itype == 0 ? 1 : di->itype == 1 ? 2 : 4;
             for (int k = 0; k < di->count; k++) { uint32_t x = 0; memcpy(&x, (const uint8_t *)(uintptr_t)di->ibuf + (size_t)k * isz, (size_t)isz); o += snprintf(t + o, sizeof t - o, " %u", x); }
             PD("  indices at %#llx:%s", (unsigned long long)di->ibuf, t); }
+        { static int pk = -1; if (pk < 0) { const char *e = getenv("NXRT_VK_PD_GPUPEEK_IB"); pk = e ? atoi(e) : 0; }
+          if (pk > 0 && di && di->ibuf && !di->ind && di->count >= 8) { pk--; uint8_t g[16], c[16]; char gx[40] = "-", cx[40];
+              memcpy(c, (const void *)(uintptr_t)di->ibuf, 16); for (int k = 0; k < 16; k++) snprintf(cx + 2 * k, 3, "%02x", c[k]);
+              if (!gpu_peek(di->ibuf, g, 16)) for (int k = 0; k < 16; k++) snprintf(gx + 2 * k, 3, "%02x", g[k]);
+              PD("  ibuf %#llx cpu %s gpu %s %s", (unsigned long long)di->ibuf, cx, gx, strcmp(gx, cx) ? "<== DIFFERS" : "same"); } }
         if (sh[0] && S->nattr && S->attr[0].fmt == 0x22) { int st = S->attr[0].stream; const uint8_t *vb = (const uint8_t *)(uintptr_t)S->vbuf[st].address; char t[300]; int o = 0;
             for (int k = 0; k < 4 && vb && (uint64_t)(k * S->stream[st].stride + 12) <= S->vbuf[st].size; k++) { float f[3]; memcpy(f, vb + k * S->stream[st].stride + S->attr[0].offset, 12); o += snprintf(t + o, sizeof t - o, " (%g,%g,%g)", f[0], f[1], f[2]); }
             PD("  positions:%s", t); }
@@ -1111,7 +1200,11 @@ static void draw(const p_draw *dw, const p_draw_idx *di) {
             uint64_t at = (uint64_t)v0 * S->stream[st].stride + S->attr[a].offset;
             if (S->vbuf[st].address && at + 16 <= S->vbuf[st].size) { const uint8_t *p = (const uint8_t *)(uintptr_t)S->vbuf[st].address + at; for (int k = 0; k < 16; k++) snprintf(hx + 2 * k, 3, "%02x", p[k]); }
             PD("  in%d fmt%#x off%u stream%u stride%u div%u vb=%#llx/%llu ct%d v%u %s", a, S->attr[a].fmt, S->attr[a].offset, S->attr[a].stream,
-            S->stream[st].stride, S->stream[st].divisor, (unsigned long long)S->vbuf[st].address, (unsigned long long)S->vbuf[st].size, sh[0]->in[i].ct, v0, hx); }
+            S->stream[st].stride, S->stream[st].divisor, (unsigned long long)S->vbuf[st].address, (unsigned long long)S->vbuf[st].size, sh[0]->in[i].ct, v0, hx);
+            { static int pk = -1; if (pk < 0) { const char *e = getenv("NXRT_VK_PD_GPUPEEK"); pk = e ? atoi(e) : 0; }
+              if (pk > 0 && S->vbuf[st].address && at + 16 <= S->vbuf[st].size) { pk--; uint8_t g[16]; char gx[40] = "-";
+                  if (!gpu_peek(S->vbuf[st].address + at, g, 16)) for (int k = 0; k < 16; k++) snprintf(gx + 2 * k, 3, "%02x", g[k]);
+                  PD("    gpu  %s %s", gx, strcmp(gx, hx) ? "<== DIFFERS" : "same"); } } }
     }
     if (S->vis_on && P.query < 0) { int q = q_alloc(); if (q >= 0) { vkCmdBeginQuery(cb, R0.qp, (uint32_t)q, 0); P.query = q; g_st.queries++; } }
     // the draw
@@ -1123,6 +1216,18 @@ static void draw(const p_draw *dw, const p_draw_idx *di) {
     }
     uint32_t inst = (uint32_t)((dw ? dw->instances : di->instances) > 0 ? (dw ? dw->instances : di->instances) : 1);
     vk_checkpoint(cb, 'd', sh[1] ? sh[1]->key : sh[0]->key, inst, 0, 0, ind != 0);
+    // NXRT_VK_PD_STATS=n: pipeline statistics (input vertices / primitives, VS invocations, clipper in / out, FS invocations) of the first n colour draws into
+    // targets at least 1280 wide in the pass dump frame
+    static VkQueryPool stq; static int stn = -1; int st_on = 0;
+    if (stn < 0) { const char *e = getenv("NXRT_VK_PD_STATS"); stn = e ? atoi(e) : 0; }
+    if (stn > 0 && g_pd && P.open && P.ncolor && P.ci[0] && P.ci[0]->w >= 1280 && (S->chmask.mask & 0xf) && g_vk.f10.pipelineStatisticsQuery) {
+        if (!stq) { VkQueryPoolCreateInfo qi = {VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO, NULL, 0, VK_QUERY_TYPE_PIPELINE_STATISTICS, 1,
+                      VK_QUERY_PIPELINE_STATISTIC_INPUT_ASSEMBLY_VERTICES_BIT | VK_QUERY_PIPELINE_STATISTIC_INPUT_ASSEMBLY_PRIMITIVES_BIT | VK_QUERY_PIPELINE_STATISTIC_VERTEX_SHADER_INVOCATIONS_BIT |
+                      VK_QUERY_PIPELINE_STATISTIC_CLIPPING_INVOCATIONS_BIT | VK_QUERY_PIPELINE_STATISTIC_CLIPPING_PRIMITIVES_BIT | VK_QUERY_PIPELINE_STATISTIC_FRAGMENT_SHADER_INVOCATIONS_BIT};
+                    if (vkCreateQueryPool(g_vk.dev, &qi, NULL, &stq) != VK_SUCCESS) stq = VK_NULL_HANDLE; }
+        if (stq) { pass_end(); vkCmdResetQueryPool(vks_cb(), stq, 0, 1); pass_begin(); cb = vks_cb(); vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, pipe); g_last_pipe = pipe;
+                   vkCmdBeginQuery(cb, stq, 0, 0); st_on = 1; stn--; }
+    }
     if (dw) {
         if (ind && expand == VKP_EXPAND_QUADS) { vkCmdBindIndexBuffer(cb, R0.quads, 0, VK_INDEX_TYPE_UINT32); vkCmdDrawIndexedIndirect(cb, qab, qao, 1, 20); }   // quad_args
         else if (ind) { VkBuffer b; VkDeviceSize o;
@@ -1154,6 +1259,11 @@ static void draw(const p_draw *dw, const p_draw_idx *di) {
             else if (di->count > 0) vkCmdDrawIndexed(cb, (uint32_t)di->count, inst, 0, di->base_vertex, (uint32_t)di->base_instance);
         }
     }
+    if (st_on) { vkCmdEndQuery(cb, stq, 0); const vks_shader *f = sh[1]; pass_end(); dbg_finish_now(); uint64_t r[6] = {0};
+        VkResult qr = VK_NOT_READY; for (int t = 0; t < 200 && qr == VK_NOT_READY; t++) { qr = vkGetQueryPoolResults(g_vk.dev, stq, 0, 1, sizeof r, r, sizeof r, VK_QUERY_RESULT_64_BIT); if (qr == VK_NOT_READY) Sleep(10); }
+        if (qr != VK_SUCCESS) stn = 0;   // give up after one failure
+        PD("  stats vs=%s fs=%s count=%d: ia verts %llu prims %llu, vs %llu, clip in %llu out %llu, fs %llu (rc %d)", sh[0] ? sh[0]->key : "-", f ? f->key : "-",
+           di ? di->count : dw ? dw->count : 0, (unsigned long long)r[0], (unsigned long long)r[1], (unsigned long long)r[2], (unsigned long long)r[3], (unsigned long long)r[4], (unsigned long long)r[5], qr); }
     g_st.draws++;
     (void)swrites;
     if (g_nwb >= 240) pass_end();   // the write-back list is nearly full: record the copies now
@@ -1161,7 +1271,8 @@ static void draw(const p_draw *dw, const p_draw_idx *di) {
     // pass image (pass_end) shows the target after each of them; a draw's index and shader are logged beside its image
     { static long dfrom = -2, dcnt; static long dn; static uint64_t dframe;
       if (dfrom == -2) { const char *e = getenv("NXRT_VK_DRAWIMG"); dfrom = -1; if (e) { char *q; dfrom = strtol(e, &q, 0); dcnt = *q == ',' ? strtol(q + 1, NULL, 0) : 60; } }
-      if (dfrom >= 0 && g_pd && P.open && P.ncolor && P.ci[0] && P.ci[0]->w >= 1280) {
+      static int donly = -1; if (donly < 0) { const char *e = getenv("NXRT_VK_DRAWIMG_COLOR"); donly = e ? atoi(e) : 0; }   // only draws that write colour
+      if (dfrom >= 0 && g_pd && P.open && P.ncolor && P.ci[0] && P.ci[0]->w >= 1280 && (!donly || (S->chmask.mask & 0xf)) && (!getenv("NXRT_VK_DRAWIMG_FS") || (sh[1] && strstr(getenv("NXRT_VK_DRAWIMG_FS"), sh[1]->key)))) {
           if (dframe != 1) { dframe = 1; dn = 0; }
           long k = dn++;
           if (k >= dfrom && k < dfrom + dcnt) {
@@ -1218,6 +1329,15 @@ static void dispatch(const p_dispatch *dp) {
     if (dp->ind) { VkBuffer b; VkDeviceSize o; if (!vkm_use(dp->ind, 12, &b, &o)) { RED_ONCE(70, "indirect dispatch arguments are in no memory pool"); return; } vkCmdDispatchIndirect(cb, b, o); }
     else if (dp->x > 0 && dp->y > 0 && dp->z > 0) vkCmdDispatch(cb, (uint32_t)dp->x, (uint32_t)dp->y, (uint32_t)dp->z);
     g_st.dispatches++;
+    { const char *dk = getenv("NXRT_VK_PD_DISPIMG");
+      if (g_pd && dk && strstr(dk, cs->key)) for (int i = 0; i < cs->nb; i++) { const vks_bind *bb = &cs->b[i]; if (bb->kind != VKB_IMG) continue;
+          vkt_reg r; int tid = (int)(S->img[5][bb->reg] & 0xfffff); if (tid <= 0 || !vkt_reg_copy(tid, &r)) continue;
+          vkt_image *im = vkt_resolve(&r.t); if (!im || (im->fi->flags & VKF_COMPRESSED)) continue;
+          uint32_t zs[4] = {0, im->depth / 4, im->depth / 2, im->depth ? im->depth - 1 : 0}; int nz = im->vtype == VK_IMAGE_VIEW_TYPE_3D ? 4 : 1;
+          for (int k = 0; k < nz; k++) { char path[1200]; const char *lp = nxrt_log_path();
+              snprintf(path, sizeof path, "%s.dispimg-%s-b%u-z%u.png", lp && *lp ? lp : "nxrt", cs->key, bb->binding, zs[k]);
+              barrier_all(cb);
+              if (!pimg_capture(cb, im, 0, zs[k], im->w, im->h, path, 900 + k)) PD("dispatch image queued %s z%u: %ux%ux%u %s", cs->key, zs[k], im->w, im->h, im->depth, path); } } }
     if (g_nbnc) {   // written bounced storage buffers back into their pools, before the write-back to guest memory below reads them
         barrier_all(cb);
         for (int i = 0; i < g_nbnc; i++) { VkBufferCopy c = {g_bnc[i].boff, g_bnc[i].poff, g_bnc[i].n}; vkCmdCopyBuffer(cb, R0.bounce, g_bnc[i].pool, 1, &c); }
